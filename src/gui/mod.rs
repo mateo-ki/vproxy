@@ -345,6 +345,8 @@ pub struct VpnApp {
     /// 服务连通性检测结果（Google/YouTube/GitHub/ChatGPT 经当前代理实测）。
     pub(crate) service_checks: Option<Vec<types::ServiceCheck>>,
     pub(crate) service_checks_running: bool,
+    /// 用户最近点击打开外部浏览器的服务项及时间戳（用于界面即时高亮反馈，消除迟钝感）
+    pub(crate) last_opened_service: Option<(&'static str, std::time::Instant)>,
     /// 本轮检测的发起时刻：超过 35 秒没回结果就允许重新发起（自愈，避免永久"检测中"）。
     pub(crate) service_check_started: Option<std::time::Instant>,
     pub(crate) last_service_check: std::time::Instant,
@@ -647,6 +649,7 @@ impl VpnApp {
             proxy_started_at: None,
             service_checks: None,
             service_checks_running: false,
+            last_opened_service: None,
             service_check_started: None,
             // 置成"已过期"，首帧就立即开始第一轮服务连通性检测
             last_service_check: std::time::Instant::now() - std::time::Duration::from_secs(61),
@@ -1111,6 +1114,16 @@ impl VpnApp {
         });
     }
 
+    /// 单站点探测辅助：有 HTTP 响应即视为连通，记录并返回首包耗时（毫秒）
+    async fn probe_service_site(client: Option<reqwest::Client>, url: &'static str) -> Option<u128> {
+        let started = std::time::Instant::now();
+        let Some(client) = client else { return None; };
+        match client.get(url).send().await {
+            Ok(_) => Some(started.elapsed().as_millis()),
+            Err(_) => None,
+        }
+    }
+
     /// 经当前代理实测 Google/YouTube/GitHub/ChatGPT 的连通性与延迟。
     /// 代理运行中每 60 秒自动刷新一次；进入 Running 后立即跑一轮。
     pub(crate) fn maybe_check_services(&mut self) {
@@ -1129,7 +1142,36 @@ impl VpnApp {
         self.check_services_now();
     }
 
-    /// 立即强制发起一轮服务连通性实测（无视 30 秒冷却），用于用户主动点击刷新或右键卡片
+    /// 单项服务连通性实测：点击某一个服务项时极速单点探测，通常几十毫秒即可流式回传结果
+    pub(crate) fn check_single_service(&mut self, target_name: &'static str) {
+        let use_proxy = matches!(
+            self.proxy_status.state,
+            ProxyState::Running | ProxyState::Degraded
+        );
+        let proxy_port = self.proxy_status.mixed_port;
+        let tx = self.tx.clone();
+        let client = self.service_check_client(use_proxy, proxy_port);
+
+        let probe_target: Option<(&'static str, &'static str)> = match target_name {
+            "Google" => Some(("Google", "https://www.google.com/generate_204")),
+            "ChatGPT" => Some(("ChatGPT", "https://chatgpt.com/cdn-cgi/trace")),
+            "GitHub" => Some(("GitHub", "https://api.github.com")),
+            "YouTube" => Some(("YouTube", "https://www.youtube.com/generate_204")),
+            _ => None,
+        };
+
+        if let Some((name, url)) = probe_target {
+            self.rt.spawn(async move {
+                let ms = Self::probe_service_site(client, url).await;
+                let _ = tx.send(BgMsg::SingleServiceCheck(crate::gui::types::ServiceCheck {
+                    name,
+                    latency_ms: ms,
+                }));
+            });
+        }
+    }
+
+    /// 立即强制发起一轮服务连通性实测（无视 30 秒冷却），4 个站点独立并发，完成一个立即流式刷新一个
     pub(crate) fn check_services_now(&mut self) {
         if self.service_checks_running {
             if let Some(started) = self.service_check_started {
@@ -1152,45 +1194,34 @@ impl VpnApp {
         // 共享 Client：按 (是否经代理, 端口) 缓存，探测节奏 60s 一次不再各自新建
         let client = self.service_check_client(use_proxy, proxy_port);
         self.rt.spawn(async move {
-            let client = client;
+            let sites: [(&'static str, &'static str); 4] = [
+                ("Google", "https://www.google.com/generate_204"),
+                ("ChatGPT", "https://chatgpt.com/cdn-cgi/trace"),
+                ("GitHub", "https://api.github.com"),
+                ("YouTube", "https://www.youtube.com/generate_204"),
+            ];
 
-            // 单站点探测：有响应即连通（Cloudflare 的 403 也证明链路是通的）
-            async fn probe(client: Option<&reqwest::Client>, url: &str) -> Option<u128> {
-                let started = std::time::Instant::now();
-                match client {
-                    Some(client) => match client.get(url).send().await {
-                        Ok(_) => Some(started.elapsed().as_millis()),
-                        Err(_) => None,
-                    },
-                    None => None,
-                }
+            let mut tasks = Vec::with_capacity(4);
+            for (name, url) in sites {
+                let cl = client.clone();
+                let tx_c = tx.clone();
+                tasks.push(tokio::spawn(async move {
+                    let ms = Self::probe_service_site(cl, url).await;
+                    let check = crate::gui::types::ServiceCheck {
+                        name,
+                        latency_ms: ms,
+                    };
+                    let _ = tx_c.send(BgMsg::SingleServiceCheck(check.clone()));
+                    check
+                }));
             }
 
-            // 四个站点并行探测，一轮最多 3 秒
-            let (g, c, h, y) = tokio::join!(
-                probe(client.as_ref(), "https://www.google.com/generate_204"),
-                probe(client.as_ref(), "https://chatgpt.com"),
-                probe(client.as_ref(), "https://api.github.com"),
-                probe(client.as_ref(), "https://www.youtube.com"),
-            );
-            let results = vec![
-                crate::gui::types::ServiceCheck {
-                    name: "Google",
-                    latency_ms: g,
-                },
-                crate::gui::types::ServiceCheck {
-                    name: "ChatGPT",
-                    latency_ms: c,
-                },
-                crate::gui::types::ServiceCheck {
-                    name: "GitHub",
-                    latency_ms: h,
-                },
-                crate::gui::types::ServiceCheck {
-                    name: "YouTube",
-                    latency_ms: y,
-                },
-            ];
+            let mut results = Vec::with_capacity(4);
+            for task in tasks {
+                if let Ok(res) = task.await {
+                    results.push(res);
+                }
+            }
             let _ = tx.send(BgMsg::ServiceChecks(results));
         });
     }

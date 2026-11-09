@@ -478,6 +478,8 @@ pub enum BgMsg {
     EgressHealth(Vec<crate::db::telemetry::HealthRow>, i64),
     /// 服务连通性检测结果（Google/YouTube/GitHub/ChatGPT 经当前代理实测）。
     ServiceChecks(Vec<ServiceCheck>),
+    /// 单项服务连通性实测即时回传（流式更新，哪一项先测完立即刷新哪一项）。
+    SingleServiceCheck(ServiceCheck),
     /// 出口切换历史：最近的若干条 + 今天换了几次 + 库里还留着多少条。
     #[allow(dead_code)]
     EgressSwitches(Vec<crate::db::telemetry::SwitchRow>, i64, i64),

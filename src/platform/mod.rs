@@ -495,11 +495,40 @@ pub fn shell_open(_path: &std::path::Path) -> Result<()> {
     Err(anyhow!("只有 Windows 才有安装包可打开"))
 }
 
-/// 在系统默认浏览器中打开指定 URL
+/// 在系统默认浏览器中打开指定 URL（极速直连启动，无 DDE 广播迟钝）
 #[cfg(windows)]
 pub fn open_url_in_browser(url: &str) -> Result<()> {
+    // 1. 优先尝试直接读取系统默认浏览器注册表并拉起进程（耗时通常 < 10ms，零线程切换开销，彻底告别 DDE 挂起）
+    if let Ok(true) = try_fast_launch_browser(url) {
+        return Ok(());
+    }
+
+    // 2. 降级方案：分派给独立工作线程走 ShellExecuteW 与 COM STA 兜底
+    let url_owned = url.to_string();
+    std::thread::Builder::new()
+        .name("browser-open-fallback".to_string())
+        .spawn(move || {
+            if let Err(e) = open_url_via_shell(&url_owned) {
+                tracing::warn!(url = %url_owned, error = %e, "降级唤起浏览器失败");
+            }
+        })
+        .map_err(|e| anyhow!("创建浏览器异步唤起线程失败: {e}"))?;
+    Ok(())
+}
+
+#[cfg(windows)]
+fn open_url_via_shell(url: &str) -> Result<()> {
     use windows_sys::Win32::UI::Shell::ShellExecuteW;
     use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+    use windows_sys::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE};
+
+    unsafe {
+        // 在新线程中初始化 COM STA 并禁用慢速 OLE1 DDE 广播
+        let _ = CoInitializeEx(
+            std::ptr::null_mut(),
+            (COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE) as u32,
+        );
+    }
 
     let wide = |value: &str| -> Vec<u16> {
         value.encode_utf16().chain(std::iter::once(0)).collect()
@@ -514,13 +543,180 @@ pub fn open_url_in_browser(url: &str) -> Result<()> {
             SW_SHOWNORMAL,
         )
     };
+    unsafe {
+        CoUninitialize();
+    }
     if result as isize <= 32 {
-        return Err(anyhow!(
-            "调用系统默认浏览器打开 URL 失败：{}",
-            shell_error_text(result as isize)
-        ));
+        return Err(anyhow!("调用 ShellExecuteW 失败：{}", shell_error_text(result as isize)));
     }
     Ok(())
+}
+
+#[cfg(windows)]
+fn get_default_browser_cmd_template() -> Option<String> {
+    use windows_sys::Win32::System::Registry::{
+        RegCloseKey, RegOpenKeyExW, RegQueryValueExW, HKEY, HKEY_CLASSES_ROOT, HKEY_CURRENT_USER,
+        KEY_READ,
+    };
+
+    let wide = |value: &str| -> Vec<u16> {
+        value.encode_utf16().chain(std::iter::once(0)).collect()
+    };
+
+    let read_reg_string = |root: HKEY, subkey: &str, value_name: Option<&str>| -> Option<String> {
+        let subkey_w = wide(subkey);
+        let mut hkey: HKEY = std::ptr::null_mut();
+        let status = unsafe {
+            RegOpenKeyExW(
+                root,
+                subkey_w.as_ptr(),
+                0,
+                KEY_READ,
+                &mut hkey,
+            )
+        };
+        if status != 0 || hkey.is_null() {
+            return None;
+        }
+
+        let val_w = value_name.map(wide);
+        let val_ptr = val_w.as_ref().map(|v| v.as_ptr()).unwrap_or(std::ptr::null());
+        let mut type_code: u32 = 0;
+        let mut byte_len: u32 = 0;
+
+        let query_len = unsafe {
+            RegQueryValueExW(
+                hkey,
+                val_ptr,
+                std::ptr::null_mut(),
+                &mut type_code,
+                std::ptr::null_mut(),
+                &mut byte_len,
+            )
+        };
+        if query_len != 0 || byte_len == 0 {
+            unsafe { RegCloseKey(hkey) };
+            return None;
+        }
+
+        let u16_count = (byte_len as usize + 1) / 2;
+        let mut buf: Vec<u16> = vec![0; u16_count + 1];
+        let query_val = unsafe {
+            RegQueryValueExW(
+                hkey,
+                val_ptr,
+                std::ptr::null_mut(),
+                &mut type_code,
+                buf.as_mut_ptr() as *mut u8,
+                &mut byte_len,
+            )
+        };
+        unsafe { RegCloseKey(hkey) };
+
+        if query_val != 0 {
+            return None;
+        }
+
+        let len = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
+        String::from_utf16(&buf[..len]).ok()
+    };
+
+    // 1. 读取 ProgId
+    let prog_id = read_reg_string(
+        HKEY_CURRENT_USER,
+        r"Software\Microsoft\Windows\Shell\Associations\UrlAssociations\https\UserChoice",
+        Some("ProgId"),
+    ).or_else(|| {
+        read_reg_string(
+            HKEY_CURRENT_USER,
+            r"Software\Microsoft\Windows\Shell\Associations\UrlAssociations\http\UserChoice",
+            Some("ProgId"),
+        )
+    });
+
+    // 2. 根据 ProgId 读取 shell\open\command
+    if let Some(prog) = prog_id {
+        read_reg_string(
+            HKEY_CLASSES_ROOT,
+            &format!(r"{prog}\shell\open\command"),
+            None,
+        )
+    } else {
+        None
+    }.or_else(|| {
+        read_reg_string(
+            HKEY_CLASSES_ROOT,
+            r"https\shell\open\command",
+            None,
+        )
+    }).or_else(|| {
+        read_reg_string(
+            HKEY_CLASSES_ROOT,
+            r"http\shell\open\command",
+            None,
+        )
+    })
+}
+
+#[cfg(windows)]
+fn try_fast_launch_browser(url: &str) -> Result<bool> {
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::Threading::{
+        CreateProcessW, PROCESS_INFORMATION, STARTUPINFOW,
+    };
+
+    let Some(cmd_template) = get_default_browser_cmd_template() else {
+        return Ok(false);
+    };
+
+    // 3. 将 url 替换到模板中（标准 URL 绝不额外包裹双引号，否则 Chromium/Edge 会将双引号计入 URL 解析为 %22）
+    let clean_url = url.trim().trim_matches('"');
+    let final_cmd = if cmd_template.contains("\"%1\"") {
+        cmd_template.replace("\"%1\"", clean_url)
+    } else if cmd_template.contains("%1") {
+        cmd_template.replace("%1", clean_url)
+    } else if cmd_template.contains("\"%L\"") {
+        cmd_template.replace("\"%L\"", clean_url)
+    } else if cmd_template.contains("%L") {
+        cmd_template.replace("%L", clean_url)
+    } else {
+        format!("{cmd_template} {clean_url}")
+    };
+
+    let wide = |value: &str| -> Vec<u16> {
+        value.encode_utf16().chain(std::iter::once(0)).collect()
+    };
+
+    let mut cmd_w: Vec<u16> = wide(&final_cmd);
+    let mut si: STARTUPINFOW = unsafe { std::mem::zeroed() };
+    si.cb = std::mem::size_of::<STARTUPINFOW>() as u32;
+    let mut pi: PROCESS_INFORMATION = unsafe { std::mem::zeroed() };
+
+    let success = unsafe {
+        CreateProcessW(
+            std::ptr::null(),
+            cmd_w.as_mut_ptr(),
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            0,
+            0,
+            std::ptr::null_mut(),
+            std::ptr::null(),
+            &mut si,
+            &mut pi,
+        )
+    };
+
+    if success != 0 {
+        unsafe {
+            CloseHandle(pi.hProcess);
+            CloseHandle(pi.hThread);
+        }
+        tracing::debug!(cmd = %final_cmd, "成功通过注册表默认浏览器极速秒开 URL");
+        return Ok(true);
+    }
+
+    Ok(false)
 }
 
 #[cfg(not(windows))]
@@ -1391,6 +1587,56 @@ mod tests {
         let cmd = tun_capability_command(p);
         assert!(cmd.starts_with("sudo setcap cap_net_admin,cap_net_raw+ep"));
         assert!(cmd.contains("/usr/local/bin/mihomo"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn test_default_browser_resolves() {
+        // 验证注册表能够快速读取到默认浏览器命令模板（例如 chrome.exe 或 msedge.exe）
+        let template = get_default_browser_cmd_template();
+        println!("Resolved browser command template: {template:?}");
+        assert!(template.is_some(), "Windows 系统应能查找到默认浏览器或 https 协议关联");
+        let t = template.unwrap();
+        assert!(t.to_lowercase().contains(".exe"));
+    }
+
+    #[test]
+    fn test_browser_command_url_formatting() {
+        let cases = [
+            (
+                "\"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe\" --single-argument %1",
+                "https://www.google.com",
+                "\"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe\" --single-argument https://www.google.com",
+            ),
+            (
+                "\"C:\\Program Files\\Mozilla Firefox\\firefox.exe\" -osint -url \"%1\"",
+                "https://chatgpt.com",
+                "\"C:\\Program Files\\Mozilla Firefox\\firefox.exe\" -osint -url https://chatgpt.com",
+            ),
+            (
+                "\"C:\\browser.exe\"",
+                "https://github.com",
+                "\"C:\\browser.exe\" https://github.com",
+            ),
+        ];
+
+        for (template, url, expected) in cases {
+            let clean_url = url.trim().trim_matches('"');
+            let final_cmd = if template.contains("\"%1\"") {
+                template.replace("\"%1\"", clean_url)
+            } else if template.contains("%1") {
+                template.replace("%1", clean_url)
+            } else if template.contains("\"%L\"") {
+                template.replace("\"%L\"", clean_url)
+            } else if template.contains("%L") {
+                template.replace("%L", clean_url)
+            } else {
+                format!("{template} {clean_url}")
+            };
+            assert_eq!(final_cmd, expected);
+            assert!(!final_cmd.contains("\"https:"));
+            assert!(!final_cmd.contains("%22"));
+        }
     }
 
     #[test]

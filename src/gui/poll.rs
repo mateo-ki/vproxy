@@ -1003,6 +1003,14 @@ impl VpnApp {
                                 self.status = message;
                             }
                         }
+                        BgMsg::SingleServiceCheck(check) => {
+                            let checks = self.service_checks.get_or_insert_with(Vec::new);
+                            if let Some(existing) = checks.iter_mut().find(|c| c.name == check.name) {
+                                *existing = check;
+                            } else {
+                                checks.push(check);
+                            }
+                        }
                         BgMsg::ServiceChecks(results) => {
                             self.service_checks = Some(results);
                             self.service_checks_running = false;

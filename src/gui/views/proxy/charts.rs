@@ -209,18 +209,25 @@ fn dash_svc_card(
 ) -> egui::Response {
     let (rect, resp) = ui.allocate_exact_size(Vec2::new(w, h), Sense::click());
     let is_hovered = resp.hovered();
+    let is_down = resp.is_pointer_button_down_on();
     let fill = if selected {
         if theme::is_light() {
-            Color32::from_rgb(234, 243, 255)
+            Color32::from_rgb(228, 240, 255)
         } else {
             theme::accent_bg()
+        }
+    } else if is_down {
+        if theme::is_light() {
+            Color32::from_rgb(218, 232, 250)
+        } else {
+            Color32::from_rgb(42, 54, 76)
         }
     } else if is_hovered {
         theme::panel_hover()
     } else {
         apple_sub_bg()
     };
-    let stroke = if selected {
+    let stroke = if selected || is_down {
         Stroke::new(1.2_f32, apple_blue())
     } else {
         Stroke::new(1.0_f32, apple_stroke2())
@@ -2792,6 +2799,15 @@ impl VpnApp {
                     ("GitHub", "https://github.com", lookup("GitHub")),
                     ("YouTube", "https://www.youtube.com", lookup("YouTube")),
                 ] {
+                    let is_active = self
+                        .last_opened_service
+                        .as_ref()
+                        .map(|(n, t)| *n == name && t.elapsed() < std::time::Duration::from_millis(1500))
+                        .unwrap_or(false);
+                    if is_active {
+                        ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
+                    }
+
                     let mut resp = dash_svc_card(
                         ui,
                         item_w,
@@ -2801,25 +2817,27 @@ impl VpnApp {
                         name,
                         &status_str,
                         text_col,
-                        false,
+                        is_active,
                     );
                     resp = resp
                         .on_hover_cursor(egui::CursorIcon::PointingHand)
                         .on_hover_text(format!(
-                            "🌐 点击在系统默认浏览器中打开: {name}\n🔗 目标网址: {url}\n⏱ 当前延迟: {status_str}\n🔄 右键点击可立即重新检测"
+                            "🌐 点击在系统默认浏览器中打开: {name}\n🔗 目标网址: {url}\n⏱ 当前延迟: {status_str}\n🔄 右键点击可单独重新检测"
                         ));
-                    // 点击服务项 = 在系统默认浏览器新标签页打开对应网站，并在状态栏给出即时提示
+                    // 点击服务项 = 在系统默认浏览器新标签页打开对应网站（极速直连拉起，0 延迟 0 阻塞）
                     if resp.clicked() {
+                        self.last_opened_service = Some((name, std::time::Instant::now()));
                         if let Err(e) = crate::platform::open_url_in_browser(url) {
                             tracing::warn!(error = %e, url = %url, "调用系统默认浏览器打开 URL 失败");
                         }
-                        ui.ctx().open_url(egui::OpenUrl::new_tab(url));
-                        self.status = format!("已在系统浏览器中打开: {name} ({url})");
+                        self.status = format!("已在系统浏览器中极速打开: {name} ({url})");
+                        ui.ctx().request_repaint();
                     }
-                    // 右键点击服务项 = 立即触发重新检测
+                    // 右键点击服务项 = 立即触发单项快速重新检测
                     if resp.secondary_clicked() {
-                        self.check_services_now();
-                        self.status = format!("正在重新检测 {name} 及各站点连通性...");
+                        self.check_single_service(name);
+                        self.status = format!("正在快速检测 {name} 连通性与实测延迟...");
+                        ui.ctx().request_repaint();
                     }
                     ui.add_space(row_gap);
                 }
