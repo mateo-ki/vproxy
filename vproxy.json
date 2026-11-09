@@ -6,7 +6,7 @@
   "architecture": {
     "64bit": {
       "url": "https://github.com/mateo-ki/vproxy/releases/download/v1.16.7/vproxy-1.16.7-windows-x64-portable.zip",
-      "hash": "57354db19a40295c8cf08b9ab142a6c091853b1e286f1f2a748ea5e3f57910de"
+      "hash": "6be7161b2e2b0b3888e1a043c108855b55515ae777464cc3d30c43c48428d8bf"
     }
   },
   "bin": "vproxy.exe",
