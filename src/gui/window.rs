@@ -445,6 +445,8 @@ impl VpnApp {
     pub(crate) fn unpark_from_tray(&mut self, ctx: &egui::Context) {
         if let Some(spot) = self.park_spot.take() {
             crate::platform::unpark_main_window(spot);
+        } else {
+            crate::platform::restore_and_repaint_main_window();
         }
         self.parked = false;
         self.parked_at = None;

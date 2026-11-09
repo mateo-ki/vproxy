@@ -52,7 +52,7 @@ mod imp {
         SetWindowLongPtrW, SetWindowPos, ShowWindow, GWL_EXSTYLE, GWL_STYLE, HWND_TOP, IMAGE_ICON,
         LR_DEFAULTCOLOR, LR_SHARED, SM_CXICON, SM_CYICON, SM_CXSMICON, SM_CYSMICON, SWP_FRAMECHANGED,
         SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW, SW_RESTORE, SW_SHOW,
-        WM_PAINT, WM_SETICON, WS_EX_APPWINDOW, WS_EX_TOOLWINDOW, WS_MINIMIZEBOX, WS_SYSMENU,
+        WM_NULL, WM_PAINT, WM_SETICON, WS_EX_APPWINDOW, WS_EX_TOOLWINDOW, WS_MINIMIZEBOX, WS_SYSMENU,
     };
 
     /// winit 给真实窗口用的类名；事件窗口 / IME 助手窗口都另有其名，必须排掉。
@@ -338,11 +338,21 @@ mod imp {
             ));
         }
     }
+
+    /// 向主窗口消息队列投递 WM_NULL 空消息，强制唤醒可能阻塞在 Win32 消息泵中的 UI 线程。
+    pub fn wake_main_window_message_loop() {
+        if let Some(hwnd) = find_main() {
+            unsafe {
+                PostMessageW(hwnd, WM_NULL, 0, 0);
+            }
+        }
+    }
 }
 
 #[cfg(windows)]
 pub use imp::{
     ensure_window_sysmenu_and_minimizebox, park, restore_and_repaint_main_window, unpark,
+    wake_main_window_message_loop,
 };
 
 #[cfg(not(windows))]
@@ -365,6 +375,9 @@ pub fn ensure_window_sysmenu_and_minimizebox() {}
 
 #[cfg(not(windows))]
 pub fn restore_and_repaint_main_window() {}
+
+#[cfg(not(windows))]
+pub fn wake_main_window_message_loop() {}
 
 #[cfg(test)]
 mod tests {

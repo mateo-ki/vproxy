@@ -1524,6 +1524,22 @@ impl VpnApp {
                         BgMsg::VpDslPreviewGenerated(dsl) => {
                             self.vp_dsl_preview = Some(dsl);
                         }
+                        BgMsg::PasteIntakeDone(intake) => {
+                            let Some(intake) = intake else {
+                                self.status = "剪贴板里没有文本".into();
+                                continue;
+                            };
+                            if let Some((name, url)) = intake.create {
+                                self.editing_id = None;
+                                self.form_name = name;
+                                self.form_url = url;
+                                self.form_enabled = true;
+                                self.form_remark = "Ctrl+V 粘贴加入".to_string();
+                                self.show_source_form = false;
+                                self.save_source_form();
+                            }
+                            self.paste_outcome = Some(intake.outcome);
+                        }
                     }
                 }
                 Err(TryRecvError::Empty) => break,

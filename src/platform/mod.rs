@@ -16,6 +16,7 @@ pub use tray::{refresh_notification_area, round_window_corners, TrayEvent, TrayH
 pub use window_park::{
     ensure_window_sysmenu_and_minimizebox, park as park_main_window,
     restore_and_repaint_main_window, unpark as unpark_main_window,
+    wake_main_window_message_loop,
 };
 
 use crate::constants::platform::SINGLE_INSTANCE_MUTEX as SINGLE_INSTANCE_MUTEX_NAME;

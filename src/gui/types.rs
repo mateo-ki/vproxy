@@ -600,6 +600,7 @@ pub enum BgMsg {
         Option<crate::proxy::tracer::RouteTraceReport>,
     ),
     VpDslPreviewGenerated(String),
+    PasteIntakeDone(Option<crate::gui::paste::Intake>),
 }
 
 /// 命令面板（Ctrl+K）能执行的动作。

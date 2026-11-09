@@ -1667,26 +1667,27 @@ impl VpnApp {
     /// `save_source_form`（和手工新增同一条路，不另开一份）。文本由调用方给 ——
     /// 事件本身就是 egui-winit 读过剪贴板才发出来的，这里不再自己开一次剪贴板。
     pub(crate) fn apply_pasted_text(&mut self, text: &str) {
+        if text.trim().is_empty() {
+            self.status = "剪贴板里没有文本".into();
+            return;
+        }
         let existing = self
             .sources
             .iter()
             .map(|source| (source.name.clone(), source.url_template.clone()))
             .collect::<Vec<_>>();
-        let Some(intake) = paste::intake(text, &existing, self.settings.speedtest_added_source)
-        else {
-            self.status = "剪贴板里没有文本".into();
-            return;
-        };
-        if let Some((name, url)) = intake.create {
-            self.editing_id = None;
-            self.form_name = name;
-            self.form_url = url;
-            self.form_enabled = true;
-            self.form_remark = "Ctrl+V 粘贴加入".to_string();
-            self.show_source_form = false;
-            self.save_source_form();
-        }
-        self.paste_outcome = Some(intake.outcome);
+        let text = text.to_string();
+        let auto_test = self.settings.speedtest_added_source;
+        let tx = self.tx.clone();
+        self.status = "正在识别剪贴板内容...".into();
+        self.rt.spawn(async move {
+            let intake = tokio::task::spawn_blocking(move || {
+                paste::intake(&text, &existing, auto_test)
+            })
+            .await
+            .unwrap_or(None);
+            let _ = tx.send(BgMsg::PasteIntakeDone(intake));
+        });
     }
 
     pub(crate) fn delete_source(&mut self, id: String) {
@@ -5693,35 +5694,17 @@ impl VpnApp {
     pub(crate) fn tr<'a>(&self, key: &'a str) -> &'a str {
         crate::i18n::tr(self.lang(), key)
     }
-}
 
-impl eframe::App for VpnApp {
-    fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        #[cfg(target_os = "macos")]
-        {
-            crate::platform::macos_window::repair_minimized_state(ctx);
-            // eframe skips `ui` while minimized or occluded, but still acts on
-            // native close requests after `logic`. Apply the same background
-            // policy here, or a hidden window can silently quit the proxy.
-            if ctx.input(|input| {
-                input.viewport().visible() == Some(false) && input.viewport().close_requested()
-            }) {
-                if self.frame_count > 5 || self.force_quit {
-                    self.request_window_close(ctx);
-                } else {
-                    // Match the startup close-event guard in `ui`, while
-                    // explicitly canceling the framework's pending close.
-                    ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
-                }
-            }
-        }
-        #[cfg(not(target_os = "macos"))]
-        let _ = ctx;
-    }
-
-    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        let ctx = &ui.ctx().clone();
+    /// 核心生命周期与事件调度：在每次事件循环的 logic() 阶段执行。
+    /// 无论窗口处于正常显示、最小化（通过任务栏/Win+D/Win+M）、还是隐藏/停放到托盘，
+    /// eframe 均保证调用 logic()，在此处驱动后台消息、托盘交互、周期性心跳与生命周期。
+    /// 返回 false 表示当前帧触发了退出或关闭，后续绘制应终止。
+    pub(crate) fn tick_logic(&mut self, ctx: &egui::Context) -> bool {
         let _rt_guard = self.rt.enter();
+
+        #[cfg(target_os = "macos")]
+        crate::platform::macos_window::repair_minimized_state(ctx);
+
         if self.reload_due
             && self.last_full_reload.elapsed() >= std::time::Duration::from_millis(800)
         {
@@ -5729,31 +5712,10 @@ impl eframe::App for VpnApp {
             self.last_full_reload = std::time::Instant::now();
             self.reload_all();
         }
-        // Ctrl+K / Cmd+K 开命令面板。快捷键在这里全局读一次，不藏在任何面板内容里，
-        // 否则焦点在某个 TextEdit 上时就再也收不到按键了。
-        let palette_toggle = ctx.input(|i| {
-            i.key_pressed(egui::Key::K)
-                && (i.modifiers.command || i.modifiers.ctrl)
-                && !i.modifiers.shift
-                && !i.modifiers.alt
-        }) && !widgets::focus_is_text_field(ctx);
-        // 只在"焦点真的在文本框里"时才让路：面板自己那个搜索框获得焦点后再按一次 Ctrl+K
-        // 不该把面板关掉（收起走 Esc 或点一行），在别的文本框里按 Ctrl+K 也不该误弹。
-        // 不能拿 `focused().is_none()` 当门槛 —— DragValue 点一下也占焦点（见
-        // `widgets::focus_is_text_field` 的注释），那样拖完一个数字快捷键就无声失效。
-        if palette_toggle {
-            if self.palette_open {
-                self.palette_open = false;
-            } else {
-                self.palette_query.clear();
-                self.open_command_palette();
-            }
-        }
-        // Ctrl+V 不在这里读 —— `Event::Key{V}` 在 eframe 里根本不存在（见本函数末尾那条
-        // 粘贴事件的处理）。Ctrl+K 是普通按键，还走 Key 事件。
+
         if self.frame_count < 5 {
             crate::startup_log(&format!(
-                "VpnApp::update rendering frame {}",
+                "VpnApp::tick_logic frame {}",
                 self.frame_count
             ));
             ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
@@ -5797,8 +5759,6 @@ impl eframe::App for VpnApp {
                 crate::platform::TrayEvent::ShowWindow => {
                     crate::startup_log("TrayEvent::ShowWindow received, restoring window");
                     // 收进托盘现在是"停放到屏幕外"，所以还原就是把位置放回去。
-                    // 这条事件现在真的有人消费：窗口没被隐藏，帧照跑（以前隐藏期间
-                    // update() 一帧都不跑，三条菜单全都没反应）。
                     self.unpark_from_tray(ctx);
                 }
                 crate::platform::TrayEvent::ToggleProxy => {
@@ -5809,8 +5769,6 @@ impl eframe::App for VpnApp {
                     }
                 }
                 crate::platform::TrayEvent::RestartProxy => {
-                    // 运行中调 start_proxy() 走的就是 manager 的 restart 分支
-                    // （stop_inner_for_restart + 重新拉起）；没跑就当普通启动。
                     if self.proxy_busy {
                         crate::startup_log("TrayEvent::RestartProxy ignored (proxy busy)");
                         self.status = "代理正在处理其他操作，稍后再重启".into();
@@ -5825,7 +5783,7 @@ impl eframe::App for VpnApp {
                     self.force_quit = true;
                     self.tray.shutdown();
                     ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-                    return;
+                    return false;
                 }
             }
         }
@@ -5834,9 +5792,13 @@ impl eframe::App for VpnApp {
 
         // Intercept window close event according to user setting (close_to_tray vs exit)
         // Guard with frame_count > 5 so false close events during window creation are ignored
-        if self.frame_count > 5 && ctx.input(|i| i.viewport().close_requested()) {
-            self.request_window_close(ctx);
-            return;
+        if ctx.input(|i| i.viewport().close_requested()) {
+            if self.frame_count > 5 || self.force_quit {
+                self.request_window_close(ctx);
+                return false;
+            } else {
+                ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            }
         }
 
         // TUN 提权交接成功了就把窗口让给提权实例：必须走真退出这条路（force_quit 绕开
@@ -5846,21 +5808,18 @@ impl eframe::App for VpnApp {
             self.force_quit = true;
             self.tray.shutdown();
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-            return;
+            return false;
         }
 
         self.poll_bg(ctx);
         self.note_proxy_state_change();
         self.auto_ip_risk_for_egress();
-        // 只在主题真的变了时才重建 Style：每帧 set_style 会让 egui 认为样式抖动，
-        // 也会白白丢掉用户在运行时改过的字号。
+
         if self.settings.firewall_auto_allow && !self.firewall_seeded {
             self.firewall_seeded = true;
             if crate::platform::is_elevated() {
                 self.apply_firewall_rules();
             }
-            // 非提权时静默跳过：不再设置"规则没写入"的提示文案（开了
-            // 「以管理员方式启动」后，下次启动自然以提权身份补上）
         }
         if self.applied_theme_id != self.settings.ui_theme
             || self.applied_ui_dark != self.settings.ui_dark
@@ -5949,7 +5908,6 @@ impl eframe::App for VpnApp {
         if self.close_after_elevation {
             // 提权实例已经接管，这个普通权限实例必须真的退掉，否则本机留下两个实例 =
             // 两个托盘图标、两个都自认为拥有系统代理。
-            // 必须主动退出当前进程，释放单实例互斥量让提权实例接管，并彻底删除当前托盘图标。
             crate::startup_log("close_after_elevation -> shutting down tray and exiting parent process immediately");
             self.tray.shutdown();
             std::thread::sleep(std::time::Duration::from_millis(100));
@@ -5964,6 +5922,47 @@ impl eframe::App for VpnApp {
             ctx.open_url(egui::OpenUrl::new_tab(&url));
             self.status = format!("已打开并复制导出链接: {url}");
         }
+
+        true
+    }
+}
+
+impl eframe::App for VpnApp {
+    fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if !self.tick_logic(ctx) {
+            return;
+        }
+    }
+
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        if self.force_quit {
+            return;
+        }
+        let ctx = &ui.ctx().clone();
+        let _rt_guard = self.rt.enter();
+
+        // Ctrl+K / Cmd+K 开命令面板。快捷键在这里全局读一次，不藏在任何面板内容里，
+        // 否则焦点在某个 TextEdit 上时就再也收不到按键了。
+        let palette_toggle = ctx.input(|i| {
+            i.key_pressed(egui::Key::K)
+                && (i.modifiers.command || i.modifiers.ctrl)
+                && !i.modifiers.shift
+                && !i.modifiers.alt
+        }) && !widgets::focus_is_text_field(ctx);
+        // 只在"焦点真的在文本框里"时才让路：面板自己那个搜索框获得焦点后再按一次 Ctrl+K
+        // 不该把面板关掉（收起走 Esc 或点一行），在别的文本框里按 Ctrl+K 也不该误弹。
+        // 不能拿 `focused().is_none()` 当门槛 —— DragValue 点一下也占焦点（见
+        // `widgets::focus_is_text_field` 的注释），那样拖完一个数字快捷键就无声失效。
+        if palette_toggle {
+            if self.palette_open {
+                self.palette_open = false;
+            } else {
+                self.palette_query.clear();
+                self.open_command_palette();
+            }
+        }
+        // Ctrl+V 不在这里读 —— `Event::Key{V}` 在 eframe 里根本不存在（见本函数末尾那条
+        // 粘贴事件的处理）。Ctrl+K 是普通按键，还走 Key 事件。
 
         let mut next_tab = self.tab;
 

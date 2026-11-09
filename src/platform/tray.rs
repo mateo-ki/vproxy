@@ -311,6 +311,8 @@ fn trigger_waker(waker: &Arc<std::sync::Mutex<Option<TrayWaker>>>) {
     if let Some(w) = callback {
         w();
     }
+    #[cfg(windows)]
+    crate::platform::wake_main_window_message_loop();
 }
 
 #[cfg(windows)]
