@@ -22,13 +22,13 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
 /// `raw.githubusercontent.com` usually fails by accepting TCP+TLS and then never
 /// answering, which `connect_timeout` cannot catch. Waiting for the response headers
 /// gets its own short budget so a hung peer costs seconds instead of the whole timeout.
-const RESPONSE_HEADER_TIMEOUT: Duration = Duration::from_secs(6);
+const RESPONSE_HEADER_TIMEOUT: Duration = Duration::from_secs(8);
 /// Gist 搜索页只能直连或走本地代理，没有镜像可赛跑；经代理节点 TLS 握手 + 首字节
 /// 实测 4~6s 且波动大，6s 的默认头部预算会把还差一两秒就能成功的请求掐掉。
 const GIST_SEARCH_HEADER_TIMEOUT: Duration = Duration::from_secs(15);
 // Keep the user-visible 120s source deadline, but do not spend all of it on a
 // peer that has sent headers and then stopped sending the response body.
-const BODY_IDLE_TIMEOUT: Duration = Duration::from_secs(5);
+const BODY_IDLE_TIMEOUT: Duration = Duration::from_secs(15);
 const FETCH_MAX_ATTEMPTS: usize = 3;
 const FETCH_RETRY_DELAYS: [Duration; 2] = [Duration::from_millis(300), Duration::from_millis(800)];
 /// A source that hung out this many budgets in a row is treated as gone and only gets
@@ -472,8 +472,15 @@ impl Collector {
         }
         let candidates = fetch_candidates(resolved_url, source.last_fetch_host.as_deref());
         if candidates.len() == 1 {
+            // 单一候选源（绝大多数机场、个人自建的订阅源）：没有多镜像可竞速，若服务端动态生成大配置
+            // （如 5MB 庞大节点列表）耗时较长，绝不能套用 GitHub 镜像竞速的短超时误杀。
+            // 充分给予服务端响应时间：预算允许下至少给到 25s（最高不超过总预算，为后续 body 留出至少 3s 空间）。
+            let single_header_budget = budget
+                .saturating_sub(Duration::from_secs(3))
+                .max(Duration::from_secs(15))
+                .min(budget);
             return self
-                .download_candidate(source, &candidates[0], task_id, budget, header_budget)
+                .download_candidate(source, &candidates[0], task_id, budget, single_header_budget)
                 .await;
         }
         self.race_candidates(source, &candidates, task_id, budget, header_budget)
@@ -1411,13 +1418,41 @@ mod tests {
     fn rejects_declared_source_body_over_limit() {
         assert_eq!(DEFAULT_FETCH_TIMEOUT, Duration::from_secs(30));
         assert_eq!(CONNECT_TIMEOUT, Duration::from_secs(3));
-        assert_eq!(BODY_IDLE_TIMEOUT, Duration::from_secs(5));
-        assert_eq!(RESPONSE_HEADER_TIMEOUT, Duration::from_secs(6));
+        assert_eq!(BODY_IDLE_TIMEOUT, Duration::from_secs(15));
+        assert_eq!(RESPONSE_HEADER_TIMEOUT, Duration::from_secs(8));
         assert_eq!(DEGRADED_FAIL_STREAK, 3);
         assert!(!source_body_too_large(Some(16 * 1024 * 1024)));
         assert!(!source_body_too_large(Some(MAX_SOURCE_BYTES)));
         assert!(source_body_too_large(Some(MAX_SOURCE_BYTES + 1)));
         assert!(!source_body_too_large(None));
+    }
+
+    #[test]
+    fn test_single_candidate_header_budget_adaptation() {
+        // 当单候选源总预算为 30s（默认）时，首包响应头预算自动放宽到 27s（留出 3s 空间），
+        // 彻底解决 5MB 等大型机场订阅服务端生成慢于 6s 被误杀的问题
+        let budget_30s = Duration::from_secs(30);
+        let header_30s = budget_30s
+            .saturating_sub(Duration::from_secs(3))
+            .max(Duration::from_secs(15))
+            .min(budget_30s);
+        assert_eq!(header_30s, Duration::from_secs(27));
+
+        // 当用户设置更长超时（例如 60s）时，响应头预算跟随扩大到 57s
+        let budget_60s = Duration::from_secs(60);
+        let header_60s = budget_60s
+            .saturating_sub(Duration::from_secs(3))
+            .max(Duration::from_secs(15))
+            .min(budget_60s);
+        assert_eq!(header_60s, Duration::from_secs(57));
+
+        // 当短超时测试场景（如 600ms）时，严格被 600ms 兜底截断，绝不溢出
+        let budget_short = Duration::from_millis(600);
+        let header_short = budget_short
+            .saturating_sub(Duration::from_secs(3))
+            .max(Duration::from_secs(15))
+            .min(budget_short);
+        assert_eq!(header_short, Duration::from_millis(600));
     }
 
     #[test]
