@@ -1,3 +1,26 @@
+# 🚀 VProxy v1.16.10 发布说明 / Release Notes
+
+🎉 **VProxy v1.16.10** 正式发布！本版本重点全面支持了 **VP-Core 1.7.3 原生 MASQUE 代理协议（Cloudflare WARP 极速出站）**，根治了**策略组抽屉展开时节点详情弹窗被图层遮挡**的问题，并优化了顶层模态交互规范与 VP-DSL 配置生成：
+
+### 🌐 内核引擎：VP-Core 原生支持 MASQUE 协议
+- **全面解禁 MASQUE 出站调度**：
+  - 对接 VP-Core 1.7.3 原生 MASQUE 协议栈（CONNECT-UDP / CONNECT-IP over HTTP/3），解禁内核协议白名单与兼容性拦截，选择 VP-Core 时无需再被动降级回退；
+  - 修复此前 VP-Core 编译生成配置时将 MASQUE 节点剔除并回退至 DIRECT 直连的问题；访问 `linux.do` 等高严苛 Cloudflare WAF 站点时直接走通 WARP 官方骨干网隧道，享受零丢包与免盾秒开体验。
+- **配置与 DSL 生成对齐**：
+  - 自动为 `type: masque` 节点补齐 `udp: true` 特性标记，保障 WARP 隧道及 QUIC 流量的 UDP 转发能力；
+  - 补全 `compile_vp_dsl` 声明式语法对 `dns: ["1.1.1.1", ...]` 等数组配置项的格式化生成支持。
+
+### 🎨 界面交互：策略组抽屉与节点详情模态层级修复
+- **图层层级（Layer Order）提权**：
+  - 将「节点详情」弹窗提升至 `egui::Order::Tooltip` 最高优先级图层，彻底解决右侧策略组抽屉（`Order::Foreground`）展开时节点详情被完全覆盖挡住的问题。
+- **全屏模态遮罩与快捷关闭**：
+  - 新增 `Order::Tooltip` 半透明全屏背景遮罩，聚焦弹窗视觉并阻断对下层抽屉与卡片的穿透点击；
+  - 支持点击遮罩空白区域或按下键盘 `Escape` 键快速关闭弹窗，默认屏幕绝对居中对齐（`Align2::CENTER_CENTER`）与视口边界自适应。
+- **复制反馈增强**：
+  - 优化复制全部节点配置到剪贴板时的状态栏即时反馈文案。
+
+---
+
 # 🚀 VProxy v1.16.9 发布说明 / Release Notes
 
 🎉 **VProxy v1.16.9** 正式发布！本版本重点根治了 **Windows 10/11 环境下程序最小化或停放至托盘后出现的“未响应” (Not Responding) / 界面冻结卡顿** 问题，全面升级了 `eframe` 事件循环架构，并深度优化了剪贴板大文件识别与窗口还原机制：

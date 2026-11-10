@@ -430,6 +430,7 @@ impl KernelKind {
                     | "brook"
                     | "wireguard"
                     | "wg"
+                    | "masque"
                     | "http"
                     | "https"
                     | "socks"
@@ -522,10 +523,6 @@ pub fn is_node_incompatible_with_meow(node: &Node, has_tun: bool) -> Option<&'st
 /// 检测特定节点是否与 VP-Core 内核不兼容（内核遇到不支持的传输层会拒绝启动，
 /// 必须在选内核阶段就回退，不能等 vpcore 进程退出码 1）。
 pub fn is_node_incompatible_with_vpcore(node: &Node) -> Option<&'static str> {
-    let proto = node.protocol.to_ascii_lowercase();
-    if proto == "masque" {
-        return Some("MASQUE 协议（VP-Core 暂不支持）");
-    }
     let mut nets: Vec<String> = Vec::new();
     if let Some(net) = node.config.get("network").and_then(|v| v.as_str()) {
         nets.push(net.to_ascii_lowercase());
@@ -1445,6 +1442,7 @@ Use tags: with_gvisor
             "tuic",
             "anytls",
             "wireguard",
+            "masque",
             "socks5",
             "http",
         ] {
@@ -1739,5 +1737,41 @@ Use tags: with_gvisor
         .expect("遇到不支持的协议默认退回 Mihomo");
         assert_eq!(shoes_res, KernelKind::Mihomo);
         assert!(shoes_notice.unwrap().contains("Mihomo"));
+
+        // 3. 用户指定 VpCore，节点为 masque（VP-Core 现已原生支持），直接选定 VpCore 无需回退
+        let masque_node = Node {
+            id: "masque-node".into(),
+            source_id: None,
+            protocol: "masque".into(),
+            name: "Masque Node".into(),
+            server: "162.159.199.1".into(),
+            port: 8095,
+            raw: "masque://...".into(),
+            config: serde_json::json!({
+                "type": "masque",
+                "server": "162.159.199.1",
+                "port": 8095,
+            }),
+            country: None,
+            latency_ms: None,
+            latency_ok: None,
+            download_kbps: None,
+            latency_kernel: None,
+            latency_test_kind: None,
+            latency_tested_at: None,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        };
+        let available_with_vpcore = |k| available(k) || k == KernelKind::VpCore;
+        let (vpcore_res, vpcore_notice) = select_proxy_kernel_preference_for_node_with(
+            &masque_node,
+            KernelPreference::VpCore,
+            true,
+            false,
+            available_with_vpcore,
+        )
+        .expect("VpCore 支持 masque 节点选定");
+        assert_eq!(vpcore_res, KernelKind::VpCore);
+        assert!(vpcore_notice.is_none());
     }
 }

@@ -6110,7 +6110,6 @@ impl eframe::App for VpnApp {
         self.ui_resize_handles(ctx);
 
         self.ui_source_form(ctx);
-        self.ui_detail(ctx);
         self.ui_homogeneity_dialog(ctx);
         self.ui_ip_risk_dialog(ctx);
         self.ui_route_trace_dialog(ctx);
@@ -6125,6 +6124,7 @@ impl eframe::App for VpnApp {
         self.ui_release_notes_modal(ctx);
         self.render_dashboard_drawer(ctx);
         self.render_group_drawer(ctx);
+        self.ui_detail(ctx);
         self.ui_quick_rule_modal(ctx);
 
         // Ctrl+V 走的是这里，不是 Key 事件：egui-winit 一认出粘贴组合就把它换成

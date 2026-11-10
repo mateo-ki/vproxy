@@ -93,6 +93,14 @@ impl VpCoreCompiler {
                             dsl.push_str(&format!("    {k}: {b}\n"));
                         } else if let Some(n) = v.as_u64() {
                             dsl.push_str(&format!("    {k}: {n}\n"));
+                        } else if let Some(arr) = v.as_array() {
+                            let items: Vec<String> = arr
+                                .iter()
+                                .filter_map(|item| item.as_str().map(|s| format!("\"{s}\"")))
+                                .collect();
+                            if !items.is_empty() {
+                                dsl.push_str(&format!("    {k}: [{}]\n", items.join(", ")));
+                            }
                         }
                     }
                     dsl.push_str("}\n\n");
@@ -218,6 +226,7 @@ impl BackendCompiler for VpCoreCompiler {
                                 | "hy2"
                                 | "tuic"
                                 | "wireguard"
+                                | "masque"
                                 | "ss"
                                 | "vmess"
                                 | "vless"
@@ -541,6 +550,8 @@ fn vpcore_supports_proxy(p: &serde_json::Value) -> bool {
             | "naive"
             | "naiveproxy"
             | "wireguard"
+            | "tailscale"
+            | "masque"
     );
     if !type_ok {
         return false;
@@ -550,8 +561,7 @@ fn vpcore_supports_proxy(p: &serde_json::Value) -> bool {
         .and_then(|v| v.as_str())
         .unwrap_or("tcp")
         .trim();
-    if ty == "hysteria" {
-        // hysteria v1 基于 QUIC，没有额外传输层；带上 ws/grpc 等 network 的节点不是纯 hy1
+    if ty == "hysteria" || ty == "masque" || ty == "wireguard" || ty == "tailscale" {
         return matches!(net, "" | "tcp" | "udp");
     }
     matches!(net, "" | "tcp" | "ws" | "grpc" | "http" | "udp")
@@ -858,7 +868,8 @@ rules:
         assert!(!ok(json!({"type": "vless", "network": "xhttp"})));
         assert!(!ok(json!({"type": "vless", "network": "httpupgrade"})));
         assert!(!ok(json!({"type": "vless", "network": "h2"})));
-        assert!(!ok(json!({"type": "masque"})));
+        assert!(ok(json!({"type": "masque"})));
+        assert!(ok(json!({"type": "masque", "network": "udp"})));
         assert!(ok(json!({"type": "hysteria"})));
         assert!(!ok(json!({"type": "hysteria", "network": "ws"})));
     }
@@ -902,7 +913,7 @@ rules:
             "vless://a@1.2.3.4:443?network=xhttp#x"
         ))
         .is_some());
-        assert!(is_node_incompatible_with_vpcore(&mk("masque", json!({}), "")).is_some());
+        assert!(is_node_incompatible_with_vpcore(&mk("masque", json!({}), "")).is_none());
         // http / ws / tcp 传输自 HTTP 伪装传输落地后均受支持
         assert!(
             is_node_incompatible_with_vpcore(&mk("vless", json!({"network": "http"}), ""))
@@ -988,5 +999,60 @@ rules:
         assert!(dsl.contains("route {"));
         assert!(dsl.contains("AND,((NETWORK,udp),(DST-PORT,443)) => \"REJECT\""));
         assert!(dsl.contains("_ => \"PROXY\""));
+    }
+
+    #[test]
+    fn test_vpcore_masque_compilation_and_dsl_generation() {
+        let node = test_node(
+            "masque",
+            json!({
+                "type": "masque",
+                "server": "162.159.199.1",
+                "port": 8095,
+                "private-key": "priv_key",
+                "public-key": "pub_key",
+                "ip": "172.16.0.2",
+                "dns": ["1.1.1.1", "2606:4700:4700::1111"],
+                "udp": true,
+                "remote-dns-resolve": true
+            }),
+        );
+        let options = MihomoConfigOptions {
+            mixed_port: 7890,
+            controller_port: 9090,
+            ..Default::default()
+        };
+        let plan = crate::proxy::ir::lower_options_to_ir(&options, Some(&node));
+        let artifact = VpCoreCompiler.compile(&plan).expect("compile success");
+        let val = artifact.as_json_value().expect("json value");
+
+        // 验证 MASQUE 节点在 proxies 中被保留，且注入 udp: true
+        let proxies = val["proxies"].as_array().expect("proxies");
+        let masque = proxies
+            .iter()
+            .find(|p| p["type"] == "masque")
+            .expect("masque proxy should be preserved");
+        assert_eq!(masque["server"], "162.159.199.1");
+        assert_eq!(masque["port"], 8095);
+        assert_eq!(masque["udp"], true);
+
+        // 验证 proxy-groups 保留了该节点
+        let groups = val["proxy-groups"].as_array().expect("proxy-groups");
+        let proxy_group = groups
+            .iter()
+            .find(|g| g["name"] == "PROXY")
+            .expect("PROXY group");
+        let members = proxy_group["proxies"].as_array().expect("members");
+        assert!(
+            members.iter().any(|m| m.as_str() == Some("Test Node")),
+            "PROXY group 应保留 Test Node: {members:?}"
+        );
+
+        // 验证 DSL 输出
+        let dsl = VpCoreCompiler.compile_vp_dsl(&plan).expect("compile vp dsl");
+        assert!(dsl.contains("node \"Test Node\" masque {"));
+        assert!(dsl.contains("server: \"162.159.199.1\""));
+        assert!(dsl.contains("port: 8095"));
+        assert!(dsl.contains("dns: [\"1.1.1.1\", \"2606:4700:4700::1111\"]"));
     }
 }

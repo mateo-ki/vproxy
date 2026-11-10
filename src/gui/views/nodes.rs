@@ -7,7 +7,7 @@ use crate::gui::widgets::{
 };
 use crate::gui::VpnApp;
 use crate::speedtest::SpeedtestIntensity;
-use eframe::egui::{self, CornerRadius, Frame, Margin, RichText, Stroke, Ui};
+use eframe::egui::{self, Color32, CornerRadius, Frame, Margin, RichText, Sense, Stroke, Ui};
 
 impl VpnApp {
     pub(crate) fn ui_nodes(&mut self, ui: &mut Ui) {
@@ -860,16 +860,56 @@ impl VpnApp {
         if !self.show_detail {
             return;
         }
+
+        // 监听 Escape 键快速关闭弹窗
+        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+            self.show_detail = false;
+            return;
+        }
+
+        // 半透明遮罩：Order::Tooltip 确保压在策略组等抽屉 (Foreground) 之上
+        let screen = ctx.viewport_rect();
+        egui::Area::new(egui::Id::new("node_detail_modal_backdrop"))
+            .fixed_pos(screen.min)
+            .order(egui::Order::Tooltip)
+            .show(ctx, |ui| {
+                ui.set_width(screen.width());
+                ui.set_height(screen.height());
+                ui.painter()
+                    .rect_filled(screen, 0.0, Color32::from_black_alpha(110));
+                let resp = ui.interact(
+                    screen,
+                    egui::Id::new("node_detail_modal_backdrop_click"),
+                    Sense::click(),
+                );
+                if resp.clicked() {
+                    self.show_detail = false;
+                }
+            });
+
+        if !self.show_detail {
+            return;
+        }
+
         let mut open = true;
-        egui::Window::new("节点详情")
+        let max_w = (screen.width() - 40.0).max(360.0);
+        let max_h = (screen.height() - 60.0).max(300.0);
+
+        egui::Window::new(RichText::new("节点详情").strong())
+            .id(egui::Id::new("node_detail_modal_window"))
+            .order(egui::Order::Tooltip)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
             .collapsible(false)
             .resizable(true)
-            .default_width(500.0)
+            .default_width(540.0)
+            .max_width(max_w)
+            .max_height(max_h)
             .open(&mut open)
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
-                    if ui.button("复制").clicked() {
+                    if ui.button("📋 复制全部").clicked() {
                         ctx.copy_text(self.detail_text.clone());
+                        self.status = "已复制节点详情至剪贴板".to_string();
                     }
                     if ui.button("关闭").clicked() {
                         self.show_detail = false;
@@ -880,13 +920,13 @@ impl VpnApp {
                     .id_salt("node_detail_modal_scroll")
                     .max_height(400.0)
                     .show(ui, |ui| {
-                    let detail_field = ui.add(
-                        egui::TextEdit::multiline(&mut self.detail_text)
-                            .font(egui::TextStyle::Monospace)
-                            .desired_width(f32::INFINITY),
-                    );
-                    crate::gui::widgets::note_text_field(ui, &detail_field);
-                });
+                        let detail_field = ui.add(
+                            egui::TextEdit::multiline(&mut self.detail_text)
+                                .font(egui::TextStyle::Monospace)
+                                .desired_width(f32::INFINITY),
+                        );
+                        crate::gui::widgets::note_text_field(ui, &detail_field);
+                    });
             });
         if !open {
             self.show_detail = false;
@@ -1049,6 +1089,34 @@ pub(crate) mod empty_pool_modal_tests {
         assert!(
             modal.contains("确认导入"),
             "弹框画了但缺「确认导入」（弹框层文字：{modal}）"
+        );
+    }
+
+    #[test]
+    fn the_node_detail_modal_renders_on_tooltip_order_above_drawers() {
+        let mut app = app_with_an_empty_library();
+        app.show_detail = true;
+        app.detail_text = "sample_server: 1.2.3.4".into();
+
+        let ctx = egui::Context::default();
+        let detail_layer = egui::LayerId::new(
+            egui::Order::Tooltip,
+            egui::Id::new("node_detail_modal_window"),
+        );
+
+        let mut seen = String::new();
+        for _ in 0..2 {
+            let mut out = String::new();
+            let _ = crate::gui::run_test_ui(&ctx, screen_input(), |_ui| {
+                app.ui_detail(&ctx);
+                out = layer_text(&ctx, detail_layer);
+            });
+            seen = out;
+        }
+
+        assert!(
+            seen.contains("节点详情") && seen.contains("sample_server: 1.2.3.4"),
+            "节点详情窗口应使用 Order::Tooltip 渲染在最高层，防策略组抽屉遮挡: {seen:?}"
         );
     }
 }
