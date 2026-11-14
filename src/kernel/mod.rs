@@ -345,6 +345,7 @@ impl KernelKind {
                     | "anytls"
                     | "snell"
                     | "mieru"
+                    | "openvpn"
                     | "wireguard"
                     | "wg"
                     | "masque"
@@ -436,6 +437,7 @@ impl KernelKind {
                     | "wireguard"
                     | "wg"
                     | "masque"
+                    | "openvpn"
                     | "http"
                     | "https"
                     | "socks"
@@ -452,6 +454,9 @@ pub fn preferred_proxy_kernel(protocol: &str) -> Option<KernelKind> {
         "naive" | "naiveproxy" => Some(KernelKind::VpCore),
         // juicity 仅有 VP-Core 原生实现（mihomo 不支持；sing-box 1.12 起已移除 juicity 出站）
         "juicity" => Some(KernelKind::VpCore),
+        // openvpn：VP-Core 1.7.7 起原生出站（TCP + AEAD/CBC，经 VPN Gate 实测），
+        // 新版 mihomo 原生出站作为兜底
+        "openvpn" => Some(KernelKind::VpCore),
         "ssh" => Some(KernelKind::SingBox),
         "hysteria2" | "hy2" | "tuic" | "anytls" | "wireguard" | "wg" => Some(KernelKind::SingBox),
         protocol if KernelKind::Mihomo.supports_proxy_protocol(protocol) => {
@@ -519,9 +524,9 @@ pub fn is_node_incompatible_with_meow(node: &Node, has_tun: bool) -> Option<&'st
     let proto = node.protocol.to_ascii_lowercase();
     if matches!(
         proto.as_str(),
-        "wireguard" | "wg" | "tuic" | "ssr" | "shadowsocksr" | "masque"
+        "wireguard" | "wg" | "tuic" | "ssr" | "shadowsocksr" | "masque" | "openvpn"
     ) {
-        return Some("WireGuard/TUIC/SSR 协议（Meow 暂不支持）");
+        return Some("WireGuard/TUIC/SSR/OpenVPN 协议（Meow 暂不支持）");
     }
     if let Some(net) = node.config.get("network").and_then(|v| v.as_str()) {
         let net_low = net.to_ascii_lowercase();
@@ -1526,12 +1531,22 @@ Use tags: with_gvisor
         }
         assert_eq!(preferred_proxy_kernel("ssh"), Some(KernelKind::SingBox));
         assert_eq!(preferred_proxy_kernel("mieru"), Some(KernelKind::Mihomo));
+        // openvpn 由 VP-Core 原生支持（mihomo 兜底）
+        assert_eq!(preferred_proxy_kernel("openvpn"), Some(KernelKind::VpCore));
+        assert!(KernelKind::VpCore.supports_proxy_protocol("openvpn"));
+        assert!(KernelKind::Mihomo.supports_proxy_protocol("openvpn"));
         // juicity 仅 VP-Core 支持（mihomo 不支持；sing-box 1.12 移除）
         assert_eq!(preferred_proxy_kernel("juicity"), Some(KernelKind::VpCore));
         // juicity 不进入其它内核白名单
         assert!(!KernelKind::Mihomo.supports_proxy_protocol("juicity"));
         assert!(!KernelKind::SingBox.supports_proxy_protocol("juicity"));
         assert!(KernelKind::VpCore.supports_proxy_protocol("juicity"));
+        // openvpn：VP-Core 原生支持（mihomo 新版内核兜底；sing-box/meow 不支持）
+        assert_eq!(preferred_proxy_kernel("openvpn"), Some(KernelKind::VpCore));
+        assert!(KernelKind::Mihomo.supports_proxy_protocol("openvpn"));
+        assert!(!KernelKind::SingBox.supports_proxy_protocol("openvpn"));
+        assert!(KernelKind::VpCore.supports_proxy_protocol("openvpn"));
+        assert!(!KernelKind::Meow.supports_proxy_protocol("openvpn"));
     }
 
     #[test]

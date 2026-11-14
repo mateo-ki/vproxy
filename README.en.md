@@ -53,20 +53,20 @@ A high-performance, modern cross-platform proxy workstation built with Rust and 
 ## Supported Protocols
 
 **Parsing** (share links / subscriptions / Clash YAML / Base64 / mixed text):
-`ss` `ssr` `vmess` `vless` `trojan` `hysteria` `hysteria2/hy2` `tuic` `wireguard/wg` `socks5` `http(s)` `masque` `snell` `naive(+https/+quic)` `mieru` `ssh` `tailscale` `juicity` `shadowtls`
+`ss` `ssr` `vmess` `vless` `trojan` `hysteria` `hysteria2/hy2` `tuic` `wireguard/wg` `socks5` `http(s)` `masque` `snell` `naive(+https/+quic)` `mieru` `ssh` `tailscale` `juicity` `shadowtls` `openvpn`
 
 **Connection** (kernels are picked automatically per node, see [Architecture & Kernel Routing](docs/architecture.md)):
 
 | Kernel | Supported protocols |
 | :--- | :--- |
-| VP-Core (native core) | `ss` `ssr` `vmess` `vless` `trojan` `snell` `hysteria2` `tuic` `juicity` `anytls` `mieru` `naive` `ssh` `brook` `wireguard` `masque` `http(s)` `socks5` |
-| Mihomo | `ss` `ssr` `vmess` `vless` `trojan` `hysteria` `hysteria2` `tuic` `anytls` `snell` `mieru` `wireguard` `masque` `http(s)` `socks5` |
+| VP-Core (native core) | `ss` `ssr` `vmess` `vless` `trojan` `snell` `hysteria2` `tuic` `juicity` `anytls` `mieru` `naive` `ssh` `brook` `wireguard` `masque` `openvpn` `http(s)` `socks5` |
+| Mihomo | `ss` `ssr` `vmess` `vless` `trojan` `hysteria` `hysteria2` `tuic` `anytls` `snell` `mieru` `openvpn` `wireguard` `masque` `http(s)` `socks5` |
 | sing-box | `ss` `vmess` `vless` `trojan` `hysteria2` `tuic` `anytls` `ssh` `wireguard` `http(s)` `socks5` |
 | Xray | `ss` `vmess` `vless` `trojan` `http(s)` `socks5` |
 | Shoes | `ss` `vmess` `vless` `trojan` `snell` `anytls` `naive` `wireguard` `http(s)` `socks5` |
 | Meow | `ss` `vmess` `vless` `trojan` `hysteria2` `snell` `anytls` `http(s)` `socks5` |
 
-Routing notes: `snell` prefers Shoes, `ssh` prefers sing-box, `naive` and `juicity` run exclusively on VP-Core (Mihomo lacks them and sing-box removed juicity in 1.12); the `xhttp/splithttp` transport is VP-Core-only and automatically reroutes to VP-Core. Parsed protocols without an installable kernel are flagged in the UI instead of being silently dropped.
+Routing notes: `snell` prefers Shoes, `ssh` prefers sing-box, `naive` and `juicity` run exclusively on VP-Core (Mihomo lacks them and sing-box removed juicity in 1.12), `openvpn` prefers the native VP-Core outbound (verified against VPN Gate, Mihomo fallback); the `xhttp/splithttp` transport is VP-Core-only and automatically reroutes to VP-Core. Parsed protocols without an installable kernel are flagged in the UI instead of being silently dropped.
 
 ## Documentation
 

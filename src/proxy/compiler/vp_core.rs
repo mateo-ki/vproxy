@@ -580,6 +580,7 @@ fn vpcore_supports_proxy(p: &serde_json::Value) -> bool {
             | "wireguard"
             | "tailscale"
             | "masque"
+            | "openvpn"
     );
     if !type_ok {
         return false;
@@ -1129,6 +1130,57 @@ rules:
         assert!(dsl.contains("route {"));
         assert!(dsl.contains("AND,((NETWORK,udp),(DST-PORT,443)) => \"REJECT\""));
         assert!(dsl.contains("_ => \"PROXY\""));
+    }
+
+    /// openvpn 家宽/VPN Gate 节点（含面板额外字段 dev/auth/handshake-timeout）：
+    /// vp_core 编译器白名单保留，DSL 直通生成 node "..." openvpn。
+    #[test]
+    fn test_vpcore_openvpn_compilation_and_dsl_generation() {
+        let node = test_node(
+            "openvpn",
+            json!({
+                "type": "openvpn",
+                "server": "79.105.35.112",
+                "port": 1987,
+                "proto": "tcp",
+                "udp": false,
+                "username": "vpn",
+                "password": "vpn",
+                "dev": "tun",
+                "cipher": "AES-128-CBC",
+                "auth": "SHA1",
+                "handshake-timeout": 30,
+                "ca": "-----BEGIN CERTIFICATE-----\nMIIBtest\n-----END CERTIFICATE-----"
+            }),
+        );
+        assert!(vpcore_supports_proxy(&node.config));
+        let options = MihomoConfigOptions {
+            mixed_port: 7890,
+            controller_port: 9090,
+            ..Default::default()
+        };
+        let plan = crate::proxy::ir::lower_options_to_ir(&options, Some(&node));
+        let artifact = VpCoreCompiler.compile(&plan).expect("compile success");
+        let val = artifact.as_json_value().expect("json value");
+
+        let proxies = val["proxies"].as_array().expect("proxies");
+        let ovpn = proxies
+            .iter()
+            .find(|p| p["type"] == "openvpn")
+            .expect("openvpn proxy should be preserved");
+        assert_eq!(ovpn["server"], "79.105.35.112");
+        assert_eq!(ovpn["port"], 1987);
+        assert_eq!(ovpn["cipher"], "AES-128-CBC");
+        assert!(ovpn["ca"].as_str().unwrap().contains("BEGIN CERTIFICATE"));
+
+        let dsl = VpCoreCompiler
+            .compile_vp_dsl(&plan)
+            .expect("compile vp dsl");
+        assert!(
+            dsl.contains("openvpn {"),
+            "DSL 应包含 openvpn 节点块: {dsl}"
+        );
+        assert!(dsl.contains("79.105.35.112"));
     }
 
     #[test]

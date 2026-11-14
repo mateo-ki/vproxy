@@ -249,6 +249,67 @@ mod tests {
     use super::*;
     use crate::proxy::{RuleAction, RuleMatcher};
 
+    /// openvpn 家宽节点（mihomo 新版原生出站）：泛化路径存全配置；
+    /// YAML 锚点/别名（ca/cert/key 复用）必须被 serde_yaml 展开为完整值。
+    #[test]
+    fn openvpn_nodes_keep_full_config_with_aliases_resolved() {
+        let yaml = r#"
+port: 7890
+proxies:
+  - name: 家宽JP
+    type: openvpn
+    server: 158.217.184.31
+    port: 995
+    proto: tcp
+    udp: false
+    username: vpn
+    password: vpn
+    dev: tun
+    cipher: AES-128-CBC
+    auth: SHA1
+    handshake-timeout: 30
+    ca: &hwca |
+      -----BEGIN CERTIFICATE-----
+      MIIBtest
+      -----END CERTIFICATE-----
+    cert: &hwcert |
+      -----BEGIN CERTIFICATE-----
+      MIIBcert
+      -----END CERTIFICATE-----
+    key: &hwkey |
+      -----BEGIN PRIVATE KEY-----
+      MIIBkey
+      -----END PRIVATE KEY-----
+  - name: 家宽KR
+    type: openvpn
+    server: 1.2.3.4
+    port: 995
+    proto: tcp
+    udp: false
+    username: vpn
+    password: vpn
+    ca: *hwca
+    cert: *hwcert
+    key: *hwkey
+"#;
+        let nodes = parse_clash_yaml(yaml, None).unwrap();
+        assert_eq!(nodes.len(), 2, "openvpn 节点不应被丢弃");
+        let jp = &nodes[0];
+        assert_eq!(jp.protocol, "openvpn");
+        assert_eq!(jp.config["type"], "openvpn");
+        assert!(jp.config["ca"].as_str().unwrap().contains("MIIBtest"));
+        // 第二个节点通过别名引用第一组 PEM，解析后必须是展开后的完整文本
+        let kr = &nodes[1];
+        assert!(kr.config["ca"].as_str().unwrap().contains("MIIBtest"));
+        assert!(kr.config["key"].as_str().unwrap().contains("MIIBkey"));
+        assert_eq!(kr.config["username"], "vpn");
+        // 面板额外字段（dev/auth/handshake-timeout）原样透传，不破坏解析
+        assert_eq!(jp.config["dev"], "tun");
+        assert_eq!(jp.config["auth"], "SHA1");
+        assert_eq!(jp.config["handshake-timeout"], 30);
+        assert_eq!(jp.config["cipher"], "AES-128-CBC");
+    }
+
     #[test]
     fn extracts_clash_rules_successfully() {
         let yaml = r#"

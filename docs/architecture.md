@@ -41,12 +41,12 @@ Mihomo YAML │ sing-box JSON │ Xray JSON │ VP-Core DSL(.vp) │ Shoes / Meo
 
 解析与连接能力以代码为准：解析 scheme 注册在 `src/parser/common.rs`；各内核白名单在 `src/kernel/mod.rs` 的 `supports_proxy_protocol`。
 
-**解析**：`ss` `ssr` `vmess` `vless` `trojan` `hysteria` `hysteria2/hy2` `tuic` `wireguard/wg` `socks5` `http(s)` `masque` `snell` `naive(+https/+quic)` `mieru` `ssh` `tailscale` `juicity` `shadowtls`，以及 Clash/Clash Meta YAML、Base64、混合文本。
+**解析**：`ss` `ssr` `vmess` `vless` `trojan` `hysteria` `hysteria2/hy2` `tuic` `wireguard/wg` `socks5` `http(s)` `masque` `snell` `naive(+https/+quic)` `mieru` `ssh` `tailscale` `juicity` `shadowtls` `openvpn`，以及 Clash/Clash Meta YAML、Base64、混合文本。
 
 | 内核 | 可运行协议 |
 | :--- | :--- |
-| VP-Core | `ss` `ssr` `vmess` `vless` `trojan` `snell` `hysteria2` `tuic` `juicity` `anytls` `mieru` `naive` `ssh` `brook` `wireguard` `masque` `http(s)` `socks5` |
-| Mihomo | `ss` `ssr` `vmess` `vless` `trojan` `hysteria` `hysteria2` `tuic` `anytls` `snell` `mieru` `wireguard` `masque` `http(s)` `socks5` |
+| VP-Core | `ss` `ssr` `vmess` `vless` `trojan` `snell` `hysteria2` `tuic` `juicity` `anytls` `mieru` `naive` `ssh` `brook` `wireguard` `masque` `openvpn` `http(s)` `socks5` |
+| Mihomo | `ss` `ssr` `vmess` `vless` `trojan` `hysteria` `hysteria2` `tuic` `anytls` `snell` `mieru` `openvpn` `wireguard` `masque` `http(s)` `socks5` |
 | sing-box | `ss` `vmess` `vless` `trojan` `hysteria2` `tuic` `anytls` `ssh` `wireguard` `http(s)` `socks5` |
 | Xray | `ss` `vmess` `vless` `trojan` `http(s)` `socks5` |
 | Shoes | `ss` `vmess` `vless` `trojan` `snell` `anytls` `naive` `wireguard` `http(s)` `socks5` |
@@ -56,6 +56,7 @@ Mihomo YAML │ sing-box JSON │ Xray JSON │ VP-Core DSL(.vp) │ Shoes / Meo
 
 - `tailscale` 目前只解析入库，尚无内核可运行，界面会标注。
 - VP-Core 另有 Hysteria 1 原生出站，但自动选路优先交给 Mihomo。
+- `openvpn`（家宽 / VPN Gate 类节点）双内核支持：VP-Core 原生出站优先（TCP 传输，数据信道 AEAD 与 CBC+HMAC-SHA1，经 VPN Gate 节点实测全链路 204），新版 mihomo（`transport/openvpn`）兜底；节点配置含 ca/cert/key PEM，Clash 导出直通。
 - sing-box 自 1.12 移除了 juicity 出站，mihomo 从未支持过 juicity，故 juicity 只有 VP-Core 一条路。
 
 ## 4. 编译器要点
@@ -70,7 +71,7 @@ Mihomo YAML │ sing-box JSON │ Xray JSON │ VP-Core DSL(.vp) │ Shoes / Meo
 自动选路（Auto 偏好）顺序：
 
 1. **协议级偏好** `preferred_proxy_kernel`：
-   `snell → Shoes`；`ssh → SingBox`；`naive → VP-Core`；`juicity → VP-Core`（专属）；`hysteria2/hy2/tuic/anytls/wireguard → SingBox`；其余落在白名单内的协议 → Mihomo。
+   `snell → Shoes`；`ssh → SingBox`；`naive → VP-Core`；`juicity → VP-Core`（专属）；`openvpn → VP-Core`（mihomo 兜底）；`hysteria2/hy2/tuic/anytls/wireguard → SingBox`；其余落在白名单内的协议 → Mihomo。
 2. 偏好内核未安装时按 `Mihomo ↔ SingBox` 回退，仍不可用再兜底 `VP-Core → Meow → Shoes → Xray`。
 3. **传输层修正**：节点传输层为 `xhttp/splithttp` 时（仅 VP-Core 支持），无论上一步选中谁，均升级到 VP-Core（可用时），并在通知中说明。
 4. **兼容性护栏**：Meow 排除 `xhttp/splithttp`、`grpc`、ECH、WireGuard/TUIC/SSR/MASQUE；VP-Core 仅排除 `mkcp/kcp`；命中时平滑回退并保留通知。

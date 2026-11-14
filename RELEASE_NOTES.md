@@ -1,3 +1,55 @@
+# 🚀 VProxy v1.16.12 发布说明 / Release Notes
+
+🎉 **VProxy v1.16.12** 正式发布！本版本配合 **VP-Core 1.7.7 原生 OpenVPN 客户端**，实现 **OpenVPN 家宽 / VPN Gate 类节点的双内核支持**，并配套面板格式回归测试与全套文档矩阵更新：
+
+### 🌐 内核选路：OpenVPN 升级 VP-Core 优先
+- **VP-Core 原生出站优先**：`openvpn` 协议选路从「仅新版 mihomo」升级为 **VP-Core 优先（mihomo 兜底）**——VP-Core 1.7.7 纯 Rust 客户端实测 VPN Gate 家宽节点全链路 204；内核协议白名单同步放行；
+- **vp_core 编译器白名单放行**：`type: openvpn` 节点不再被剔除，配置完整直通进 VP-DSL（含 `ca`/`cert`/`key` PEM），DSL 生成 `node "..." openvpn { ... }` 块；
+- **面板字段透传**：`dev` / `auth` / `handshake-timeout` 等面板扩展字段原样保留，不破坏解析与编译。
+
+### 🧪 回归测试
+- **面板 anchor 格式专项**：`ca: &hwca |` 锚点 + `*hwca` 别名引用（本订阅 78/79 节点复用首节点 PEM 的形态）断言 serde_yaml 展开后每节点拿到完整 CA/证书；
+- **vp_core 编译端到端**：openvpn 节点经编译器进 IR JSON 与 VP-DSL 双产物断言（server/port/cipher/CA 逐字段）；
+- **VP-Core 侧哑证书回归**：X.509 v1 哑客户端证书判定单测（`VPNGateClientCert1` 真实样本）。
+
+### 📚 文档矩阵更新
+- `docs/architecture.md` 协议 × 内核矩阵：VP-Core 行补 `openvpn`，选路序列补 `openvpn → VP-Core（mihomo 兜底）`；
+- 中英文 README：VP-Core 矩阵行补 `openvpn`，选路要点更新。
+
+### ⚠️ 说明
+- OpenVPN 数据信道支持 AEAD（GCM/ChaCha20）与 CBC+HMAC-SHA1（SoftEther/VPN Gate 兼容）；不支持 tls-auth/tls-crypt 与 UDP 传输；VPN Gate 免费节点存在常态漂移（掉线 / 服务端禁认证），节点测速与连接报错如实反映。
+
+---
+
+# 🚀 VProxy v1.16.11 发布说明 / Release Notes
+
+🎉 **VProxy v1.16.11** 正式发布！本版本重点扩展 **7 个新协议的解析与导出**、落地 **流量统计持久化（保留 30 天）**，并实现 **XHTTP 传输层内核选路自动升级**，同步整理了全套架构文档：
+
+### 🌐 协议矩阵扩展：7 个新协议解析 + 导出
+- **新增 URI 解析器**：`snell` / `naive(+https/+quic)` / `mieru` / `ssh` / `tailscale` / `juicity` / `shadowtls`（`shadowtls://` 支持 `next=` 内层 SS 链接，合并为 mihomo `plugin: shadow-tls` 形态）；
+- **分享链接导出**：上述协议全部支持一键重建分享链接（ShadowTLS 导出为合并后的 ss 节点链接，可直接回环再解析）；
+- **ShadowTLS 双内核导出**：mihomo 走 `plugin: shadow-tls` 合并节点直通；sing-box 1.11+ 走 `shadowtls` endpoint + `detour` 挂载形态。
+
+### 🚦 内核选路升级
+- **juicity 专属 VP-Core**：mihomo 无此协议、sing-box 自 1.12 起移除，自动选路直指 VP-Core（客户端对齐官方 Go 实现线格式）；
+- **XHTTP/SplitHTTP 传输层自动升级**：选路不再只看协议——`vless/vmess/trojan + network: xhttp` 命中时自动改由 VP-Core 运行（mihomo 无此传输层实现），回退与通知机制完整保留；
+- **白名单放行**：`snell`（Shoes 优先）、`mieru`、`ssh`（sing-box 优先）、`naive`（VP-Core 优先）。
+
+### 🛠️ VP-Core 编译器与 DSL
+- **juicity 主节点完整编译支持**：类型白名单放行、UDP 标记补齐、`insecure` / `congestion-*` / `pinned-cert-chain` 重名 alias 归一，防止 VP-Core 解析 duplicate-field 报错；
+- **修复 alias 归一短路缺陷**：`or_else` 链在首个 alias 命中后跳过剩余键清理的问题。
+
+### 📊 流量统计持久化（保留 30 天）
+- 内核每秒采样的流量增量按**小时桶**落库（60s 批量刷 + 跨小时/退出收尾，重启最多丢最后一分钟增量）；
+- 流量页新增 **「📈 近30天」** tab：按天聚合上行/下行/合计，打开或 5 分钟过期时懒加载；
+- 超过 30 天的小时桶随启动裁剪自动清理，主库不膨胀。
+
+### 📚 文档整理
+- 新增 `docs/architecture.md` 作为现状唯一事实源（模块地图、协议 × 内核矩阵、内核偏好与回退规则）；
+- 中英文 README 协议章节重写为 6 内核连接矩阵，新增文档索引；历史设计文档（design / requirements / tasks）标注存档定位；
+- 全仓 `cargo fmt` 格式规范（含 route_trace 尾随空格修复），通过格式门禁。
+
+---
 # 🚀 VProxy v1.16.11 发布说明 / Release Notes
 
 🎉 **VProxy v1.16.11** 正式发布！本版本重点扩展 **7 个新协议的解析与导出**、落地 **流量统计持久化（保留 30 天）**，并实现 **XHTTP 传输层内核选路自动升级**，同步整理了全套架构文档：

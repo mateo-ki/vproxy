@@ -148,6 +148,11 @@ fn node_to_clash_proxy(node: &Node) -> Option<Value> {
             }
             Some(cfg)
         }
+        // OpenVPN（新版 mihomo 原生出站）：配置整体直通（含 ca/cert/key PEM）
+        "openvpn" => {
+            ensure_server_port_name(&mut cfg, node);
+            Some(cfg)
+        }
         "juicity" => {
             set_type(&mut cfg, "juicity");
             ensure_server_port_name(&mut cfg, node);
@@ -1958,6 +1963,54 @@ mod tests {
         assert_eq!(uris.len(), 1);
         assert!(uris[0].starts_with("ssh://root:toor@8.8.8.8:22"));
         assert!(uris[0].contains("#my-ssh"));
+    }
+
+    #[test]
+    fn openvpn_node_exports_full_config() {
+        let node = Node {
+            id: "ovpn-1".into(),
+            source_id: None,
+            name: "家宽JP".into(),
+            protocol: "openvpn".into(),
+            server: "158.217.184.31".into(),
+            port: 995,
+            raw: String::new(),
+            config: serde_json::json!({
+                "type": "openvpn",
+                "server": "158.217.184.31",
+                "port": 995,
+                "proto": "tcp",
+                "udp": false,
+                "username": "vpn",
+                "password": "vpn",
+                "ca": "-----BEGIN CERTIFICATE-----
+MIIBtest
+-----END CERTIFICATE-----",
+                "cert": "-----BEGIN CERTIFICATE-----
+MIIBcert
+-----END CERTIFICATE-----",
+                "key": "-----BEGIN PRIVATE KEY-----
+MIIBkey
+-----END PRIVATE KEY-----"
+            }),
+            country: None,
+            latency_ms: None,
+            latency_ok: None,
+            download_kbps: None,
+            latency_kernel: None,
+            latency_test_kind: None,
+            latency_tested_at: None,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        };
+        let proxies = nodes_to_clash_proxies(std::slice::from_ref(&node));
+        assert_eq!(proxies.len(), 1, "openvpn 节点应直通导出");
+        let p = &proxies[0];
+        assert_eq!(p["type"], "openvpn");
+        assert_eq!(p["proto"], "tcp");
+        assert_eq!(p["username"], "vpn");
+        assert!(p["ca"].as_str().unwrap().contains("MIIBtest"));
+        assert!(p["key"].as_str().unwrap().contains("MIIBkey"));
     }
 
     #[test]

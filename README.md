@@ -51,20 +51,20 @@ Rust + egui 编写的高性能现代化跨平台代理工作站：采集订阅�
 ## 协议
 
 **解析**（分享链接 / 订阅 / Clash YAML / Base64 / 混合文本）：
-`ss` `ssr` `vmess` `vless` `trojan` `hysteria` `hysteria2/hy2` `tuic` `wireguard/wg` `socks5` `http(s)` `masque` `snell` `naive(+https/+quic)` `mieru` `ssh` `tailscale` `juicity` `shadowtls`
+`ss` `ssr` `vmess` `vless` `trojan` `hysteria` `hysteria2/hy2` `tuic` `wireguard/wg` `socks5` `http(s)` `masque` `snell` `naive(+https/+quic)` `mieru` `ssh` `tailscale` `juicity` `shadowtls` `openvpn`
 
 **连接**（按节点自动选择内核，见 [架构与内核选路](docs/architecture.md)）：
 
 | 内核 | 可运行协议 |
 | :--- | :--- |
-| VP-Core（原生内核） | `ss` `ssr` `vmess` `vless` `trojan` `snell` `hysteria2` `tuic` `juicity` `anytls` `mieru` `naive` `ssh` `brook` `wireguard` `masque` `http(s)` `socks5` |
-| Mihomo | `ss` `ssr` `vmess` `vless` `trojan` `hysteria` `hysteria2` `tuic` `anytls` `snell` `mieru` `wireguard` `masque` `http(s)` `socks5` |
+| VP-Core（原生内核） | `ss` `ssr` `vmess` `vless` `trojan` `snell` `hysteria2` `tuic` `juicity` `anytls` `mieru` `naive` `ssh` `brook` `wireguard` `masque` `openvpn` `http(s)` `socks5` |
+| Mihomo | `ss` `ssr` `vmess` `vless` `trojan` `hysteria` `hysteria2` `tuic` `anytls` `snell` `mieru` `openvpn` `wireguard` `masque` `http(s)` `socks5` |
 | sing-box | `ss` `vmess` `vless` `trojan` `hysteria2` `tuic` `anytls` `ssh` `wireguard` `http(s)` `socks5` |
 | Xray | `ss` `vmess` `vless` `trojan` `http(s)` `socks5` |
 | Shoes | `ss` `vmess` `vless` `trojan` `snell` `anytls` `naive` `wireguard` `http(s)` `socks5` |
 | Meow | `ss` `vmess` `vless` `trojan` `hysteria2` `snell` `anytls` `http(s)` `socks5` |
 
-选路要点：`snell` 优先 Shoes，`ssh` 优先 sing-box，`naive` 与 `juicity` 专属 VP-Core（mihomo 不支持、sing-box 1.12 起移除）；`xhttp/splithttp` 传输层仅 VP-Core 支持，命中时自动改由 VP-Core 运行。解析到但当前装不到内核的协议会在界面标注，不会静默丢弃。
+选路要点：`snell` 优先 Shoes，`ssh` 优先 sing-box，`naive` 与 `juicity` 专属 VP-Core（mihomo 不支持、sing-box 1.12 起移除），`openvpn` 优先 VP-Core 原生出站（VPN Gate 实测、mihomo 兜底）；`xhttp/splithttp` 传输层仅 VP-Core 支持，命中时自动改由 VP-Core 运行。解析到但当前装不到内核的协议会在界面标注，不会静默丢弃。
 
 ## 文档
 
