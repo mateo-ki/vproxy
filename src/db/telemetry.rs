@@ -18,6 +18,8 @@ pub const RETENTION_SWITCHES_DAYS: i64 = 90;
 const RETENTION_HITS_DAYS: i64 = 7;
 /// 每个源只留最近 40 次拉取记录。
 const FETCH_HISTORY_KEEP: i64 = 40;
+/// 流量小时桶保留 30 天：按天聚合看一个月趋势，再早的没有回看价值。
+pub const RETENTION_TRAFFIC_DAYS: i64 = 30;
 
 #[derive(Debug, Clone, sqlx::FromRow)]
 #[allow(dead_code)]
@@ -41,6 +43,19 @@ pub struct SwitchRow {
     pub to_name: Option<String>,
     pub reason: String,
     pub latency_ms: Option<i64>,
+}
+
+/// 流量按天聚合行（本地日），upload/download 单位字节。
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct TrafficDayRow {
+    pub day: String,
+    pub upload: i64,
+    pub download: i64,
+}
+
+/// 本地小时桶键："YYYY-MM-DD HH:00"（字典序即时间序，裁剪直接按字符串比较）。
+pub fn traffic_hour_key(now: DateTime<Local>) -> String {
+    now.format("%Y-%m-%d %H:00").to_string()
 }
 
 #[derive(Debug, Clone)]
@@ -270,6 +285,43 @@ impl Database {
         Ok(written)
     }
 
+    /// 流量增量入账：把 GUI 采样出的挂账字节累进对应小时桶。
+    /// 增量语义（+excluded）保证 60s 批量刷、跨小时收尾、退出收尾都幂等可加。
+    pub async fn record_traffic_hour(&self, hour: &str, up: u64, down: u64) -> Result<()> {
+        let at = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+        sqlx::query(
+            "INSERT INTO traffic_hourly (hour, upload, download, updated_at) \
+             VALUES (?1, ?2, ?3, ?4) \
+             ON CONFLICT(hour) DO UPDATE SET \
+               upload = upload + excluded.upload, \
+               download = download + excluded.download, \
+               updated_at = excluded.updated_at",
+        )
+        .bind(hour)
+        .bind(up as i64)
+        .bind(down as i64)
+        .bind(&at)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// 近 N 天流量按天聚合（本地日，含今天），按日期倒序。
+    pub async fn traffic_daily(&self, days: i64) -> Result<Vec<TrafficDayRow>> {
+        let cutoff = (Local::now() - chrono::Duration::days(days.saturating_sub(1)))
+            .format("%Y-%m-%d")
+            .to_string();
+        let rows = sqlx::query_as::<_, TrafficDayRow>(
+            "SELECT substr(hour, 1, 10) AS day, SUM(upload) AS upload, SUM(download) AS download \
+             FROM traffic_hourly WHERE substr(hour, 1, 10) >= ?1 \
+             GROUP BY day ORDER BY day DESC",
+        )
+        .bind(cutoff)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows)
+    }
+
     /// 今天每条规则的命中数，按命中从多到少。
     pub async fn rule_hits_today(&self) -> Result<Vec<RuleHitRow>> {
         let day = Local::now().format("%Y-%m-%d").to_string();
@@ -390,6 +442,13 @@ impl Database {
             .bind(hits_cut)
             .execute(&self.pool)
             .await?;
+        let traffic_cut = (Local::now() - chrono::Duration::days(RETENTION_TRAFFIC_DAYS))
+            .format("%Y-%m-%d %H:00")
+            .to_string();
+        sqlx::query("DELETE FROM traffic_hourly WHERE hour < ?1")
+            .bind(traffic_cut)
+            .execute(&self.pool)
+            .await?;
         sqlx::query(
             "DELETE FROM source_fetch_history WHERE id NOT IN ( \
                 SELECT id FROM ( \
@@ -412,6 +471,40 @@ mod tests {
 
     /// 自动切换判定要切、但一个替补都没找到 —— 这种"没切成"以前只写在状态栏，
     /// 滑过去就查无实据。现在进切换历史，并且连续同样的失败不许刷成一片。
+    #[tokio::test]
+    async fn traffic_hourly_accumulates_aggregates_and_prunes() {
+        let (_path, db) = temp_db("traffic-hourly").await;
+        db.record_traffic_hour("2026-11-14 10:00", 100, 200)
+            .await
+            .unwrap();
+        db.record_traffic_hour("2026-11-14 10:00", 50, 60)
+            .await
+            .unwrap();
+        db.record_traffic_hour("2026-11-13 09:00", 7, 8)
+            .await
+            .unwrap();
+        db.record_traffic_hour("2026-10-05 08:00", 9, 9)
+            .await
+            .unwrap();
+
+        let days = db.traffic_daily(30).await.unwrap();
+        assert_eq!(days.len(), 2, "30 天窗口外的日期不该出现: {days:?}");
+        let day_1114 = days.iter().find(|d| d.day == "2026-11-14").unwrap();
+        assert_eq!(day_1114.upload, 150, "同小时多批增量应累加");
+        assert_eq!(day_1114.download, 260);
+        let day_1113 = days.iter().find(|d| d.day == "2026-11-13").unwrap();
+        assert_eq!((day_1113.upload, day_1113.download), (7, 8));
+        assert_eq!(days[0].day, "2026-11-14", "按日期倒序");
+
+        db.prune_telemetry().await.unwrap();
+        let days = db.traffic_daily(30).await.unwrap();
+        assert!(
+            days.iter().all(|d| d.day != "2026-10-05"),
+            "40 天前的桶应被裁剪"
+        );
+        assert_eq!(days.len(), 2, "保留期内数据不受裁剪影响");
+    }
+
     #[tokio::test]
     async fn a_failover_without_a_target_is_recorded_once_not_spammed() {
         let (_path, db) = temp_db("switch-miss").await;

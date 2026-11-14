@@ -51,6 +51,30 @@ pub fn parse_uri(uri: &str, source_id: Option<&str>) -> Option<Node> {
     if lower.starts_with("masque://") {
         return super::warp_masque::parse_masque_uri(&uri, source_id);
     }
+    if lower.starts_with("snell://") {
+        return parse_snell(&uri, source_id);
+    }
+    if lower.starts_with("naive+https://")
+        || lower.starts_with("naive+quic://")
+        || lower.starts_with("naive://")
+    {
+        return parse_naive(&uri, source_id);
+    }
+    if lower.starts_with("mieru://") {
+        return parse_mieru(&uri, source_id);
+    }
+    if lower.starts_with("ssh://") {
+        return parse_ssh(&uri, source_id);
+    }
+    if lower.starts_with("tailscale://") {
+        return parse_tailscale(&uri, source_id);
+    }
+    if lower.starts_with("juicity://") {
+        return parse_juicity(&uri, source_id);
+    }
+    if lower.starts_with("shadowtls://") {
+        return parse_shadowtls(&uri, source_id);
+    }
     if lower.starts_with("http://") || lower.starts_with("https://") {
         // Only treat as proxy URI when it has userinfo (proxy auth style)
         if let Ok(u) = Url::parse(&uri) {
@@ -364,7 +388,11 @@ fn parse_hysteria2(uri: &str, source_id: Option<&str>) -> Option<Node> {
             "obfs-password": q.get("obfs-password").cloned().unwrap_or_default(),
             "udp": json!(true),
         });
-        if let Some(mport) = q.get("mport").or_else(|| q.get("ports")).filter(|s| !s.is_empty()) {
+        if let Some(mport) = q
+            .get("mport")
+            .or_else(|| q.get("ports"))
+            .filter(|s| !s.is_empty())
+        {
             config["ports"] = json!(mport);
         }
         return Some(make_node(
@@ -391,7 +419,11 @@ fn parse_hysteria2(uri: &str, source_id: Option<&str>) -> Option<Node> {
         "obfs-password": q.get("obfs-password").cloned().unwrap_or_default(),
         "udp": json!(true),
     });
-    if let Some(mport) = q.get("mport").or_else(|| q.get("ports")).filter(|s| !s.is_empty()) {
+    if let Some(mport) = q
+        .get("mport")
+        .or_else(|| q.get("ports"))
+        .filter(|s| !s.is_empty())
+    {
         config["ports"] = json!(mport);
     }
     Some(make_node(
@@ -608,7 +640,13 @@ fn parse_ssr(uri: &str, source_id: Option<&str>) -> Option<Node> {
     });
 
     Some(make_node(
-        "shadowsocksr", &name, &host, port, uri, config, source_id,
+        "shadowsocksr",
+        &name,
+        &host,
+        port,
+        uri,
+        config,
+        source_id,
     ))
 }
 
@@ -720,7 +758,13 @@ fn parse_wireguard(uri: &str, source_id: Option<&str>) -> Option<Node> {
     }
 
     Some(make_node(
-        "wireguard", &name, &host, port, uri, config, source_id,
+        "wireguard",
+        &name,
+        &host,
+        port,
+        uri,
+        config,
+        source_id,
     ))
 }
 
@@ -840,6 +884,447 @@ fn split_fragment(s: &str) -> (&str, Option<&str>) {
     }
 }
 
+// ---------------------------------------------------------------------------
+// snell / naive / mieru / ssh / tailscale / juicity / shadowtls
+// ---------------------------------------------------------------------------
+
+/// snell://PSK@host:port?version=4&obfs=http&obfs-host=xxx#name
+/// （社区通用格式；Surge 原生无 URI，订阅转换站普遍输出该形态）
+fn parse_snell(uri: &str, source_id: Option<&str>) -> Option<Node> {
+    let rest = uri
+        .trim_start_matches("snell://")
+        .trim_start_matches("SNELL://");
+    let (body, fragment) = split_fragment(rest);
+    let name = fragment.map(percent_decode).unwrap_or_default();
+    let (userinfo, host, port) = split_userinfo_hostport(body)?;
+    let psk = percent_decode(&userinfo);
+    if psk.is_empty() {
+        return None;
+    }
+    let q = parse_query(body.split_once('?').map(|(_, q)| q).unwrap_or(""));
+    let version: u8 = q.get("version").and_then(|v| v.parse().ok()).unwrap_or(4);
+    let mut config = json!({
+        "type": "snell",
+        "server": host,
+        "port": port,
+        "psk": psk,
+        "password": psk,
+        "version": version,
+        "name": name,
+    });
+    if let Some(obj) = config.as_object_mut() {
+        if let Some(obfs) = q
+            .get("obfs")
+            .filter(|s| !s.is_empty() && !s.eq_ignore_ascii_case("none"))
+        {
+            obj.insert("obfs".into(), json!(obfs));
+            if let Some(obfs_host) = q.get("obfs-host").or_else(|| q.get("obfs_host")) {
+                obj.insert("obfs-host".into(), json!(obfs_host));
+            }
+        }
+    }
+    Some(make_node(
+        "snell", &name, &host, port, uri, config, source_id,
+    ))
+}
+
+/// naive://user:pass@host:port?sni=xxx#name
+/// 以及 naive+https:// / naive+quic://（naive 客户端分发链接惯例）
+fn parse_naive(uri: &str, source_id: Option<&str>) -> Option<Node> {
+    let lower = uri.to_ascii_lowercase();
+    let rest = if lower.starts_with("naive+https://") {
+        &uri["naive+https://".len()..]
+    } else if lower.starts_with("naive+quic://") {
+        &uri["naive+quic://".len()..]
+    } else {
+        uri.trim_start_matches("naive://")
+            .trim_start_matches("NAIVE://")
+    };
+    let (body, fragment) = split_fragment(rest);
+    let name = fragment.map(percent_decode).unwrap_or_default();
+    if !body.contains('@') {
+        return None;
+    }
+    let (userinfo, host, port) = split_userinfo_hostport(body)?;
+    let (username, password) = userinfo.split_once(':')?;
+    let username = percent_decode(username);
+    let password = percent_decode(password);
+    if username.is_empty() {
+        return None;
+    }
+    let q = parse_query(body.split_once('?').map(|(_, q)| q).unwrap_or(""));
+    // naive+quic 走 QUIC(H3) 承载，其余默认 HTTPS(H2)
+    let is_quic = lower.starts_with("naive+quic://");
+    let sni = q
+        .get("sni")
+        .or_else(|| q.get("host"))
+        .cloned()
+        .unwrap_or_default();
+    let config = json!({
+        "type": "naive",
+        "server": host,
+        "port": port,
+        "username": username,
+        "password": password,
+        "sni": sni,
+        "tls": json!(!is_quic),
+        "insecure": json!(false),
+        "name": name,
+    });
+    Some(make_node(
+        "naive", &name, &host, port, uri, config, source_id,
+    ))
+}
+
+/// mieru://user:pass@host:port?protocol=socks5&transport=wss&portRange=10000-20000&multiplexing=QUIC#name
+fn parse_mieru(uri: &str, source_id: Option<&str>) -> Option<Node> {
+    let rest = uri
+        .trim_start_matches("mieru://")
+        .trim_start_matches("MIERU://");
+    let (body, fragment) = split_fragment(rest);
+    let name = fragment.map(percent_decode).unwrap_or_default();
+    if !body.contains('@') {
+        return None;
+    }
+    let (userinfo, host, port) = split_userinfo_hostport(body)?;
+    let (username, password) = userinfo.split_once(':')?;
+    let username = percent_decode(username);
+    let password = percent_decode(password);
+    if username.is_empty() || password.is_empty() {
+        return None;
+    }
+    let q = parse_query(body.split_once('?').map(|(_, q)| q).unwrap_or(""));
+    let mut config = json!({
+        "type": "mieru",
+        "server": host,
+        "port": port,
+        "username": username,
+        "password": password,
+        "name": name,
+    });
+    if let Some(obj) = config.as_object_mut() {
+        if let Some(transport) = q
+            .get("transport")
+            .or_else(|| q.get("profile"))
+            .filter(|s| !s.is_empty())
+        {
+            obj.insert("transport".into(), json!(transport));
+        }
+        if let Some(mux) = q
+            .get("multiplexing")
+            .or_else(|| q.get("multiplex"))
+            .filter(|s| !s.is_empty())
+        {
+            obj.insert("multiplexing".into(), json!(mux));
+        }
+        if let Some(pr) = q
+            .get("portrange")
+            .or_else(|| q.get("port-range"))
+            .or_else(|| q.get("port_range"))
+            .filter(|s| !s.is_empty())
+        {
+            obj.insert("port-range".into(), json!(pr));
+            obj.insert("portrange".into(), json!(pr));
+        }
+    }
+    Some(make_node(
+        "mieru", &name, &host, port, uri, config, source_id,
+    ))
+}
+
+/// ssh://user:pass@host:port?private-key=<base64 PEM>&host-key=SHA256:xxx#name
+fn parse_ssh(uri: &str, source_id: Option<&str>) -> Option<Node> {
+    let rest = uri
+        .trim_start_matches("ssh://")
+        .trim_start_matches("SSH://");
+    let (body, fragment) = split_fragment(rest);
+    let name = fragment.map(percent_decode).unwrap_or_default();
+    if !body.contains('@') {
+        return None;
+    }
+    let (userinfo, host, port) = split_userinfo_hostport(body)?;
+    let (username, password) = match userinfo.split_once(':') {
+        Some((u, p)) => (percent_decode(u), percent_decode(p)),
+        None => (percent_decode(&userinfo), String::new()),
+    };
+    if username.is_empty() {
+        return None;
+    }
+    let q = parse_query(body.split_once('?').map(|(_, q)| q).unwrap_or(""));
+    let mut config = json!({
+        "type": "ssh",
+        "server": host,
+        "port": port,
+        "username": username,
+        "name": name,
+    });
+    if let Some(obj) = config.as_object_mut() {
+        if !password.is_empty() {
+            obj.insert("password".into(), json!(password));
+        }
+        // private-key 支持内联 PEM 或 base64 编码 PEM
+        if let Some(pk) = q
+            .get("private-key")
+            .or_else(|| q.get("private_key"))
+            .or_else(|| q.get("key"))
+            .filter(|s| !s.is_empty())
+        {
+            let decoded = decode_base64_str(pk).unwrap_or_else(|| pk.clone());
+            obj.insert("private-key".into(), json!(decoded));
+        }
+        if let Some(pass) = q
+            .get("private-key-passphrase")
+            .or_else(|| q.get("key-passphrase"))
+            .filter(|s| !s.is_empty())
+        {
+            obj.insert("private-key-passphrase".into(), json!(pass));
+        }
+        if let Some(hk) = q
+            .get("host-key")
+            .or_else(|| q.get("host_key"))
+            .filter(|s| !s.is_empty())
+        {
+            obj.insert("host-key".into(), json!(hk));
+        }
+    }
+    Some(make_node("ssh", &name, &host, port, uri, config, source_id))
+}
+
+/// tailscale://authkey@host:port?hostname=xxx&exit-node=xxx&control-url=xxx#name
+fn parse_tailscale(uri: &str, source_id: Option<&str>) -> Option<Node> {
+    let rest = uri
+        .trim_start_matches("tailscale://")
+        .trim_start_matches("TAILSCALE://");
+    let (body, fragment) = split_fragment(rest);
+    let name = fragment.map(percent_decode).unwrap_or_default();
+    let (host, port, userinfo) = if body.contains('@') {
+        let (u, h, p) = split_userinfo_hostport(body)?;
+        (h, p, percent_decode(&u))
+    } else {
+        let (h, p) = split_host_port(body)?;
+        (h, p.parse().unwrap_or(443), String::new())
+    };
+    let q = parse_query(body.split_once('?').map(|(_, q)| q).unwrap_or(""));
+    let authkey = q
+        .get("authkey")
+        .or_else(|| q.get("auth-key"))
+        .or_else(|| q.get("auth_key"))
+        .cloned()
+        .unwrap_or(userinfo);
+    let mut config = json!({
+        "type": "tailscale",
+        "server": host,
+        "port": port,
+        "udp": json!(true),
+        "name": name,
+    });
+    if let Some(obj) = config.as_object_mut() {
+        if !authkey.is_empty() {
+            obj.insert("auth-key".into(), json!(authkey));
+        }
+        if let Some(v) = q.get("hostname").filter(|s| !s.is_empty()) {
+            obj.insert("hostname".into(), json!(v));
+        }
+        if let Some(v) = q
+            .get("exit-node")
+            .or_else(|| q.get("exit_node"))
+            .filter(|s| !s.is_empty())
+        {
+            obj.insert("exit-node".into(), json!(v));
+            if let Some(allow) = q.get("exit-node-allow-lan").or_else(|| q.get("allow-lan")) {
+                obj.insert(
+                    "exit-node-allow-lan".into(),
+                    json!(allow == "1" || allow.eq_ignore_ascii_case("true")),
+                );
+            }
+        }
+        if let Some(v) = q
+            .get("control-url")
+            .or_else(|| q.get("control_url"))
+            .filter(|s| !s.is_empty())
+        {
+            obj.insert("control-url".into(), json!(v));
+        }
+    }
+    Some(make_node(
+        "tailscale",
+        &name,
+        &host,
+        port,
+        uri,
+        config,
+        source_id,
+    ))
+}
+
+/// juicity://uuid:password@host:port?sni=xxx&congestion_control=bbr&allow_insecure=1&pinned_cert_chain=xxx#name
+/// （juicity-client --generate-share-link 输出格式）
+fn parse_juicity(uri: &str, source_id: Option<&str>) -> Option<Node> {
+    let rest = uri
+        .trim_start_matches("juicity://")
+        .trim_start_matches("JUICITY://");
+    let (body, fragment) = split_fragment(rest);
+    let name = fragment.map(percent_decode).unwrap_or_default();
+    if !body.contains('@') {
+        return None;
+    }
+    let (userinfo, host, port) = split_userinfo_hostport(body)?;
+    let (uuid, password) = match userinfo.split_once(':') {
+        Some((u, p)) => (percent_decode(u), percent_decode(p)),
+        None => (percent_decode(&userinfo), String::new()),
+    };
+    if uuid.is_empty() {
+        return None;
+    }
+    let q = parse_query(body.split_once('?').map(|(_, q)| q).unwrap_or(""));
+    let sni = q.get("sni").cloned().unwrap_or_else(|| host.clone());
+    let cc = q
+        .get("congestion_control")
+        .or_else(|| q.get("congestion-control"))
+        .or_else(|| q.get("cc"))
+        .cloned()
+        .unwrap_or_else(|| "bbr".to_string());
+    let insecure = q
+        .get("allow_insecure")
+        .or_else(|| q.get("allow-insecure"))
+        .or_else(|| q.get("insecure"))
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false);
+    let mut config = json!({
+        "type": "juicity",
+        "server": host,
+        "port": port,
+        "uuid": uuid,
+        "password": password,
+        "sni": sni,
+        "congestion-control": cc,
+        "congestion_control": cc,
+        "udp": json!(true),
+        "insecure": json!(insecure),
+        "allowInsecure": json!(insecure),
+        "name": name,
+    });
+    if let Some(obj) = config.as_object_mut() {
+        if let Some(chain) = q
+            .get("pinned_cert_chain")
+            .or_else(|| q.get("pinned-cert-chain"))
+            .filter(|s| !s.is_empty())
+        {
+            obj.insert("pinned-cert-chain".into(), json!(chain));
+        }
+    }
+    Some(make_node(
+        "juicity", &name, &host, port, uri, config, source_id,
+    ))
+}
+
+/// shadowtls://password@host:port?sni=xxx&version=3&next=<内层 ss 分享链接>#name
+///
+/// ShadowTLS 本质是 TLS 伪装前置层，必须与内层代理（惯例为 Shadowsocks）串联使用：
+/// - 携带 `next=` 时解析为**合并后的 ss 节点**（mihomo `plugin: shadow-tls` 形态），
+///   直接可被 mihomo / VP-Core 运行；
+/// - 未携带 `next=` 时仅存档 shadow-tls 层参数（type: shadowtls），暂不可运行。
+fn parse_shadowtls(uri: &str, source_id: Option<&str>) -> Option<Node> {
+    let rest = uri
+        .trim_start_matches("shadowtls://")
+        .trim_start_matches("SHADOWTLS://");
+    let (body, fragment) = split_fragment(rest);
+    let name = fragment.map(percent_decode).unwrap_or_default();
+    let (userinfo, host, port) = split_userinfo_hostport(body)?;
+    let password = percent_decode(&userinfo);
+    if password.is_empty() {
+        return None;
+    }
+    let q = parse_query(body.split_once('?').map(|(_, q)| q).unwrap_or(""));
+    let sni = q
+        .get("sni")
+        .or_else(|| q.get("host"))
+        .cloned()
+        .unwrap_or_default();
+    let version: u32 = q.get("version").and_then(|v| v.parse().ok()).unwrap_or(3);
+
+    // next= 内层分享链接（允许 URL 编码）
+    let next_raw = q
+        .get("next")
+        .or_else(|| q.get("inner"))
+        .or_else(|| q.get("proxy"))
+        .cloned()
+        .unwrap_or_default();
+    let next_uri = if next_raw.is_empty() {
+        None
+    } else {
+        let decoded = percent_decode(&next_raw);
+        let trimmed = decoded.trim().to_string();
+        if trimmed.is_empty() {
+            None
+        } else if trimmed.contains("://") {
+            Some(trimmed)
+        } else {
+            // base64 形式的分享链接
+            decode_base64_str(&trimmed).filter(|s| s.contains("://"))
+        }
+    };
+
+    if let Some(inner) = next_uri {
+        let inner_node = parse_uri(&inner, source_id)
+            .or_else(|| parse_uri(&format!("ss://{inner}"), source_id))?;
+        let mut cfg = inner_node.config;
+        if let Some(obj) = cfg.as_object_mut() {
+            obj.insert("type".into(), json!("ss"));
+            obj.insert("server".into(), json!(host));
+            obj.insert("port".into(), json!(port));
+            if name.is_empty() {
+                obj.insert("name".into(), json!(inner_node.name));
+            } else {
+                obj.insert("name".into(), json!(name));
+            }
+            obj.insert("plugin".into(), json!("shadow-tls"));
+            obj.insert(
+                "plugin-opts".into(),
+                json!({
+                    "host": sni,
+                    "password": password,
+                    "version": version,
+                }),
+            );
+        }
+        let merged_name = if name.is_empty() {
+            inner_node.name
+        } else {
+            name
+        };
+        return Some(make_node(
+            "shadowsocks",
+            &merged_name,
+            &host,
+            port,
+            uri,
+            cfg,
+            source_id,
+        ));
+    }
+
+    // 无内层：仅存档 shadow-tls 层参数
+    let config = json!({
+        "type": "shadowtls",
+        "server": host,
+        "port": port,
+        "password": password,
+        "sni": sni,
+        "version": version,
+        "name": name,
+    });
+    Some(make_node(
+        "shadowtls",
+        &name,
+        &host,
+        port,
+        uri,
+        config,
+        source_id,
+    ))
+}
+
 fn parse_port_value(v: &serde_json::Value) -> Option<u16> {
     if let Some(n) = v.as_u64() {
         return u16::try_from(n).ok();
@@ -873,7 +1358,9 @@ mod tests {
             Some("secretpass")
         );
         assert_eq!(
-            node.config.get("congestion-controller").and_then(|v| v.as_str()),
+            node.config
+                .get("congestion-controller")
+                .and_then(|v| v.as_str()),
             Some("bbr")
         );
     }
@@ -926,7 +1413,11 @@ mod tests {
             node.config.get("public-key").and_then(|v| v.as_str()),
             Some("cHVibGljX2tleQ==")
         );
-        let res = node.config.get("reserved").and_then(|v| v.as_array()).expect("reserved array");
+        let res = node
+            .config
+            .get("reserved")
+            .and_then(|v| v.as_array())
+            .expect("reserved array");
         assert_eq!(res.len(), 3);
         assert_eq!(res[0], 1);
     }
@@ -951,5 +1442,209 @@ mod tests {
         assert_eq!(node.config.get("down").and_then(|v| v.as_u64()), Some(500));
         assert_eq!(node.config.get("skip-cert-verify"), Some(&json!(true)));
         assert_eq!(node.config.get("alpn"), Some(&json!(["h3"])));
+    }
+
+    #[test]
+    fn parses_snell_uri() {
+        let uri = "snell://psk-secret@snell.example.com:6160?version=4&obfs=http&obfs-host=cdn.example.com#SnellNode";
+        let node = parse_uri(uri, None).expect("snell parse");
+        assert_eq!(node.protocol, "snell");
+        assert_eq!(node.name, "SnellNode");
+        assert_eq!(node.server, "snell.example.com");
+        assert_eq!(node.port, 6160);
+        assert_eq!(
+            node.config.get("psk").and_then(|v| v.as_str()),
+            Some("psk-secret")
+        );
+        assert_eq!(node.config.get("version").and_then(|v| v.as_u64()), Some(4));
+        assert_eq!(
+            node.config.get("obfs").and_then(|v| v.as_str()),
+            Some("http")
+        );
+        assert_eq!(
+            node.config.get("obfs-host").and_then(|v| v.as_str()),
+            Some("cdn.example.com")
+        );
+    }
+
+    #[test]
+    fn parses_naive_uris() {
+        for scheme in ["naive://", "naive+https://"] {
+            let uri = format!(
+                "{scheme}user:pass123@naive.example.com:443?sni=naive.example.com#NaiveNode"
+            );
+            let node = parse_uri(&uri, None).unwrap_or_else(|| panic!("naive parse {scheme}"));
+            assert_eq!(node.protocol, "naive");
+            assert_eq!(node.name, "NaiveNode");
+            assert_eq!(node.server, "naive.example.com");
+            assert_eq!(node.port, 443);
+            assert_eq!(
+                node.config.get("username").and_then(|v| v.as_str()),
+                Some("user")
+            );
+            assert_eq!(
+                node.config.get("password").and_then(|v| v.as_str()),
+                Some("pass123")
+            );
+            assert_eq!(
+                node.config.get("type").and_then(|v| v.as_str()),
+                Some("naive")
+            );
+        }
+    }
+
+    #[test]
+    fn parses_mieru_uri() {
+        let uri = "mieru://alice:wonderland@mieru.example.com:28888?transport=wss&multiplexing=QUIC&portRange=10000-20000#MieruNode";
+        let node = parse_uri(uri, None).expect("mieru parse");
+        assert_eq!(node.protocol, "mieru");
+        assert_eq!(node.name, "MieruNode");
+        assert_eq!(node.server, "mieru.example.com");
+        assert_eq!(node.port, 28888);
+        assert_eq!(
+            node.config.get("username").and_then(|v| v.as_str()),
+            Some("alice")
+        );
+        assert_eq!(
+            node.config.get("password").and_then(|v| v.as_str()),
+            Some("wonderland")
+        );
+        assert_eq!(
+            node.config.get("transport").and_then(|v| v.as_str()),
+            Some("wss")
+        );
+        assert_eq!(
+            node.config.get("multiplexing").and_then(|v| v.as_str()),
+            Some("QUIC")
+        );
+    }
+
+    #[test]
+    fn parses_ssh_uri() {
+        let uri = "ssh://root:pa55word@ssh.example.com:22?host-key=SHA256%3Aabcdef#SshNode";
+        let node = parse_uri(uri, None).expect("ssh parse");
+        assert_eq!(node.protocol, "ssh");
+        assert_eq!(node.name, "SshNode");
+        assert_eq!(node.server, "ssh.example.com");
+        assert_eq!(node.port, 22);
+        assert_eq!(
+            node.config.get("username").and_then(|v| v.as_str()),
+            Some("root")
+        );
+        assert_eq!(
+            node.config.get("password").and_then(|v| v.as_str()),
+            Some("pa55word")
+        );
+        assert_eq!(
+            node.config.get("host-key").and_then(|v| v.as_str()),
+            Some("SHA256:abcdef")
+        );
+    }
+
+    #[test]
+    fn parses_tailscale_uri() {
+        let uri = "tailscale://tskey-auth-abc123@ts.example.com:443?hostname=vproxy-node&exit-node=us-east&exit-node-allow-lan=1#TailscaleNode";
+        let node = parse_uri(uri, None).expect("tailscale parse");
+        assert_eq!(node.protocol, "tailscale");
+        assert_eq!(node.name, "TailscaleNode");
+        assert_eq!(node.server, "ts.example.com");
+        assert_eq!(node.port, 443);
+        assert_eq!(
+            node.config.get("auth-key").and_then(|v| v.as_str()),
+            Some("tskey-auth-abc123")
+        );
+        assert_eq!(
+            node.config.get("exit-node").and_then(|v| v.as_str()),
+            Some("us-east")
+        );
+        assert_eq!(node.config.get("exit-node-allow-lan"), Some(&json!(true)));
+    }
+
+    #[test]
+    fn parses_juicity_uri() {
+        let uri = "juicity://b54d39f7-9204-4680-ba76-2e84c59ff06a:juice-pass@jc.example.com:8443?sni=jc.example.com&congestion_control=bbr&allow_insecure=0#JuicityNode";
+        let node = parse_uri(uri, None).expect("juicity parse");
+        assert_eq!(node.protocol, "juicity");
+        assert_eq!(node.name, "JuicityNode");
+        assert_eq!(node.server, "jc.example.com");
+        assert_eq!(node.port, 8443);
+        assert_eq!(
+            node.config.get("uuid").and_then(|v| v.as_str()),
+            Some("b54d39f7-9204-4680-ba76-2e84c59ff06a")
+        );
+        assert_eq!(
+            node.config.get("password").and_then(|v| v.as_str()),
+            Some("juice-pass")
+        );
+        assert_eq!(
+            node.config
+                .get("congestion-control")
+                .and_then(|v| v.as_str()),
+            Some("bbr")
+        );
+        assert_eq!(node.config.get("insecure"), Some(&json!(false)));
+    }
+
+    #[test]
+    fn parses_shadowtls_uri_with_inner_ss() {
+        // next= 内层 ss 链接（URL 编码），合并为 mihomo plugin 形态的 ss 节点
+        let inner = "ss://YWVzLTEyOC1nY206c3NwYXNz@1.2.3.4:8388#InnerSS";
+        let encoded =
+            percent_encoding::utf8_percent_encode(inner, percent_encoding::NON_ALPHANUMERIC)
+                .to_string();
+        let uri = format!(
+            "shadowtls://stls-pass@st.example.com:443?sni=www.apple.com&version=3&next={}#StNode",
+            encoded
+        );
+        let node = parse_uri(&uri, None).expect("shadowtls parse");
+        assert_eq!(node.protocol, "shadowsocks");
+        assert_eq!(node.name, "StNode");
+        assert_eq!(node.server, "st.example.com");
+        assert_eq!(node.port, 443);
+        assert_eq!(node.config.get("type").and_then(|v| v.as_str()), Some("ss"));
+        assert_eq!(
+            node.config.get("cipher").and_then(|v| v.as_str()),
+            Some("aes-128-gcm")
+        );
+        assert_eq!(
+            node.config.get("password").and_then(|v| v.as_str()),
+            Some("sspass")
+        );
+        assert_eq!(
+            node.config.get("plugin").and_then(|v| v.as_str()),
+            Some("shadow-tls")
+        );
+        let opts = node
+            .config
+            .get("plugin-opts")
+            .and_then(|v| v.as_object())
+            .expect("plugin-opts");
+        assert_eq!(
+            opts.get("host").and_then(|v| v.as_str()),
+            Some("www.apple.com")
+        );
+        assert_eq!(
+            opts.get("password").and_then(|v| v.as_str()),
+            Some("stls-pass")
+        );
+        assert_eq!(opts.get("version").and_then(|v| v.as_u64()), Some(3));
+    }
+
+    #[test]
+    fn parses_shadowtls_uri_without_inner() {
+        let uri = "shadowtls://stls-pass@st.example.com:443?sni=www.apple.com&version=3#StOnly";
+        let node = parse_uri(uri, None).expect("shadowtls parse");
+        assert_eq!(node.protocol, "shadowtls");
+        assert_eq!(node.name, "StOnly");
+        assert_eq!(node.server, "st.example.com");
+        assert_eq!(
+            node.config.get("type").and_then(|v| v.as_str()),
+            Some("shadowtls")
+        );
+        assert_eq!(
+            node.config.get("sni").and_then(|v| v.as_str()),
+            Some("www.apple.com")
+        );
+        assert_eq!(node.config.get("version").and_then(|v| v.as_u64()), Some(3));
     }
 }

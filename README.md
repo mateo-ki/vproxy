@@ -46,12 +46,32 @@ Rust + egui 编写的高性能现代化跨平台代理工作站：采集订阅�
 - 关于页在线更新，稳定与预发两个通道（默认只跟稳定版）
 - 界面全中文、5 套浅色主题、Ctrl+K 命令面板、85%~140% 整页缩放
 - 本地 HTTP API（默认 `127.0.0.1:8080`，强制 bearer 鉴权）
-- 导出 mihomo / sing-box / xray 配置
+- 导出 mihomo / sing-box / xray 配置与 VP-Core 原生 DSL 配置
 
 ## 协议
 
-解析：`ss` `vmess` `vless` `trojan` `hysteria2/hy2` `socks5` `http(s)`，以及 Clash/Clash Meta YAML、Base64 与混合文本里的分享链接。
-连接（取决于内核）：以上再加 `tuic` `wireguard`。`anytls` `ssr` `mieru` `openvpn` `sstp` 存得下但连不上，界面上会标出来而不是静默丢弃。
+**解析**（分享链接 / 订阅 / Clash YAML / Base64 / 混合文本）：
+`ss` `ssr` `vmess` `vless` `trojan` `hysteria` `hysteria2/hy2` `tuic` `wireguard/wg` `socks5` `http(s)` `masque` `snell` `naive(+https/+quic)` `mieru` `ssh` `tailscale` `juicity` `shadowtls`
+
+**连接**（按节点自动选择内核，见 [架构与内核选路](docs/architecture.md)）：
+
+| 内核 | 可运行协议 |
+| :--- | :--- |
+| VP-Core（原生内核） | `ss` `ssr` `vmess` `vless` `trojan` `snell` `hysteria2` `tuic` `juicity` `anytls` `mieru` `naive` `ssh` `brook` `wireguard` `masque` `http(s)` `socks5` |
+| Mihomo | `ss` `ssr` `vmess` `vless` `trojan` `hysteria` `hysteria2` `tuic` `anytls` `snell` `mieru` `wireguard` `masque` `http(s)` `socks5` |
+| sing-box | `ss` `vmess` `vless` `trojan` `hysteria2` `tuic` `anytls` `ssh` `wireguard` `http(s)` `socks5` |
+| Xray | `ss` `vmess` `vless` `trojan` `http(s)` `socks5` |
+| Shoes | `ss` `vmess` `vless` `trojan` `snell` `anytls` `naive` `wireguard` `http(s)` `socks5` |
+| Meow | `ss` `vmess` `vless` `trojan` `hysteria2` `snell` `anytls` `http(s)` `socks5` |
+
+选路要点：`snell` 优先 Shoes，`ssh` 优先 sing-box，`naive` 与 `juicity` 专属 VP-Core（mihomo 不支持、sing-box 1.12 起移除）；`xhttp/splithttp` 传输层仅 VP-Core 支持，命中时自动改由 VP-Core 运行。解析到但当前装不到内核的协议会在界面标注，不会静默丢弃。
+
+## 文档
+
+- [架构与内核选路](docs/architecture.md) — 模块划分、协议 × 内核矩阵、内核偏好与回退规则（当前现状的唯一事实源）
+- [OpenWrt 部署指南](docs/openwrt.md) · [macOS TUN 指南](docs/macos-tun.md)
+- [发布说明](RELEASE_NOTES.md) — 每个版本的功能与修复
+- 历史设计文档（仅作决策记录，不再反映现状）：[design.md](design.md) · [requirements.md](requirements.md) · [tasks.md](tasks.md)
 
 ## 运行与打包
 

@@ -343,6 +343,8 @@ impl KernelKind {
                     | "hy2"
                     | "tuic"
                     | "anytls"
+                    | "snell"
+                    | "mieru"
                     | "wireguard"
                     | "wg"
                     | "masque"
@@ -361,6 +363,7 @@ impl KernelKind {
                     | "hy2"
                     | "tuic"
                     | "anytls"
+                    | "ssh"
                     | "wireguard"
                     | "wg"
                     | "http"
@@ -387,6 +390,7 @@ impl KernelKind {
                     | "trojan"
                     | "snell"
                     | "anytls"
+                    | "naive"
                     | "naiveproxy"
                     | "wireguard"
                     | "wg"
@@ -422,6 +426,7 @@ impl KernelKind {
                     | "hysteria2"
                     | "hy2"
                     | "tuic"
+                    | "juicity"
                     | "anytls"
                     | "mieru"
                     | "naive"
@@ -442,7 +447,12 @@ impl KernelKind {
 
 pub fn preferred_proxy_kernel(protocol: &str) -> Option<KernelKind> {
     match protocol.to_ascii_lowercase().as_str() {
-        "snell" | "naiveproxy" => Some(KernelKind::Shoes),
+        "snell" => Some(KernelKind::Shoes),
+        // naive 走 VP-Core 原生出站（Shoes 编译器暂未实现 naive 协议层）
+        "naive" | "naiveproxy" => Some(KernelKind::VpCore),
+        // juicity 仅有 VP-Core 原生实现（mihomo 不支持；sing-box 1.12 起已移除 juicity 出站）
+        "juicity" => Some(KernelKind::VpCore),
+        "ssh" => Some(KernelKind::SingBox),
         "hysteria2" | "hy2" | "tuic" | "anytls" | "wireguard" | "wg" => Some(KernelKind::SingBox),
         protocol if KernelKind::Mihomo.supports_proxy_protocol(protocol) => {
             Some(KernelKind::Mihomo)
@@ -487,6 +497,21 @@ pub fn select_proxy_kernel(protocol: &str) -> Result<KernelKind> {
 }
 
 /// 检测特定节点或运行模式是否与 Meow 内核存在已知不兼容/致命缺陷（如 SplitHTTP、ECH、Windows TUN 网卡环路）
+/// 节点传输层是否为 xhttp/splithttp（config network 或 raw 查询参数，与 Meow 排除逻辑同源）
+fn node_uses_xhttp_transport(node: &Node) -> bool {
+    if let Some(net) = node.config.get("network").and_then(|v| v.as_str()) {
+        let n = net.to_ascii_lowercase();
+        if n.contains("xhttp") || n.contains("splithttp") {
+            return true;
+        }
+    }
+    let raw_low = node.raw.to_ascii_lowercase();
+    raw_low.contains("type=xhttp")
+        || raw_low.contains("type=splithttp")
+        || raw_low.contains("network=xhttp")
+        || raw_low.contains("network=splithttp")
+}
+
 pub fn is_node_incompatible_with_meow(node: &Node, has_tun: bool) -> Option<&'static str> {
     if cfg!(windows) && has_tun {
         return Some("Windows TUN 模式（Meow 存在虚拟网卡环路缺陷）");
@@ -522,6 +547,8 @@ pub fn is_node_incompatible_with_meow(node: &Node, has_tun: bool) -> Option<&'st
 
 /// 检测特定节点是否与 VP-Core 内核不兼容（内核遇到不支持的传输层会拒绝启动，
 /// 必须在选内核阶段就回退，不能等 vpcore 进程退出码 1）。
+///
+/// xhttp/splithttp、httpupgrade、h2 传输层已由 VP-Core 1.7.4 原生支持，不再阻断。
 pub fn is_node_incompatible_with_vpcore(node: &Node) -> Option<&'static str> {
     let mut nets: Vec<String> = Vec::new();
     if let Some(net) = node.config.get("network").and_then(|v| v.as_str()) {
@@ -542,9 +569,8 @@ pub fn is_node_incompatible_with_vpcore(node: &Node) -> Option<&'static str> {
     }
     for net in &nets {
         match net.as_str() {
-            "xhttp" | "splithttp" => return Some("XHTTP/SplitHTTP 传输层（VP-Core 暂不支持）"),
-            "httpupgrade" => return Some("HTTPUpgrade 传输层（VP-Core 暂不支持）"),
-            "h2" => return Some("H2 传输层（VP-Core 暂不支持）"),
+            // mkcp 为 Xray 专有 UDP 拥塞传输，VP-Core 暂无对应实现
+            "mkcp" | "kcp" => return Some("mKCP 传输层（VP-Core 暂不支持）"),
             _ => {}
         }
     }
@@ -625,7 +651,7 @@ pub fn select_proxy_kernel_preference(
     })
 }
 
-pub fn select_proxy_kernel_preference_for_node_with(
+fn select_proxy_kernel_preference_for_node_base(
     node: &Node,
     preference: KernelPreference,
     allow_xray: bool,
@@ -773,6 +799,35 @@ pub fn select_proxy_kernel_preference_for_node_with(
         }
     }
     Ok((kind, None))
+}
+
+/// 节点级内核选择：在协议级选择结果之上叠加传输层修正。
+/// XHTTP/SplitHTTP 仅 VP-Core 原生支持（mihomo / sing-box / Meow 均无此传输层），
+/// 选中的内核跑不起来时自动升级到 VP-Core（可用性不足则维持原选择尽力运行）。
+pub fn select_proxy_kernel_preference_for_node_with(
+    node: &Node,
+    preference: KernelPreference,
+    allow_xray: bool,
+    has_tun: bool,
+    available: impl Fn(KernelKind) -> bool,
+) -> Result<(KernelKind, Option<String>)> {
+    let (kind, notice) = select_proxy_kernel_preference_for_node_base(
+        node, preference, allow_xray, has_tun, &available,
+    )?;
+    if kind != KernelKind::VpCore && node_uses_xhttp_transport(node) {
+        if KernelKind::VpCore.supports_proxy_protocol(&node.protocol)
+            && is_node_incompatible_with_vpcore(node).is_none()
+            && available(KernelKind::VpCore)
+        {
+            const UPGRADE: &str = "XHTTP/SplitHTTP 传输层仅 VP-Core 支持，已自动改由 VP-Core 运行";
+            let merged = match notice {
+                Some(n) => format!("{n}；{UPGRADE}"),
+                None => UPGRADE.to_string(),
+            };
+            return Ok((KernelKind::VpCore, Some(merged)));
+        }
+    }
+    Ok((kind, notice))
 }
 
 pub fn select_proxy_kernel_preference_for_node(
@@ -1085,7 +1140,10 @@ pub fn clean_kernel_version(raw: &str) -> &str {
 
     // 如果未识别出标准数字版本（如包含短 commit hash 或特殊名称），安全截取最多 16 个字符
     if trimmed.chars().count() > 16 {
-        let (idx, _) = trimmed.char_indices().nth(16).unwrap_or((trimmed.len(), ' '));
+        let (idx, _) = trimmed
+            .char_indices()
+            .nth(16)
+            .unwrap_or((trimmed.len(), ' '));
         &trimmed[..idx]
     } else {
         trimmed
@@ -1461,10 +1519,19 @@ Use tags: with_gvisor
         for protocol in ["hysteria2", "hy2", "tuic", "anytls", "wireguard", "wg"] {
             assert_eq!(preferred_proxy_kernel(protocol), Some(KernelKind::SingBox));
         }
-        for protocol in ["snell", "naiveproxy"] {
-            assert_eq!(preferred_proxy_kernel(protocol), Some(KernelKind::Shoes));
+        assert_eq!(preferred_proxy_kernel("snell"), Some(KernelKind::Shoes));
+        // naive 走 VP-Core 原生出站；ssh 走 Sing-box；mieru 由 mihomo 原生支持
+        for protocol in ["naive", "naiveproxy"] {
+            assert_eq!(preferred_proxy_kernel(protocol), Some(KernelKind::VpCore));
         }
-        assert_eq!(preferred_proxy_kernel("mieru"), None);
+        assert_eq!(preferred_proxy_kernel("ssh"), Some(KernelKind::SingBox));
+        assert_eq!(preferred_proxy_kernel("mieru"), Some(KernelKind::Mihomo));
+        // juicity 仅 VP-Core 支持（mihomo 不支持；sing-box 1.12 移除）
+        assert_eq!(preferred_proxy_kernel("juicity"), Some(KernelKind::VpCore));
+        // juicity 不进入其它内核白名单
+        assert!(!KernelKind::Mihomo.supports_proxy_protocol("juicity"));
+        assert!(!KernelKind::SingBox.supports_proxy_protocol("juicity"));
+        assert!(KernelKind::VpCore.supports_proxy_protocol("juicity"));
     }
 
     #[test]
@@ -1481,9 +1548,14 @@ Use tags: with_gvisor
             select_proxy_kernel_with("hysteria2", mihomo_only).unwrap(),
             KernelKind::Mihomo
         );
-        // mieru 没有首选内核，但 VP-Core 支持时应选中 VP-Core
+        // mieru 首选 mihomo（原生支持）；仅 VP-Core 可用时退选 VP-Core
         assert_eq!(
-            select_proxy_kernel_with("mieru", |_| true).unwrap(),
+            select_proxy_kernel_with("mieru", |kind| kind == KernelKind::VpCore).unwrap(),
+            KernelKind::VpCore
+        );
+        // naive 首选 VP-Core（原生 naive 出站）
+        assert_eq!(
+            select_proxy_kernel_with("naive", |_| true).unwrap(),
             KernelKind::VpCore
         );
     }
@@ -1591,6 +1663,94 @@ Use tags: with_gvisor
             KernelKind::VpCore.asset_name_for(KernelPlatform::MacOS, "v1.0.0"),
             "vpcore-v1.0.0-aarch64-apple-darwin.tar.gz"
         );
+    }
+
+    #[test]
+    fn xhttp_transport_routes_to_vpcore() {
+        let mk_node = |network: &str, raw_query: &str| Node {
+            id: "test-xhttp-routing".into(),
+            source_id: None,
+            protocol: "vless".into(),
+            name: "VLESS Node".into(),
+            server: "example.com".into(),
+            port: 443,
+            raw: format!("vless://uuid@example.com:443?{raw_query}#t"),
+            config: serde_json::json!({ "network": network }),
+            country: None,
+            latency_ms: None,
+            latency_ok: None,
+            download_kbps: None,
+            latency_kernel: None,
+            latency_test_kind: None,
+            latency_tested_at: None,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        };
+        let both = |k| k == KernelKind::Mihomo || k == KernelKind::VpCore;
+        let mihomo_only = |k| k == KernelKind::Mihomo;
+
+        // 1. Auto + vless+xhttp：mihomo 可用但跑不了 xhttp → 升级 VpCore
+        let node = mk_node("xhttp", "type=xhttp");
+        let (kind, notice) = select_proxy_kernel_preference_for_node_with(
+            &node,
+            KernelPreference::Auto,
+            false,
+            false,
+            both,
+        )
+        .unwrap();
+        assert_eq!(kind, KernelKind::VpCore);
+        assert!(notice.is_some_and(|n| n.contains("VP-Core")));
+
+        // 2. raw 参数 network=splithttp 同样识别（config 缺 network 字段时）
+        let node_raw = mk_node("tcp", "network=splithttp");
+        let (kind, _) = select_proxy_kernel_preference_for_node_with(
+            &node_raw,
+            KernelPreference::Auto,
+            false,
+            false,
+            both,
+        )
+        .unwrap();
+        assert_eq!(kind, KernelKind::VpCore);
+
+        // 3. VpCore 未安装 → 维持 mihomo 尽力运行（不比旧逻辑更差）
+        let (kind, _) = select_proxy_kernel_preference_for_node_with(
+            &node,
+            KernelPreference::Auto,
+            false,
+            false,
+            mihomo_only,
+        )
+        .unwrap();
+        assert_eq!(kind, KernelKind::Mihomo);
+
+        // 4. 普通 vless（ws）不受影响，仍走 mihomo
+        let normal = mk_node("ws", "type=ws");
+        let (kind, notice) = select_proxy_kernel_preference_for_node_with(
+            &normal,
+            KernelPreference::Auto,
+            false,
+            false,
+            both,
+        )
+        .unwrap();
+        assert_eq!(kind, KernelKind::Mihomo);
+        assert!(notice.is_none());
+
+        // 5. 点名 Meow + xhttp：Meow 不兼容回退后仍应升级到 VpCore
+        let meow_both =
+            |k| k == KernelKind::Meow || k == KernelKind::Mihomo || k == KernelKind::VpCore;
+        let (kind, notice) = select_proxy_kernel_preference_for_node_with(
+            &node,
+            KernelPreference::Meow,
+            true,
+            false,
+            meow_both,
+        )
+        .unwrap();
+        assert_eq!(kind, KernelKind::VpCore);
+        assert!(notice.is_some_and(|n| n.contains("VP-Core")));
     }
 
     #[test]

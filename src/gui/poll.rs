@@ -30,7 +30,8 @@ impl VpnApp {
                 }
             }
             // 刚跑起来就先测一轮服务连通性（把上次检测时间回拨到刚好"过期"）
-            self.last_service_check = std::time::Instant::now() - std::time::Duration::from_secs(61);
+            self.last_service_check =
+                std::time::Instant::now() - std::time::Duration::from_secs(61);
             // 启动代理立刻静默检测出口 IP 归属（机房/住宅标签马上有真实数据，不弹窗）
             self.refresh_egress_silently();
             // 应用未启动代理时在抽屉里记住的调度选择：
@@ -92,11 +93,13 @@ impl VpnApp {
                     let cpu_s = (cur.cpu_100ns.saturating_sub(prev.1)) as f32 / 10_000_000.0;
                     k_cpu = (cpu_s / dt * 100.0 / cores).clamp(0.0, 100.0);
                     let bytes = (cur.read_bytes.saturating_sub(prev.2)
-                        + cur.write_bytes.saturating_sub(prev.3)) as f32;
+                        + cur.write_bytes.saturating_sub(prev.3))
+                        as f32;
                     k_disk = (bytes / dt / (1024.0 * 1024.0)).max(0.0);
                 }
             }
-            self.kernel_perf_prev = k_sample.map(|s| (now, s.cpu_100ns, s.read_bytes, s.write_bytes));
+            self.kernel_perf_prev =
+                k_sample.map(|s| (now, s.cpu_100ns, s.read_bytes, s.write_bytes));
             self.kernel_perf_stats = crate::gui::perf::PerfSample {
                 cpu_percent: k_cpu,
                 mem_mb: k_mem,
@@ -115,14 +118,18 @@ impl VpnApp {
         // API actions also revoke GUI work. They have no GUI completion message,
         // so reconcile the request owner even when old preparation returns early.
         if let Some(request) = self.proxy_busy_request {
-            if !self.proxy_manager.request_is_current(request) && self.finish_proxy_request(request) {
+            if !self.proxy_manager.request_is_current(request) && self.finish_proxy_request(request)
+            {
                 self.pending_mode_apply = None;
                 self.status = "代理请求已被后续操作取消".into();
                 self.reload_proxy();
                 need_repaint = true;
             }
         }
-        if self.proxy_switch_request.is_some_and(|request| !self.proxy_manager.request_is_current(request)) {
+        if self
+            .proxy_switch_request
+            .is_some_and(|request| !self.proxy_manager.request_is_current(request))
+        {
             self.proxy_switch_request = None;
             self.switching_node_id = None;
             need_repaint = true;
@@ -170,8 +177,11 @@ impl VpnApp {
                                 match result {
                                     Ok((items, total)) => {
                                         if let Some(ref sel_id) = self.selected_proxy_node_id {
-                                            if let Some(matching) = items.iter().find(|n| &n.id == sel_id) {
-                                                self.selected_proxy_node_name = Some(matching.name.clone());
+                                            if let Some(matching) =
+                                                items.iter().find(|n| &n.id == sel_id)
+                                            {
+                                                self.selected_proxy_node_name =
+                                                    Some(matching.name.clone());
                                             }
                                         }
                                         self.nodes = items;
@@ -454,20 +464,17 @@ impl VpnApp {
                                 self.import_yaml_source_name = filename;
                             }
                         }
-                        BgMsg::ProfileExported(res) => {
-                            match res {
-                                Ok(msg) => {
-                                    self.profile_status = Some((msg, false));
-                                }
-                                Err(err) => {
-                                    self.profile_status = Some((format!("导出配置失败: {err}"), true));
-                                }
+                        BgMsg::ProfileExported(res) => match res {
+                            Ok(msg) => {
+                                self.profile_status = Some((msg, false));
                             }
-                        }
-                        BgMsg::ProfileImported(res) => {
-                            match res {
-                                Ok(summary) => {
-                                    self.profile_status = Some((
+                            Err(err) => {
+                                self.profile_status = Some((format!("导出配置失败: {err}"), true));
+                            }
+                        },
+                        BgMsg::ProfileImported(res) => match res {
+                            Ok(summary) => {
+                                self.profile_status = Some((
                                         format!(
                                             "配置恢复成功：新增 {} 个源，更新 {} 个源，导入 {} 个自建节点",
                                             summary.sources_added,
@@ -476,25 +483,24 @@ impl VpnApp {
                                         ),
                                         false,
                                     ));
-                                    self.reload_sources();
-                                    self.reload_nodes();
-                                    self.reload_settings();
-                                    let db = self.db.clone();
-                                    let tx = self.tx.clone();
-                                    self.rt.spawn(async move {
-                                        if let Ok(cfg) = db.get_proxy_config().await {
-                                            let _ = tx.send(BgMsg::ProxyConfig {
-                                                baseline: None,
-                                                result: Ok(cfg),
-                                            });
-                                        }
-                                    });
-                                }
-                                Err(err) => {
-                                    self.profile_status = Some((format!("导入配置失败: {err}"), true));
-                                }
+                                self.reload_sources();
+                                self.reload_nodes();
+                                self.reload_settings();
+                                let db = self.db.clone();
+                                let tx = self.tx.clone();
+                                self.rt.spawn(async move {
+                                    if let Ok(cfg) = db.get_proxy_config().await {
+                                        let _ = tx.send(BgMsg::ProxyConfig {
+                                            baseline: None,
+                                            result: Ok(cfg),
+                                        });
+                                    }
+                                });
                             }
-                        }
+                            Err(err) => {
+                                self.profile_status = Some((format!("导入配置失败: {err}"), true));
+                            }
+                        },
                         BgMsg::FetchHistory(rows) => {
                             let mut buckets: std::collections::HashMap<
                                 String,
@@ -574,11 +580,8 @@ impl VpnApp {
                                         combined.extend(fetch.extracted_rules.clone());
                                         self.proxy_config.rules =
                                             crate::proxy::optimize_traffic_rules(&combined);
-                                        auto_added_rules = self
-                                            .proxy_config
-                                            .rules
-                                            .len()
-                                            .saturating_sub(before);
+                                        auto_added_rules =
+                                            self.proxy_config.rules.len().saturating_sub(before);
                                         if auto_added_rules > 0 {
                                             self.save_proxy_config();
                                             tracing::info!(
@@ -631,10 +634,7 @@ impl VpnApp {
                                             result.source_name, msg
                                         )
                                     } else {
-                                        format!(
-                                            "订阅“{}”拉取失败：{}",
-                                            result.source_name, msg
-                                        )
+                                        format!("订阅“{}”拉取失败：{}", result.source_name, msg)
                                     }
                                 }
                                 Err(error) => format!("单源拉取失败: {error}"),
@@ -698,14 +698,16 @@ impl VpnApp {
                                 if let Some(ms) = res.latency_ms {
                                     self.speedtest_last_ping_ms = Some(ms);
                                     let jit = ((ms.abs() % 23) as f32) / 8.0 + 1.2;
-                                    self.speedtest_last_jitter_ms = Some((jit * 10.0).round() / 10.0);
+                                    self.speedtest_last_jitter_ms =
+                                        Some((jit * 10.0).round() / 10.0);
                                 }
                                 if let Some(kbps) = res.download_kbps {
                                     let mbps = (kbps * 8.0 / 1000.0) as f32;
                                     self.speedtest_last_dl_mbps = Some(mbps);
                                     if self.speedtest_last_ul_mbps.is_none() {
                                         let ul = (mbps * 0.15).max(4.5);
-                                        self.speedtest_last_ul_mbps = Some((ul * 10.0).round() / 10.0);
+                                        self.speedtest_last_ul_mbps =
+                                            Some((ul * 10.0).round() / 10.0);
                                     }
                                 }
                             }
@@ -750,10 +752,14 @@ impl VpnApp {
                                     self.rt.spawn(async move {
                                         let _ = db.update_node_country(&tid, &country).await;
                                     });
-                                    if let Some(node) = self.nodes.iter_mut().find(|n| n.id == target_id) {
+                                    if let Some(node) =
+                                        self.nodes.iter_mut().find(|n| n.id == target_id)
+                                    {
                                         node.country = Some(risk.country.clone());
                                     }
-                                    if let Some(node) = self.proxy_nodes.iter_mut().find(|n| n.id == target_id) {
+                                    if let Some(node) =
+                                        self.proxy_nodes.iter_mut().find(|n| n.id == target_id)
+                                    {
                                         node.country = Some(risk.country.clone());
                                     }
                                 }
@@ -918,7 +924,11 @@ impl VpnApp {
                                     let count = list.len();
                                     self.status = format!("已获取 {count} 个版本");
                                     // 若当前选中的版本不存在于新列表中，重置选择
-                                    if self.selected_release_tag.as_ref().is_none_or(|tag| !list.iter().any(|r| &r.tag == tag)) {
+                                    if self
+                                        .selected_release_tag
+                                        .as_ref()
+                                        .is_none_or(|tag| !list.iter().any(|r| &r.tag == tag))
+                                    {
                                         if let Some(curr) = list.iter().find(|r| r.is_current) {
                                             self.selected_release_tag = Some(curr.tag.clone());
                                         } else if let Some(first) = list.first() {
@@ -946,7 +956,11 @@ impl VpnApp {
                                 }
                             }
                         }
-                        BgMsg::ProxyModeHotToggled { request, result, message } => {
+                        BgMsg::ProxyModeHotToggled {
+                            request,
+                            result,
+                            message,
+                        } => {
                             if !self.proxy_manager.request_is_current(request) {
                                 continue;
                             }
@@ -956,7 +970,8 @@ impl VpnApp {
                                 self.note_proxy_state_transition(ProxyState::Running);
                                 self.proxy_status.state = ProxyState::Running;
                                 self.proxy_status.mode = self.proxy_config.mode;
-                                self.proxy_status.system_proxy_enabled = self.proxy_config.mode.has_system();
+                                self.proxy_status.system_proxy_enabled =
+                                    self.proxy_config.mode.has_system();
                                 self.proxy_status.last_error = None;
                                 self.status = message;
                                 // TUN 状态变了，出口归属立刻静默复核一遍
@@ -971,13 +986,18 @@ impl VpnApp {
                                 self.reload_proxy();
                             }
                         }
-                        BgMsg::SystemProxyHotToggled { request, ok, message } => {
+                        BgMsg::SystemProxyHotToggled {
+                            request,
+                            ok,
+                            message,
+                        } => {
                             if !self.proxy_manager.request_is_current(request) {
                                 continue;
                             }
                             self.finish_proxy_request(request);
                             if ok {
-                                self.proxy_status.system_proxy_enabled = self.proxy_config.mode.has_system();
+                                self.proxy_status.system_proxy_enabled =
+                                    self.proxy_config.mode.has_system();
                                 self.proxy_status.mode = self.proxy_config.mode;
                                 self.status = message;
                                 self.refresh_egress_silently();
@@ -989,7 +1009,12 @@ impl VpnApp {
                                 self.reload_proxy();
                             }
                         }
-                        BgMsg::ProxyRoutingModeHotSwitched { request, ok, mode, message } => {
+                        BgMsg::ProxyRoutingModeHotSwitched {
+                            request,
+                            ok,
+                            mode,
+                            message,
+                        } => {
                             if !self.proxy_manager.request_is_current(request) {
                                 continue;
                             }
@@ -1005,7 +1030,8 @@ impl VpnApp {
                         }
                         BgMsg::SingleServiceCheck(check) => {
                             let checks = self.service_checks.get_or_insert_with(Vec::new);
-                            if let Some(existing) = checks.iter_mut().find(|c| c.name == check.name) {
+                            if let Some(existing) = checks.iter_mut().find(|c| c.name == check.name)
+                            {
                                 *existing = check;
                             } else {
                                 checks.push(check);
@@ -1016,7 +1042,10 @@ impl VpnApp {
                             self.service_checks_running = false;
                         }
                         BgMsg::ProxyConfig { baseline, result } => {
-                            if baseline.as_ref().is_some_and(|expected| expected != &self.proxy_config) {
+                            if baseline
+                                .as_ref()
+                                .is_some_and(|expected| expected != &self.proxy_config)
+                            {
                                 continue; // A newer UI edit owns the draft now.
                             }
                             match result {
@@ -1030,10 +1059,12 @@ impl VpnApp {
                             }
                             match result {
                                 Ok(saved) => {
-                                    self.status = saved.status_message(matches!(
-                                        self.proxy_status.state,
-                                        ProxyState::Running | ProxyState::Degraded
-                                    )).into();
+                                    self.status = saved
+                                        .status_message(matches!(
+                                            self.proxy_status.state,
+                                            ProxyState::Running | ProxyState::Degraded
+                                        ))
+                                        .into();
                                     self.set_proxy_config(saved.config);
                                     // 模式开关（系统代理/TUN）在保存期间登记的待应用变更：
                                     // busy 已清、配置已落库，此时才能真正走热切换/重启。
@@ -1053,10 +1084,12 @@ impl VpnApp {
                         }
                         BgMsg::ProxyConfigQuietSaved(result) => {
                             self.status = match result {
-                                Ok(saved) => saved.status_message(matches!(
-                                    self.proxy_status.state,
-                                    ProxyState::Running | ProxyState::Degraded
-                                )).into(),
+                                Ok(saved) => saved
+                                    .status_message(matches!(
+                                        self.proxy_status.state,
+                                        ProxyState::Running | ProxyState::Degraded
+                                    ))
+                                    .into(),
                                 Err(error) => format!("保存代理配置失败: {error:#}"),
                             };
                         }
@@ -1090,7 +1123,8 @@ impl VpnApp {
                                         // 立刻静默查出口归属：状态卡"机房/住宅"马上有真实数据
                                         self.refresh_egress_silently();
                                         self.proxy_status.local_proxy_ready = true;
-                                        self.proxy_status.system_proxy_enabled = self.proxy_config.mode.has_system();
+                                        self.proxy_status.system_proxy_enabled =
+                                            self.proxy_config.mode.has_system();
                                     }
                                 }
                                 Err(error) => {
@@ -1103,8 +1137,12 @@ impl VpnApp {
                                     // 正是因为这里不留档导致根因无从查起）。同步落一份到
                                     // startup.log，与状态栏所见严格一致。
                                     crate::startup_log(&format!("[代理状态] 启停失败: {error:#}"));
-                                    self.failed_proxy_start_notice = (operation.kind == ProxyOperationKind::Start)
-                                        .then(|| FailedProxyStartNotice { operation, footer: self.status.clone() });
+                                    self.failed_proxy_start_notice = (operation.kind
+                                        == ProxyOperationKind::Start)
+                                        .then(|| FailedProxyStartNotice {
+                                            operation,
+                                            footer: self.status.clone(),
+                                        });
                                     self.note_proxy_state_transition(ProxyState::Failed);
                                     self.proxy_status.state = ProxyState::Failed;
                                 }
@@ -1125,7 +1163,9 @@ impl VpnApp {
                             node_id,
                             result,
                         } => {
-                            if seq == self.proxy_switch_seq && self.proxy_manager.request_is_current(request) {
+                            if seq == self.proxy_switch_seq
+                                && self.proxy_manager.request_is_current(request)
+                            {
                                 self.proxy_switch_request = None;
                                 self.switching_node_id = None;
                                 match result {
@@ -1212,6 +1252,10 @@ impl VpnApp {
                                         ((download_total.saturating_sub(prev_down)) as f64 / dt)
                                             as u64;
                                 }
+                                // 流量统计持久化：本次采样间隔的增量进小时桶（60s 批量落库，保留 30 天）
+                                let traffic_up_delta = upload_total.saturating_sub(prev_up);
+                                let traffic_down_delta = download_total.saturating_sub(prev_down);
+                                self.push_traffic_delta(traffic_up_delta, traffic_down_delta);
                             }
                             self.traffic_prev_sample = Some((now, upload_total, download_total));
                             self.traffic_up_total = upload_total;
@@ -1226,12 +1270,12 @@ impl VpnApp {
 
                                     // 记录新增 DNS 解析 / 域名请求轨迹
                                     if !conn.host.is_empty() || conn.destination.contains(":53") {
-                                        let now_str = chrono::Local::now().format("%H:%M:%S").to_string();
-                                        let is_duplicate = self
-                                            .dns_records
-                                            .iter()
-                                            .take(15)
-                                            .any(|r| r.host == conn.host && r.ip == conn.destination);
+                                        let now_str =
+                                            chrono::Local::now().format("%H:%M:%S").to_string();
+                                        let is_duplicate =
+                                            self.dns_records.iter().take(15).any(|r| {
+                                                r.host == conn.host && r.ip == conn.destination
+                                            });
                                         if !is_duplicate {
                                             if self.dns_records.len() >= 300 {
                                                 self.dns_records.pop_back();
@@ -1273,8 +1317,11 @@ impl VpnApp {
                             self.active_connections = connections;
 
                             // 节点流量统计：增量累加与瞬时速率计算
-                            let active_conn_ids: std::collections::HashSet<String> =
-                                self.active_connections.iter().map(|c| c.id.clone()).collect();
+                            let active_conn_ids: std::collections::HashSet<String> = self
+                                .active_connections
+                                .iter()
+                                .map(|c| c.id.clone())
+                                .collect();
 
                             for rec in self.node_traffic_records.values_mut() {
                                 rec.active_conns = 0;
@@ -1299,42 +1346,58 @@ impl VpnApp {
                             };
 
                             for conn in &self.active_connections {
-                                let node_name = conn.chains.iter().rev()
+                                let node_name = conn
+                                    .chains
+                                    .iter()
+                                    .rev()
                                     .find(|s| {
                                         let s_low = s.to_lowercase();
-                                        s_low != "local-mixed" && s_low != "direct" && s_low != "reject"
+                                        s_low != "local-mixed"
+                                            && s_low != "direct"
+                                            && s_low != "reject"
                                     })
                                     .cloned()
                                     .unwrap_or_else(|| {
-                                        if conn.chains.iter().any(|s| s.eq_ignore_ascii_case("direct"))
+                                        if conn
+                                            .chains
+                                            .iter()
+                                            .any(|s| s.eq_ignore_ascii_case("direct"))
                                             || conn.target.eq_ignore_ascii_case("direct")
                                         {
                                             "DIRECT (直连)".to_string()
-                                        } else if let Some(ref sel) = self.selected_proxy_node_name {
+                                        } else if let Some(ref sel) = self.selected_proxy_node_name
+                                        {
                                             sel.clone()
                                         } else {
                                             conn.target.clone()
                                         }
                                     });
 
-                                let (delta_up, delta_down) = match self.conn_prev_traffic.get(&conn.id) {
-                                    Some((_prev_node, prev_up, prev_down)) => {
-                                        (conn.upload.saturating_sub(*prev_up), conn.download.saturating_sub(*prev_down))
-                                    }
-                                    None => (conn.upload, conn.download),
-                                };
+                                let (delta_up, delta_down) =
+                                    match self.conn_prev_traffic.get(&conn.id) {
+                                        Some((_prev_node, prev_up, prev_down)) => (
+                                            conn.upload.saturating_sub(*prev_up),
+                                            conn.download.saturating_sub(*prev_down),
+                                        ),
+                                        None => (conn.upload, conn.download),
+                                    };
 
                                 self.conn_prev_traffic.insert(
                                     conn.id.clone(),
                                     (node_name.clone(), conn.upload, conn.download),
                                 );
 
-                                let (proto, srv, country) = self.nodes.iter()
+                                let (proto, srv, country) = self
+                                    .nodes
+                                    .iter()
                                     .find(|n| n.name == node_name)
-                                    .map(|n| (n.protocol.clone(), n.server.clone(), n.country.clone()))
+                                    .map(|n| {
+                                        (n.protocol.clone(), n.server.clone(), n.country.clone())
+                                    })
                                     .unwrap_or_else(|| ("-".into(), "-".into(), None));
 
-                                let rec = self.node_traffic_records
+                                let rec = self
+                                    .node_traffic_records
                                     .entry(node_name.clone())
                                     .or_insert_with(|| crate::gui::types::NodeTrafficRecord {
                                         node_name: node_name.clone(),
@@ -1368,14 +1431,18 @@ impl VpnApp {
                                         .to_string()
                                 };
                                 if !domain_key.is_empty() {
-                                    let drec = self.domain_traffic_records
+                                    let drec = self
+                                        .domain_traffic_records
                                         .entry(domain_key.clone())
-                                        .or_insert_with(|| crate::gui::types::DomainTrafficRecord {
-                                            domain: domain_key,
-                                            ..Default::default()
+                                        .or_insert_with(|| {
+                                            crate::gui::types::DomainTrafficRecord {
+                                                domain: domain_key,
+                                                ..Default::default()
+                                            }
                                         });
                                     drec.upload_bytes = drec.upload_bytes.saturating_add(delta_up);
-                                    drec.download_bytes = drec.download_bytes.saturating_add(delta_down);
+                                    drec.download_bytes =
+                                        drec.download_bytes.saturating_add(delta_down);
                                     drec.active_conns += 1;
                                     drec.upload_rate += (delta_up as f64 / dt_val) as u64;
                                     drec.download_rate += (delta_down as f64 / dt_val) as u64;
@@ -1387,21 +1454,24 @@ impl VpnApp {
                                 } else {
                                     conn.process.clone()
                                 };
-                                let prec = self.process_traffic_records
+                                let prec = self
+                                    .process_traffic_records
                                     .entry(proc_key.clone())
                                     .or_insert_with(|| crate::gui::types::ProcessTrafficRecord {
                                         process: proc_key,
                                         ..Default::default()
                                     });
                                 prec.upload_bytes = prec.upload_bytes.saturating_add(delta_up);
-                                prec.download_bytes = prec.download_bytes.saturating_add(delta_down);
+                                prec.download_bytes =
+                                    prec.download_bytes.saturating_add(delta_down);
                                 prec.active_conns += 1;
                                 prec.upload_rate += (delta_up as f64 / dt_val) as u64;
                                 prec.download_rate += (delta_down as f64 / dt_val) as u64;
                             }
 
                             // 清理已经断开关闭的连接记录
-                            self.conn_prev_traffic.retain(|id, _| active_conn_ids.contains(id));
+                            self.conn_prev_traffic
+                                .retain(|id, _| active_conn_ids.contains(id));
 
                             let down_kb = self.traffic_down_rate as f32 / 1024.0;
                             let up_kb = self.traffic_up_rate as f32 / 1024.0;
@@ -1433,6 +1503,9 @@ impl VpnApp {
                                     self.apply_router_decision(&active, &name, decision);
                                 }
                             }
+                        }
+                        BgMsg::TrafficHistory(rows) => {
+                            self.traffic_days_history = rows;
                         }
                         BgMsg::TrafficPollDone => {
                             self.traffic_polling = false;
@@ -1508,7 +1581,8 @@ impl VpnApp {
                                     self.network_doctor_message = Some(msg);
                                 }
                                 Err(err) => {
-                                    self.network_doctor_message = Some(format!("修复遇到错误: {err}"));
+                                    self.network_doctor_message =
+                                        Some(format!("修复遇到错误: {err}"));
                                 }
                             }
                             // 修复后立即自动重新扫描
@@ -1567,7 +1641,6 @@ impl VpnApp {
             ctx.request_repaint_after(std::time::Duration::from_millis(200));
         }
     }
-
 }
 
 #[cfg(test)]
@@ -1593,11 +1666,18 @@ mod system_proxy_callback_tests {
         let runtime = app.rt.block_on(manager.runtime.lock());
         assert!(runtime.child.is_none());
         let message = "切换系统代理失败: mock restore failed; original snapshot retained";
-        app.tx.send(BgMsg::SystemProxyHotToggled {
-            request, ok: false, message: message.into(),
-        }).unwrap();
+        app.tx
+            .send(BgMsg::SystemProxyHotToggled {
+                request,
+                ok: false,
+                message: message.into(),
+            })
+            .unwrap();
         app.poll_bg(&egui::Context::default());
-        assert_eq!(app.status, message, "fallback Start would replace this error with a node-selection prompt");
+        assert_eq!(
+            app.status, message,
+            "fallback Start would replace this error with a node-selection prompt"
+        );
         assert_eq!(app.proxy_operation_id, 77);
         assert_eq!(manager.current_request(), request);
         assert_eq!(app.proxy_status.state, ProxyState::Stopped);

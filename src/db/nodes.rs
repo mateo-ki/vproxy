@@ -232,7 +232,8 @@ impl Database {
         )
         .fetch_all(&pool)
         .await?;
-        let summaries: Vec<NodeSummary> = rows.into_iter().map(super::row_to_node_summary).collect();
+        let summaries: Vec<NodeSummary> =
+            rows.into_iter().map(super::row_to_node_summary).collect();
         if !summaries.is_empty() {
             return Ok(summaries);
         }
@@ -250,7 +251,10 @@ impl Database {
         )
         .fetch_all(&pool)
         .await?;
-        Ok(fallback_rows.into_iter().map(super::row_to_node_summary).collect())
+        Ok(fallback_rows
+            .into_iter()
+            .map(super::row_to_node_summary)
+            .collect())
     }
 
     /// 单节点库的 SQL 分页查询：过滤/排序/分页全部在库内完成，且只加载元数据。
@@ -477,14 +481,7 @@ impl Database {
         let keyword = keyword.map(str::trim).filter(|s| !s.is_empty());
         let latency = latency.map(|value| value.to_ascii_lowercase());
         nodes.retain(|node| {
-            Self::node_matches_filter(
-                node,
-                None,
-                protocol,
-                keyword,
-                latency.as_deref(),
-                country,
-            )
+            Self::node_matches_filter(node, None, protocol, keyword, latency.as_deref(), country)
         });
         nodes
     }
@@ -599,12 +596,13 @@ impl Database {
 
     pub async fn get_node(&self, id: &str) -> Result<Option<Node>> {
         // 先查主库 node_index 索引表看它归属哪个 source_id，毫秒级直接命中分库，免去并发扫 40+ 个分片库
-        let known_scope: Option<Option<String>> = sqlx::query_scalar("SELECT source_id FROM node_index WHERE id = ?")
-            .bind(id)
-            .fetch_optional(&self.pool)
-            .await
-            .ok()
-            .flatten();
+        let known_scope: Option<Option<String>> =
+            sqlx::query_scalar("SELECT source_id FROM node_index WHERE id = ?")
+                .bind(id)
+                .fetch_optional(&self.pool)
+                .await
+                .ok()
+                .flatten();
 
         let pool = if let Some(scope) = known_scope {
             self.open_node_pool(scope.as_deref()).await.ok()
@@ -912,11 +910,7 @@ impl Database {
             .map(|node| {
                 (
                     node.id.clone(),
-                    (
-                        node.protocol.clone(),
-                        node.server.clone(),
-                        node.port,
-                    ),
+                    (node.protocol.clone(), node.server.clone(), node.port),
                 )
             })
             .collect();
@@ -1291,9 +1285,10 @@ impl Database {
     pub async fn fix_misclassified_tr_nodes(&self) -> Result<usize> {
         let mut fixed = 0usize;
         for (_scope, pool) in self.active_node_pools(None).await? {
-            let rows = sqlx::query("SELECT id, name, server FROM nodes WHERE lower(country) = 'tr'")
-                .fetch_all(&pool)
-                .await?;
+            let rows =
+                sqlx::query("SELECT id, name, server FROM nodes WHERE lower(country) = 'tr'")
+                    .fetch_all(&pool)
+                    .await?;
             let mut fixes = Vec::new();
             for row in rows {
                 let id: String = row.get("id");
@@ -1620,14 +1615,18 @@ impl Database {
             stored += 1;
         }
         tx.commit().await?;
-        if let Ok(count) = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM nodes").fetch_one(&pool).await {
+        if let Ok(count) = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM nodes")
+            .fetch_one(&pool)
+            .await
+        {
             let now = chrono::Utc::now().to_rfc3339();
-            let _ = sqlx::query("UPDATE sources SET last_node_count = ?, updated_at = ? WHERE id = ?")
-                .bind(count)
-                .bind(&now)
-                .bind(UNGROUPED_SOURCE_ID)
-                .execute(&self.pool)
-                .await;
+            let _ =
+                sqlx::query("UPDATE sources SET last_node_count = ?, updated_at = ? WHERE id = ?")
+                    .bind(count)
+                    .bind(&now)
+                    .bind(UNGROUPED_SOURCE_ID)
+                    .execute(&self.pool)
+                    .await;
         }
         self.invalidate_node_index().await;
         Ok(stored)
@@ -1656,12 +1655,20 @@ mod tests {
             .map(|i| NodeSummary {
                 id: format!("node-{i}"),
                 source_id: Some(format!("source-{}", i % 10)),
-                protocol: if i % 2 == 0 { "ss".into() } else { "vless".into() },
+                protocol: if i % 2 == 0 {
+                    "ss".into()
+                } else {
+                    "vless".into()
+                },
                 name: format!("香港-HK-Node-{i:05}-HighSpeed"),
                 server: format!("{}.example.com", i),
                 port: 443,
                 country: Some(if i % 3 == 0 { "HK".into() } else { "US".into() }),
-                latency_ms: if i % 4 == 0 { None } else { Some((i % 500) as i64) },
+                latency_ms: if i % 4 == 0 {
+                    None
+                } else {
+                    Some((i % 500) as i64)
+                },
                 latency_ok: if i % 4 == 0 { None } else { Some(i % 5 != 0) },
                 download_kbps: None,
                 latency_kernel: None,
@@ -1680,7 +1687,11 @@ mod tests {
             Some("HK"),
         );
         let elapsed = start.elapsed();
-        println!("20,000 节点元数据过滤耗时: {:.2?}，命中: {} 条", elapsed, filtered.len());
+        println!(
+            "20,000 节点元数据过滤耗时: {:.2?}，命中: {} 条",
+            elapsed,
+            filtered.len()
+        );
         assert!(!filtered.is_empty());
         // 这条是**回归绊线**，不是性能记分牌：它要挡的是"有人把过滤写成 O(n²) 或
         // 每个节点回库一次"那种量级的退化，不是 8ms 变 12ms。
@@ -1736,25 +1747,37 @@ mod tests {
             .collect();
 
         let t_start = std::time::Instant::now();
-        db.replace_source_nodes(&source_id, &test_nodes).await.unwrap();
+        db.replace_source_nodes(&source_id, &test_nodes)
+            .await
+            .unwrap();
         let write_elapsed = t_start.elapsed();
         println!("1,000 条节点事务批量写入耗时: {:.2?}", write_elapsed);
 
         let t_start = std::time::Instant::now();
         let indexed = db.rebuild_node_index().await.unwrap();
         let index_elapsed = t_start.elapsed();
-        println!("1,000 条节点索引重建耗时: {:.2?}，索引条数: {}", index_elapsed, indexed);
+        println!(
+            "1,000 条节点索引重建耗时: {:.2?}，索引条数: {}",
+            index_elapsed, indexed
+        );
 
         let t_start = std::time::Instant::now();
         let top = db.top_verified_nodes(10, None).await.unwrap();
         let query_elapsed = t_start.elapsed();
-        println!("Top 10 最低延迟节点检索耗时: {:.2?}，检索到: {} 条", query_elapsed, top.len());
+        println!(
+            "Top 10 最低延迟节点检索耗时: {:.2?}，检索到: {} 条",
+            query_elapsed,
+            top.len()
+        );
         assert_eq!(top.len(), 10);
 
         let t_start = std::time::Instant::now();
         db.trim_cached_pools().await;
         let trim_elapsed = t_start.elapsed();
-        println!("trim_cached_pools (含 PRAGMA shrink_memory) 执行耗时: {:.2?}", trim_elapsed);
+        println!(
+            "trim_cached_pools (含 PRAGMA shrink_memory) 执行耗时: {:.2?}",
+            trim_elapsed
+        );
 
         // 测试 list_filtered_node_ids 精准过滤
         let filtered_ids = db
@@ -1811,7 +1834,11 @@ mod tests {
             .map(|i| Node {
                 id: format!("hk-{i}"),
                 source_id: Some(s1.clone()),
-                protocol: if i % 2 == 0 { "ss".into() } else { "vless".into() },
+                protocol: if i % 2 == 0 {
+                    "ss".into()
+                } else {
+                    "vless".into()
+                },
                 name: format!("香港-Node-{i:03}"),
                 server: format!("hk{i}.example.com"),
                 port: 443,
@@ -1865,7 +1892,10 @@ mod tests {
         let elapsed_cold = t0.elapsed();
         assert_eq!(page_cold.total, 1000);
         assert_eq!(page_cold.items.len(), 24);
-        assert!(db.get_cached_node_summaries().await.is_some(), "冷读后应已缓存全量节点摘要");
+        assert!(
+            db.get_cached_node_summaries().await.is_some(),
+            "冷读后应已缓存全量节点摘要"
+        );
 
         // 第二次读：热读（多维组合筛选 + 排序 + 分页），应达到亚毫秒/极速响应
         let t1 = std::time::Instant::now();
@@ -1883,7 +1913,10 @@ mod tests {
             .await
             .unwrap();
         let elapsed_warm = t1.elapsed();
-        println!("冷读耗时: {:.2?}，热读过滤耗时: {:.2?}", elapsed_cold, elapsed_warm);
+        println!(
+            "冷读耗时: {:.2?}，热读过滤耗时: {:.2?}",
+            elapsed_cold, elapsed_warm
+        );
         assert!(!page_warm.items.is_empty());
         assert!(
             elapsed_warm.as_millis() < 20,
@@ -1906,4 +1939,3 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
-

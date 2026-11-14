@@ -31,7 +31,10 @@ impl VpCoreCompiler {
         dsl.push_str("// ==========================================\n\n");
 
         // 1. Inbounds
-        let mixed_port = val.get("mixed-port").and_then(|v| v.as_u64()).unwrap_or(7890);
+        let mixed_port = val
+            .get("mixed-port")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(7890);
         dsl.push_str("// 入站监听\n");
         dsl.push_str("inbound mixed {\n");
         dsl.push_str(&format!("    listen: \"127.0.0.1:{mixed_port}\"\n"));
@@ -39,9 +42,18 @@ impl VpCoreCompiler {
 
         if let Some(tun) = val.get("tun").and_then(|v| v.as_object()) {
             if tun.get("enable").and_then(|v| v.as_bool()).unwrap_or(false) {
-                let addr = tun.get("address").and_then(|v| v.as_str()).unwrap_or("198.18.0.1");
-                let mask = tun.get("netmask").and_then(|v| v.as_str()).unwrap_or("255.255.0.0");
-                let auto_route = tun.get("auto-route").and_then(|v| v.as_bool()).unwrap_or(true);
+                let addr = tun
+                    .get("address")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("198.18.0.1");
+                let mask = tun
+                    .get("netmask")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("255.255.0.0");
+                let auto_route = tun
+                    .get("auto-route")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(true);
                 dsl.push_str("inbound tun {\n");
                 dsl.push_str(&format!("    address: \"{addr}\"\n"));
                 dsl.push_str(&format!("    netmask: \"{mask}\"\n"));
@@ -119,7 +131,10 @@ impl VpCoreCompiler {
                         .and_then(|v| v.as_str())
                         .unwrap_or("select")
                         .replace('-', "_");
-                    let fallback = go.get("fallback").and_then(|v| v.as_str()).unwrap_or("DIRECT");
+                    let fallback = go
+                        .get("fallback")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("DIRECT");
 
                     dsl.push_str(&format!("group \"{name}\" {ty} {{\n"));
                     if let Some(members) = go.get("proxies").and_then(|v| v.as_array()) {
@@ -225,6 +240,7 @@ impl BackendCompiler for VpCoreCompiler {
                                 | "hysteria2"
                                 | "hy2"
                                 | "tuic"
+                                | "juicity"
                                 | "wireguard"
                                 | "masque"
                                 | "ss"
@@ -256,6 +272,14 @@ impl BackendCompiler for VpCoreCompiler {
                             po.insert("skip-cert-verify".into(), s);
                         }
 
+                        let c1 = po.remove("congestion-control");
+                        let c2 = po.remove("congestion_control");
+                        let c3 = po.remove("congestion-controller");
+                        let c4 = po.remove("congestion_controller");
+                        if let Some(s) = c1.or(c2).or(c3).or(c4) {
+                            po.insert("congestion-controller".into(), s);
+                        }
+
                         let f1 = po.remove("client-fingerprint");
                         let f2 = po.remove("client_fingerprint");
                         let f3 = po.remove("fp");
@@ -268,8 +292,11 @@ impl BackendCompiler for VpCoreCompiler {
                         po.remove("ech-opts");
 
                         // 补齐 WebSocket 握手标准 User-Agent 标头，防止被 Cloudflare WAF 识别拦截 (400 Bad Request)
-                        if let Some(ws_opts) = po.get_mut("ws-opts").and_then(|v| v.as_object_mut()) {
-                            let headers = ws_opts.entry("headers").or_insert_with(|| serde_json::json!({}));
+                        if let Some(ws_opts) = po.get_mut("ws-opts").and_then(|v| v.as_object_mut())
+                        {
+                            let headers = ws_opts
+                                .entry("headers")
+                                .or_insert_with(|| serde_json::json!({}));
                             if let Some(h) = headers.as_object_mut() {
                                 if !h.keys().any(|k| k.eq_ignore_ascii_case("user-agent")) {
                                     h.insert(
@@ -409,15 +436,15 @@ impl BackendCompiler for VpCoreCompiler {
                         }
                     }
                 } else {
-                    let mut default_ns = vec![serde_json::json!("223.5.5.5"), serde_json::json!("119.29.29.29")];
+                    let mut default_ns = vec![
+                        serde_json::json!("223.5.5.5"),
+                        serde_json::json!("119.29.29.29"),
+                    ];
                     if plan.dns.ipv6 {
                         default_ns.push(serde_json::json!("2400:3200::1"));
                         default_ns.push(serde_json::json!("2402:4e00::"));
                     }
-                    dns.insert(
-                        "nameserver".into(),
-                        serde_json::Value::Array(default_ns),
-                    );
+                    dns.insert("nameserver".into(), serde_json::Value::Array(default_ns));
                 }
             }
 
@@ -539,6 +566,7 @@ fn vpcore_supports_proxy(p: &serde_json::Value) -> bool {
             | "hysteria2"
             | "hy2"
             | "tuic"
+            | "juicity"
             | "http"
             | "https"
             | "socks5"
@@ -564,7 +592,11 @@ fn vpcore_supports_proxy(p: &serde_json::Value) -> bool {
     if ty == "hysteria" || ty == "masque" || ty == "wireguard" || ty == "tailscale" {
         return matches!(net, "" | "tcp" | "udp");
     }
-    matches!(net, "" | "tcp" | "ws" | "grpc" | "http" | "udp")
+    // xhttp/splithttp、httpupgrade、h2 已由 VP-Core 1.7.4 原生支持
+    matches!(
+        net,
+        "" | "tcp" | "ws" | "grpc" | "http" | "h2" | "httpupgrade" | "xhttp" | "splithttp" | "udp"
+    )
 }
 
 #[cfg(test)]
@@ -717,9 +749,7 @@ mod tests {
         let inject_pos = yaml
             .find("GEOSITE,google,PROXY")
             .expect("注入规则存在性已在上一断言保证");
-        let cn_pos = yaml
-            .find("GEOIP,CN")
-            .expect("默认推荐规则应包含 GEOIP,CN");
+        let cn_pos = yaml.find("GEOIP,CN").expect("默认推荐规则应包含 GEOIP,CN");
         assert!(
             inject_pos < cn_pos,
             "注入规则必须插在第一条 GEOIP,CN 之前（inject={inject_pos}, cn={cn_pos}）"
@@ -767,6 +797,61 @@ rules:
     }
 
     #[test]
+    fn test_vpcore_compiler_accepts_juicity_primary_node() {
+        let node = test_node(
+            "juicity",
+            json!({
+                "uuid": "aaaaaaaa-bbbb-4ccc-8ddd-000000000055",
+                "password": "pw",
+                "sni": "example.com",
+                "congestion-control": "bbr",
+                "congestion_control": "bbr",
+                "insecure": true,
+                "allowInsecure": true,
+                "pinned-cert-chain": "ABCD",
+                "pinned_cert_chain": "ABCD"
+            }),
+        );
+        let plan =
+            crate::proxy::ir::lower_options_to_ir(&MihomoConfigOptions::default(), Some(&node));
+        let artifact = VpCoreCompiler
+            .compile(&plan)
+            .expect("juicity 主节点应可编译");
+        let yaml = match artifact {
+            CompiledArtifact::Yaml(y) => y,
+            _ => panic!("expected Yaml artifact"),
+        };
+        assert!(
+            yaml.contains("type: juicity"),
+            "juicity 节点应透传:\n{yaml}"
+        );
+        assert!(
+            !yaml.contains("allowInsecure"),
+            "insecure alias 必须归一:\n{yaml}"
+        );
+        assert!(
+            !yaml.contains("congestion_control"),
+            "congestion alias 必须归一:\n{yaml}"
+        );
+        assert!(
+            !yaml.contains("pinned_cert_chain"),
+            "pinned alias 必须归一:\n{yaml}"
+        );
+        assert!(
+            yaml.contains("skip-cert-verify: true"),
+            "insecure 应归一为 skip-cert-verify 并保留:\n{yaml}"
+        );
+        assert!(
+            yaml.contains("congestion-control"),
+            "congestion-control 应保留:\n{yaml}"
+        );
+        assert!(
+            yaml.contains("pinned-cert-chain"),
+            "pinned-cert-chain 应保留:\n{yaml}"
+        );
+    }
+
+    #[test]
     fn test_vpcore_compiler_drops_unsupported_nodes_and_prunes_groups() {
         let node = test_node(
             "vless",
@@ -774,20 +859,27 @@ rules:
         );
         let mut options = MihomoConfigOptions::default();
         options.url_test = true;
-        options.url_test_size = 4;
+        options.url_test_size = 5;
         options.url_test_nodes = vec![
             json!({
                 "name": "good-ws", "type": "vless", "server": "1.2.3.4", "port": 443,
                 "uuid": "aaaaaaaa-bbbb-4ccc-8ddd-000000000051", "network": "ws"
             }),
             json!({
-                "name": "bad-xhttp", "type": "vless", "server": "1.2.3.4", "port": 443,
-                "uuid": "aaaaaaaa-bbbb-4ccc-8ddd-000000000052", "network": "xhttp"
+                "name": "good-xhttp", "type": "vless", "server": "1.2.3.4", "port": 443,
+                "uuid": "aaaaaaaa-bbbb-4ccc-8ddd-000000000052", "network": "xhttp",
+                "xhttp-opts": { "path": "/dl", "mode": "packet-up" }
             }),
             json!({
                 "name": "raw-alias", "type": "vmess", "server": "1.2.3.4", "port": 80,
                 "uuid": "aaaaaaaa-bbbb-4ccc-8ddd-000000000053", "alterId": "0",
                 "cipher": "auto", "network": "raw"
+            }),
+            json!({
+                "name": "good-juicity", "type": "juicity", "server": "1.2.3.4", "port": 8443,
+                "uuid": "aaaaaaaa-bbbb-4ccc-8ddd-000000000054", "password": "pw",
+                "congestion-control": "bbr", "congestion_control": "bbr",
+                "insecure": true, "allowInsecure": true
             }),
         ];
         let plan = crate::proxy::ir::lower_options_to_ir(&options, Some(&node));
@@ -798,14 +890,33 @@ rules:
         };
 
         assert!(yaml.contains("good-ws"), "ws 节点应保留:\n{yaml}");
-        assert!(!yaml.contains("bad-xhttp"), "xhttp 节点必须剔除:\n{yaml}");
+        assert!(
+            yaml.contains("good-xhttp"),
+            "xhttp 传输已由 VP-Core 原生支持，节点应保留:\n{yaml}"
+        );
+        assert!(
+            yaml.contains("xhttp-opts"),
+            "xhttp-opts 应透传给 vp-core:\n{yaml}"
+        );
         assert!(
             yaml.contains("raw-alias"),
             "raw 传输应归一为 tcp 后保留:\n{yaml}"
         );
         assert!(
-            !yaml.contains("network: xhttp"),
-            "不允许残留 xhttp 传输:\n{yaml}"
+            yaml.contains("good-juicity"),
+            "juicity 已由 VP-Core 原生支持，节点应保留:\n{yaml}"
+        );
+        assert!(
+            !yaml.contains("allowInsecure"),
+            "insecure 重名 alias 必须归一成 skip-cert-verify:\n{yaml}"
+        );
+        assert!(
+            yaml.contains("skip-cert-verify"),
+            "insecure 应归一为 skip-cert-verify:\n{yaml}"
+        );
+        assert!(
+            !yaml.contains("congestion_control"),
+            "congestion_control 重名 alias 必须归一:\n{yaml}"
         );
         assert!(
             !yaml.contains("network: raw"),
@@ -843,10 +954,16 @@ rules:
 
         // 必须彻底剥离 ech-opts，防止 GFW 黑洞静默丢包超时
         assert!(!yaml.contains("ech-opts"), "ech-opts 必须被剥离:\n{yaml}");
-        assert!(!yaml.contains("cloudflare-ech.com"), "ech 查询名必须被剥离:\n{yaml}");
+        assert!(
+            !yaml.contains("cloudflare-ech.com"),
+            "ech 查询名必须被剥离:\n{yaml}"
+        );
 
         // 必须注入标准 User-Agent 标头防止 Cloudflare 400 Bad Request
-        assert!(yaml.contains("User-Agent: Mozilla/5.0"), "必须补全 User-Agent 标头:\n{yaml}");
+        assert!(
+            yaml.contains("User-Agent: Mozilla/5.0"),
+            "必须补全 User-Agent 标头:\n{yaml}"
+        );
     }
 
     #[test]
@@ -865,9 +982,11 @@ rules:
         assert!(ok(json!({"type": "hysteria2", "network": "udp"})));
         assert!(ok(json!({"type": "tuic", "network": "udp"})));
         assert!(ok(json!({"type": "wireguard", "network": "udp"})));
-        assert!(!ok(json!({"type": "vless", "network": "xhttp"})));
-        assert!(!ok(json!({"type": "vless", "network": "httpupgrade"})));
-        assert!(!ok(json!({"type": "vless", "network": "h2"})));
+        // xhttp/splithttp、httpupgrade、h2 已由 VP-Core 1.7.4 原生支持
+        assert!(ok(json!({"type": "vless", "network": "xhttp"})));
+        assert!(ok(json!({"type": "vless", "network": "splithttp"})));
+        assert!(ok(json!({"type": "vless", "network": "httpupgrade"})));
+        assert!(ok(json!({"type": "vless", "network": "h2"})));
         assert!(ok(json!({"type": "masque"})));
         assert!(ok(json!({"type": "masque", "network": "udp"})));
         assert!(ok(json!({"type": "hysteria"})));
@@ -897,22 +1016,28 @@ rules:
             updated_at: chrono::Utc::now(),
         };
 
+        // xhttp/splithttp、httpupgrade、h2 已由 VP-Core 1.7.4 原生支持，不再视为不兼容
         assert!(
             is_node_incompatible_with_vpcore(&mk("vless", json!({"network": "xhttp"}), ""))
-                .is_some()
+                .is_none()
         );
         assert!(is_node_incompatible_with_vpcore(&mk(
             "vmess",
             json!({"network": "httpupgrade"}),
             ""
         ))
-        .is_some());
+        .is_none());
         assert!(is_node_incompatible_with_vpcore(&mk(
             "vless",
             json!({}),
             "vless://a@1.2.3.4:443?network=xhttp#x"
         ))
-        .is_some());
+        .is_none());
+        // mKCP 仍是 Xray 专有传输，继续拦截
+        assert!(
+            is_node_incompatible_with_vpcore(&mk("vless", json!({"network": "mkcp"}), ""))
+                .is_some()
+        );
         assert!(is_node_incompatible_with_vpcore(&mk("masque", json!({}), "")).is_none());
         // http / ws / tcp 传输自 HTTP 伪装传输落地后均受支持
         assert!(
@@ -954,7 +1079,10 @@ rules:
 
         // 3. 验证 Hysteria2 包含 udp: true 及 ports
         let proxies = val["proxies"].as_array().expect("proxies");
-        let hy2 = proxies.iter().find(|p| p["type"] == "hysteria2").expect("hy2 proxy");
+        let hy2 = proxies
+            .iter()
+            .find(|p| p["type"] == "hysteria2")
+            .expect("hy2 proxy");
         assert_eq!(hy2["udp"], serde_json::json!(true));
         assert_eq!(hy2["ports"], "20000-30000");
     }
@@ -989,7 +1117,9 @@ rules:
         }
 
         // 2. 验证原生 VP-DSL 脚本生成
-        let dsl = VpCoreCompiler.compile_vp_dsl(&plan).expect("compile vp dsl");
+        let dsl = VpCoreCompiler
+            .compile_vp_dsl(&plan)
+            .expect("compile vp dsl");
         println!("--- Generated VP DSL ---\n{dsl}");
         assert!(dsl.contains("inbound mixed {"));
         assert!(dsl.contains("listen: \"127.0.0.1:7890\""));
@@ -1049,7 +1179,9 @@ rules:
         );
 
         // 验证 DSL 输出
-        let dsl = VpCoreCompiler.compile_vp_dsl(&plan).expect("compile vp dsl");
+        let dsl = VpCoreCompiler
+            .compile_vp_dsl(&plan)
+            .expect("compile vp dsl");
         assert!(dsl.contains("node \"Test Node\" masque {"));
         assert!(dsl.contains("server: \"162.159.199.1\""));
         assert!(dsl.contains("port: 8095"));

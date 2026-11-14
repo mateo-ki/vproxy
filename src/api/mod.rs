@@ -82,15 +82,17 @@ pub fn router(state: AppState, api_token: Option<String>) -> Router {
             let expected = api_token.clone();
             async move { authenticate_request(request, next, expected.as_deref()).await }
         }))
-        .layer(TraceLayer::new_for_http().make_span_with(|request: &Request<Body>| {
-            // 访问日志只记 method + path：导出链接的 ?token= 与带凭据的 query
-            // 绝不能进日志（默认 span 会记完整 URI 含 query）
-            tracing::debug_span!(
-                "http_request",
-                method = %request.method(),
-                path = request.uri().path(),
-            )
-        }))
+        .layer(
+            TraceLayer::new_for_http().make_span_with(|request: &Request<Body>| {
+                // 访问日志只记 method + path：导出链接的 ?token= 与带凭据的 query
+                // 绝不能进日志（默认 span 会记完整 URI 含 query）
+                tracing::debug_span!(
+                    "http_request",
+                    method = %request.method(),
+                    path = request.uri().path(),
+                )
+            }),
+        )
         .with_state(Arc::new(state))
 }
 

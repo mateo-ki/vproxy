@@ -52,8 +52,28 @@ A high-performance, modern cross-platform proxy workstation built with Rust and 
 
 ## Supported Protocols
 
-- **Parsing**: `ss`, `vmess`, `vless`, `trojan`, `hysteria2/hy2`, `wireguard`, `masque`, `socks5`, `http(s)`, Clash/Mihomo YAML, Base64, and mixed raw text.
-- **Connection**: Driven by managed kernels (Mihomo / sing-box / Xray).
+**Parsing** (share links / subscriptions / Clash YAML / Base64 / mixed text):
+`ss` `ssr` `vmess` `vless` `trojan` `hysteria` `hysteria2/hy2` `tuic` `wireguard/wg` `socks5` `http(s)` `masque` `snell` `naive(+https/+quic)` `mieru` `ssh` `tailscale` `juicity` `shadowtls`
+
+**Connection** (kernels are picked automatically per node, see [Architecture & Kernel Routing](docs/architecture.md)):
+
+| Kernel | Supported protocols |
+| :--- | :--- |
+| VP-Core (native core) | `ss` `ssr` `vmess` `vless` `trojan` `snell` `hysteria2` `tuic` `juicity` `anytls` `mieru` `naive` `ssh` `brook` `wireguard` `masque` `http(s)` `socks5` |
+| Mihomo | `ss` `ssr` `vmess` `vless` `trojan` `hysteria` `hysteria2` `tuic` `anytls` `snell` `mieru` `wireguard` `masque` `http(s)` `socks5` |
+| sing-box | `ss` `vmess` `vless` `trojan` `hysteria2` `tuic` `anytls` `ssh` `wireguard` `http(s)` `socks5` |
+| Xray | `ss` `vmess` `vless` `trojan` `http(s)` `socks5` |
+| Shoes | `ss` `vmess` `vless` `trojan` `snell` `anytls` `naive` `wireguard` `http(s)` `socks5` |
+| Meow | `ss` `vmess` `vless` `trojan` `hysteria2` `snell` `anytls` `http(s)` `socks5` |
+
+Routing notes: `snell` prefers Shoes, `ssh` prefers sing-box, `naive` and `juicity` run exclusively on VP-Core (Mihomo lacks them and sing-box removed juicity in 1.12); the `xhttp/splithttp` transport is VP-Core-only and automatically reroutes to VP-Core. Parsed protocols without an installable kernel are flagged in the UI instead of being silently dropped.
+
+## Documentation
+
+- [Architecture & Kernel Routing](docs/architecture.md) — module map, protocol × kernel matrix, kernel preference & fallback rules (single source of truth for current behavior)
+- [OpenWrt Deployment Guide](docs/openwrt.md) · [macOS TUN Guide](docs/macos-tun.md)
+- [Release Notes](RELEASE_NOTES.md)
+- Historical design documents (decision logs only, not current state): [design.md](design.md) · [requirements.md](requirements.md) · [tasks.md](tasks.md)
 
 ## Building from Source
 

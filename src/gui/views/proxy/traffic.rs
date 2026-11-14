@@ -115,6 +115,7 @@ impl VpnApp {
             TrafficStatTab::Node => self.traffic_node_tab(ui),
             TrafficStatTab::Domain => self.traffic_domain_tab(ui),
             TrafficStatTab::Process => self.traffic_process_tab(ui),
+            TrafficStatTab::History => self.traffic_history_tab(ui),
         }
     }
 
@@ -124,6 +125,7 @@ impl VpnApp {
             (TrafficStatTab::Node, "🚀 节点流量统计"),
             (TrafficStatTab::Domain, "🌐 域名流量统计"),
             (TrafficStatTab::Process, "⚙ 软件流量统计"),
+            (TrafficStatTab::History, "📈 近30天"),
         ];
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 6.0;
@@ -148,6 +150,95 @@ impl VpnApp {
                 if ui.add(btn).clicked() {
                     self.traffic_stat_tab = tab;
                 }
+            }
+        });
+    }
+
+    /// 近 30 天流量历史：按小时落库、按天聚合（本地日），保留期 30 天。
+    /// 打开 tab 或超过 5 分钟时懒加载刷新；同一运行周期内的增量由采样循环入账。
+    fn traffic_history_tab(&mut self, ui: &mut Ui) {
+        if self.traffic_days_at.is_none()
+            || self.traffic_days_at.unwrap().elapsed() >= std::time::Duration::from_secs(300)
+        {
+            self.traffic_days_at = Some(std::time::Instant::now());
+            let db = self.db.clone();
+            let tx = self.tx.clone();
+            self.rt.spawn(async move {
+                match db.traffic_daily(30).await {
+                    Ok(rows) => {
+                        let _ = tx.send(crate::gui::types::BgMsg::TrafficHistory(rows));
+                    }
+                    Err(e) => tracing::debug!("加载流量历史失败: {e}"),
+                }
+            });
+        }
+
+        let total_up: i64 = self.traffic_days_history.iter().map(|r| r.upload).sum();
+        let total_down: i64 = self.traffic_days_history.iter().map(|r| r.download).sum();
+        ui.columns(2, |columns| {
+            for (idx, (title, value)) in [
+                ("近 30 天上行", format_bytes(total_up.max(0) as u64)),
+                ("近 30 天下行", format_bytes(total_down.max(0) as u64)),
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                columns[idx].vertical(|ui| {
+                    ui.set_width(ui.available_width());
+                    ui.label(RichText::new(title).size(11.0).color(theme::muted()));
+                    ui.add_space(2.0);
+                    ui.label(
+                        RichText::new(value)
+                            .size(16.0)
+                            .strong()
+                            .color(theme::text_primary()),
+                    );
+                });
+            }
+        });
+        ui.add_space(8.0);
+
+        egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+            if self.traffic_days_history.is_empty() {
+                ui.label(
+                    RichText::new("暂无流量历史：启动代理后流量按小时落库（保留 30 天），跑一会儿再来看。")
+                        .size(12.0)
+                        .color(theme::muted()),
+                );
+                return;
+            }
+            ui.label(RichText::new("按天统计（本地时间，含今天）").size(11.0).color(theme::muted()));
+            ui.add_space(4.0);
+            for row in &self.traffic_days_history {
+                let total = (row.upload + row.download).max(0) as u64;
+                egui::Grid::new(format!("traffic-day-{}", row.day))
+                    .num_columns(4)
+                    .spacing([16.0, 3.0])
+                    .min_col_width(0.0)
+                    .show(ui, |ui| {
+                        ui.label(
+                            RichText::new(&row.day)
+                                .size(12.5)
+                                .color(theme::text_primary()),
+                        );
+                        ui.label(
+                            RichText::new(format!("↑ {}", format_bytes(row.upload.max(0) as u64)))
+                                .size(12.0)
+                                .color(theme::text_secondary()),
+                        );
+                        ui.label(
+                            RichText::new(format!("↓ {}", format_bytes(row.download.max(0) as u64)))
+                                .size(12.0)
+                                .color(theme::text_secondary()),
+                        );
+                        ui.label(
+                            RichText::new(format_bytes(total))
+                                .size(12.5)
+                                .strong()
+                                .color(theme::text_primary()),
+                        );
+                        ui.end_row();
+                    });
             }
         });
     }
@@ -211,10 +302,17 @@ impl VpnApp {
             card_frame().show(&mut columns[2], |ui| {
                 ui.set_width(ui.available_width());
                 ui.vertical(|ui| {
-                    ui.label(RichText::new("实时活跃连接").size(11.0).color(theme::muted()));
+                    ui.label(
+                        RichText::new("实时活跃连接")
+                            .size(11.0)
+                            .color(theme::muted()),
+                    );
                     ui.add_space(2.0);
-                    let conns_color =
-                        if total_active_conns > 0 { theme::success() } else { theme::text_primary() };
+                    let conns_color = if total_active_conns > 0 {
+                        theme::success()
+                    } else {
+                        theme::text_primary()
+                    };
                     ui.label(
                         RichText::new(format!("{} 连接", total_active_conns))
                             .size(16.0)
@@ -254,6 +352,7 @@ impl VpnApp {
                     TrafficStatTab::Node => self.node_traffic_sort == opt,
                     TrafficStatTab::Domain => self.domain_traffic_sort == opt,
                     TrafficStatTab::Process => self.process_traffic_sort == opt,
+                    TrafficStatTab::History => false,
                 };
                 let bg = if is_selected {
                     theme::accent_bg()
@@ -275,6 +374,7 @@ impl VpnApp {
                         TrafficStatTab::Node => self.node_traffic_sort = opt,
                         TrafficStatTab::Domain => self.domain_traffic_sort = opt,
                         TrafficStatTab::Process => self.process_traffic_sort = opt,
+                        TrafficStatTab::History => {}
                     }
                 }
             }
@@ -285,6 +385,7 @@ impl VpnApp {
                 TrafficStatTab::Node => "🔍 搜索节点名/协议...",
                 TrafficStatTab::Domain => "🔍 搜索域名...",
                 TrafficStatTab::Process => "🔍 搜索进程名...",
+                TrafficStatTab::History => "",
             };
             match tab {
                 TrafficStatTab::Node => ui.add(
@@ -302,6 +403,8 @@ impl VpnApp {
                         .hint_text(hint)
                         .desired_width(140.0),
                 ),
+                // 历史 tab 不渲染搜索框（过滤条只有各明细 tab 自己调用，历史 tab 不走这里）
+                TrafficStatTab::History => ui.allocate_response(Vec2::ZERO, Sense::hover()),
             };
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -309,9 +412,14 @@ impl VpnApp {
                     TrafficStatTab::Node => "重置当前记录的节点流量与连接增量统计",
                     TrafficStatTab::Domain => "清空域名流量统计",
                     TrafficStatTab::Process => "清空软件进程流量统计",
+                    TrafficStatTab::History => "",
                 };
                 if ui
-                    .add(icons::button_with_icon(Icon::Trash, "清空统计", theme::muted()))
+                    .add(icons::button_with_icon(
+                        Icon::Trash,
+                        "清空统计",
+                        theme::muted(),
+                    ))
                     .on_hover_text(tip)
                     .clicked()
                 {
@@ -331,6 +439,7 @@ impl VpnApp {
                 TrafficStatTab::Process => {
                     self.process_traffic_records.clear();
                 }
+                TrafficStatTab::History => {}
             }
         }
     }
@@ -385,9 +494,13 @@ impl VpnApp {
             ui.add_space(3.0);
             if down_rate > 0 || up_rate > 0 {
                 ui.label(
-                    RichText::new(format!("↓{} ↑{}", format_speed(down_rate), format_speed(up_rate)))
-                        .size(10.5)
-                        .color(theme::accent()),
+                    RichText::new(format!(
+                        "↓{} ↑{}",
+                        format_speed(down_rate),
+                        format_speed(up_rate)
+                    ))
+                    .size(10.5)
+                    .color(theme::accent()),
                 );
                 ui.add_space(3.0);
             }
@@ -455,10 +568,7 @@ impl VpnApp {
                                         theme::text_secondary()
                                     };
                                     let name_label = egui::Label::new(
-                                        RichText::new(title)
-                                            .strong()
-                                            .size(12.5)
-                                            .color(name_color),
+                                        RichText::new(title).strong().size(12.5).color(name_color),
                                     )
                                     .truncate();
                                     ui.add(name_label);
@@ -467,7 +577,12 @@ impl VpnApp {
                                 ui.add_space(2.0);
 
                                 ui.horizontal(|ui| {
-                                    Self::render_row_live_line(ui, active_conns, down_rate, up_rate);
+                                    Self::render_row_live_line(
+                                        ui,
+                                        active_conns,
+                                        down_rate,
+                                        up_rate,
+                                    );
                                     ui.label(
                                         RichText::new(format!(
                                             "↓下行: {}  ·  ↑上行: {}",
@@ -498,8 +613,7 @@ impl VpnApp {
     /// 节点流量统计 tab（原节点排行完整保留）
     fn traffic_node_tab(&mut self, ui: &mut Ui) {
         // 1. 汇总与聚合全量节点（已记录流量的 + 节点池未跑流量的）
-        let mut all_records: HashMap<String, NodeTrafficRecord> =
-            self.node_traffic_records.clone();
+        let mut all_records: HashMap<String, NodeTrafficRecord> = self.node_traffic_records.clone();
 
         // 将当前节点池中尚未产生流量的节点补充进来（保持列表完整）
         for node in &self.nodes {
@@ -675,11 +789,14 @@ impl VpnApp {
                                                 ui.add(name_label);
 
                                                 if is_active {
-                                                    render_status_pill(ui, "运行中", theme::success());
+                                                    render_status_pill(
+                                                        ui,
+                                                        "运行中",
+                                                        theme::success(),
+                                                    );
                                                 }
 
-                                                if !item.protocol.is_empty()
-                                                    && item.protocol != "-"
+                                                if !item.protocol.is_empty() && item.protocol != "-"
                                                 {
                                                     protocol_pill(
                                                         ui,
@@ -799,7 +916,10 @@ impl VpnApp {
                     ui.vertical_centered(|ui| {
                         icon_label(ui, Icon::Info, 24.0, theme::muted());
                         ui.add_space(4.0);
-                        ui.label(RichText::new("暂无域名流量记录，跑起流量后再来看").color(theme::muted()));
+                        ui.label(
+                            RichText::new("暂无域名流量记录，跑起流量后再来看")
+                                .color(theme::muted()),
+                        );
                     });
                     return;
                 }
@@ -895,7 +1015,8 @@ impl VpnApp {
                         icon_label(ui, Icon::Info, 24.0, theme::muted());
                         ui.add_space(4.0);
                         ui.label(
-                            RichText::new("暂无软件流量记录，跑起流量后再来看").color(theme::muted()),
+                            RichText::new("暂无软件流量记录，跑起流量后再来看")
+                                .color(theme::muted()),
                         );
                     });
                     return;
@@ -1014,7 +1135,8 @@ fn render_status_pill(ui: &mut Ui, text: &str, color: Color32) {
 /// 实时活跃绿点指示
 fn render_live_dot(ui: &mut Ui) {
     let (rect, _) = ui.allocate_exact_size(Vec2::splat(6.0), Sense::hover());
-    ui.painter().circle_filled(rect.center(), 3.0, theme::success());
+    ui.painter()
+        .circle_filled(rect.center(), 3.0, theme::success());
 }
 
 #[cfg(test)]

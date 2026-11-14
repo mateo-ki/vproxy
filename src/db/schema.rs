@@ -174,8 +174,7 @@ impl Database {
             .await?;
         self.ensure_column("sources", "content_sha256", "TEXT")
             .await?;
-        self.ensure_column("sources", "user_agent", "TEXT")
-            .await?;
+        self.ensure_column("sources", "user_agent", "TEXT").await?;
         self.ensure_column("sources", "upload_bytes", "INTEGER DEFAULT NULL")
             .await?;
         self.ensure_column("sources", "download_bytes", "INTEGER DEFAULT NULL")
@@ -199,8 +198,12 @@ impl Database {
             .await?;
         self.ensure_column("settings", "ui_theme", "TEXT NOT NULL DEFAULT 'obsidian'")
             .await?;
-        self.ensure_column("settings", "app_icon_style", "TEXT NOT NULL DEFAULT 'classic'")
-            .await?;
+        self.ensure_column(
+            "settings",
+            "app_icon_style",
+            "TEXT NOT NULL DEFAULT 'classic'",
+        )
+        .await?;
         self.ensure_column("settings", "ui_language", "TEXT NOT NULL DEFAULT 'zh-CN'")
             .await?;
         // 字体/界面大小（1.0 = 不缩放）。老库升级上来的这一列就是 1.0，行为不变。
@@ -211,12 +214,8 @@ impl Database {
         self.ensure_column("settings", "ui_dark", "INTEGER NOT NULL DEFAULT 1")
             .await?;
         // 菜单栏展开态（默认收起 = 和老版本的图标条一模一样）。
-        self.ensure_column(
-            "settings",
-            "sidebar_expanded",
-            "INTEGER NOT NULL DEFAULT 0",
-        )
-        .await?;
+        self.ensure_column("settings", "sidebar_expanded", "INTEGER NOT NULL DEFAULT 0")
+            .await?;
         self.ensure_column(
             "settings",
             "kernel_source",
@@ -264,8 +263,12 @@ impl Database {
         self.ensure_column("settings", "launch_as_admin", "INTEGER NOT NULL DEFAULT 1")
             .await?;
         // 开机自启动：默认关（写的是用户注册表，不能擅自开）。
-        self.ensure_column("settings", "launch_at_startup", "INTEGER NOT NULL DEFAULT 0")
-            .await?;
+        self.ensure_column(
+            "settings",
+            "launch_at_startup",
+            "INTEGER NOT NULL DEFAULT 0",
+        )
+        .await?;
         // 五个测速优化开关默认全部关闭，行为与老版本一致。
         for column in [
             "speedtest_parallel_kernels",
@@ -315,14 +318,22 @@ impl Database {
             .await?;
         self.ensure_column("settings", "gist_pages", "INTEGER NOT NULL DEFAULT 100")
             .await?;
-        self.ensure_column("settings", "gist_queries", "TEXT NOT NULL DEFAULT 'vless//'")
-            .await?;
+        self.ensure_column(
+            "settings",
+            "gist_queries",
+            "TEXT NOT NULL DEFAULT 'vless//'",
+        )
+        .await?;
         self.ensure_column("settings", "window_size", "TEXT NOT NULL DEFAULT 'small'")
             .await?;
         self.ensure_column("settings", "console_tabs", "TEXT NOT NULL DEFAULT 'all'")
             .await?;
-        self.ensure_column("settings", "dashboard_ui_mode", "TEXT NOT NULL DEFAULT 'compact'")
-            .await?;
+        self.ensure_column(
+            "settings",
+            "dashboard_ui_mode",
+            "TEXT NOT NULL DEFAULT 'compact'",
+        )
+        .await?;
 
         // 订阅源持久化存储原始分流规则与策略组
         self.ensure_column("sources", "rules_yaml", "TEXT").await?;
@@ -534,6 +545,14 @@ impl Database {
                 status TEXT NOT NULL
             )"#,
             "CREATE INDEX IF NOT EXISTS idx_fetch_history_source ON source_fetch_history(source_id, at)",
+            // 流量统计按小时落桶（本地时间 "YYYY-MM-DD HH:00"），保留 30 天：
+            // 采样增量在 GUI 侧每 60s 批量入账，跨小时/退出时收尾，重启只丢最后一分钟。
+            r#"CREATE TABLE IF NOT EXISTS traffic_hourly (
+                hour TEXT PRIMARY KEY NOT NULL,
+                upload INTEGER NOT NULL DEFAULT 0,
+                download INTEGER NOT NULL DEFAULT 0,
+                updated_at TEXT NOT NULL
+            )"#,
         ] {
             sqlx::query(ddl).execute(&self.pool).await?;
         }

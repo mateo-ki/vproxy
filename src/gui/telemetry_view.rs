@@ -17,6 +17,49 @@ impl VpnApp {
     }
 
     /// 把攒下的命中增量写进主库（按天聚合，冲突就累加）。
+    /// 流量采样增量进小时桶：跨小时先把挂账记到上一小时，60s 批量落库。
+    /// 内核重启计数清零由调用方 saturating_sub 兜住，不会产生负增量。
+    pub(crate) fn push_traffic_delta(&mut self, up: u64, down: u64) {
+        if up == 0 && down == 0 {
+            return;
+        }
+        let now_hour = crate::db::telemetry::traffic_hour_key(chrono::Local::now());
+        match self.traffic_pend_hour.as_deref() {
+            None => self.traffic_pend_hour = Some(now_hour),
+            Some(h) if h != now_hour => {
+                // 跨小时：挂账增量归属上一个小时
+                self.flush_traffic_pend();
+                self.traffic_pend_hour = Some(now_hour);
+            }
+            _ => {}
+        }
+        self.traffic_pend_up += up;
+        self.traffic_pend_down += down;
+        if self.traffic_last_traffic_flush.elapsed() >= std::time::Duration::from_secs(60) {
+            self.flush_traffic_pend();
+        }
+    }
+
+    /// 把挂账增量刷进当前挂账小时桶（小时键保留，60s 内可继续累加）。
+    pub(crate) fn flush_traffic_pend(&mut self) {
+        self.traffic_last_traffic_flush = std::time::Instant::now();
+        let Some(hour) = self.traffic_pend_hour.clone() else {
+            return;
+        };
+        if self.traffic_pend_up == 0 && self.traffic_pend_down == 0 {
+            return;
+        }
+        let (up, down) = (self.traffic_pend_up, self.traffic_pend_down);
+        self.traffic_pend_up = 0;
+        self.traffic_pend_down = 0;
+        let db = self.db.clone();
+        self.rt.spawn(async move {
+            if let Err(e) = db.record_traffic_hour(&hour, up, down).await {
+                tracing::debug!("流量小时桶落库失败: {e}");
+            }
+        });
+    }
+
     pub(crate) fn flush_rule_hits(&mut self) {
         self.last_hit_flush = std::time::Instant::now();
         let at = chrono::Utc::now().to_rfc3339();

@@ -47,7 +47,12 @@ pub struct FailedProxyStartNotice {
 }
 
 impl FailedProxyStartNotice {
-    pub fn recovered_by(&self, current_operation: u64, footer: &str, status: &ProxyRuntimeStatus) -> bool {
+    pub fn recovered_by(
+        &self,
+        current_operation: u64,
+        footer: &str,
+        status: &ProxyRuntimeStatus,
+    ) -> bool {
         self.operation.kind == ProxyOperationKind::Start
             && self.operation.id == current_operation
             && footer == self.footer
@@ -284,6 +289,8 @@ pub enum TrafficStatTab {
     Node,
     Domain,
     Process,
+    /// 近 30 天流量历史（按小时落库、按天聚合，保留期 30 天）
+    History,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -460,7 +467,10 @@ pub enum BgMsg {
     FirewallApplied(Result<String, String>),
     /// 自动选路模式下替用户挑一个锚点节点（id, name）：左键点卡片不再选节点，
     /// 若仍要求"先有节点才能启动"，启动代理就永远点不动。
-    AutoAnchorStart { request: u64, result: Result<(String, String), String> },
+    AutoAnchorStart {
+        request: u64,
+        result: Result<(String, String), String>,
+    },
     Stats(Result<Stats, String>),
     Settings(Result<AppSettings, String>),
     SettingsSaved(Result<AppSettings, String>),
@@ -542,12 +552,26 @@ pub enum BgMsg {
     AppUpdateProgress(crate::app_update::AppUpdateProgress),
     AppUpdateDownloaded(Result<std::path::PathBuf, String>),
     AppReleasesListed(Result<Vec<crate::app_update::ReleaseItem>, String>),
-    ProxyStatus { request: u64, status: ProxyRuntimeStatus },
-    ProxyMaintenanceDone { request: u64, status: Option<ProxyRuntimeStatus> },
+    ProxyStatus {
+        request: u64,
+        status: ProxyRuntimeStatus,
+    },
+    ProxyMaintenanceDone {
+        request: u64,
+        status: Option<ProxyRuntimeStatus>,
+    },
     /// Only unsupported hot switching may fall back to a restart; errors stay visible.
-    ProxyModeHotToggled { request: u64, result: Result<bool, String>, message: String },
+    ProxyModeHotToggled {
+        request: u64,
+        result: Result<bool, String>,
+        message: String,
+    },
     /// 系统代理热切换结果：ok=true 已生效，未重启进程
-    SystemProxyHotToggled { request: u64, ok: bool, message: String },
+    SystemProxyHotToggled {
+        request: u64,
+        ok: bool,
+        message: String,
+    },
     /// 分流出站模式（规则 / 全局 / 直连）免停热切结果
     ProxyRoutingModeHotSwitched {
         request: u64,
@@ -564,7 +588,10 @@ pub enum BgMsg {
     ProxyConfigSaved(Result<ProxyConfigSaveResult, String>),
     ProxyConfigQuietSaved(Result<ProxyConfigSaveResult, String>),
     ProxyLog(Result<String, String>),
-    ProxyOp { operation: ProxyOperation, result: Result<String, String> },
+    ProxyOp {
+        operation: ProxyOperation,
+        result: Result<String, String>,
+    },
     ApiServerStatus(Result<String, String>),
     ProxySwitchDone {
         seq: u64,
@@ -588,6 +615,8 @@ pub enum BgMsg {
         connections: Vec<ActiveConnectionInfo>,
     },
     TrafficPollDone,
+    /// 近 30 天流量历史（按天聚合），供流量页"历史"tab 懒加载
+    TrafficHistory(Vec<crate::db::telemetry::TrafficDayRow>),
     /// 内核 proxy-groups 的实际状态 + 各成员最近一次实测延迟。
     KernelGroups(Vec<KernelGroup>, Vec<KernelLatency>),
     ConnectionClosed(String),
@@ -891,7 +920,6 @@ pub struct QuickRuleModalState {
     pub action: crate::proxy::RuleAction,
 }
 
-
 #[cfg(test)]
 mod config_save_result_tests {
     use super::*;
@@ -903,10 +931,16 @@ mod config_save_result_tests {
             applied: false,
         };
         assert_eq!(saved.status_message(true), "代理配置已保存，重新连接后生效");
-        assert_eq!(saved.status_message(false), "代理配置已保存，重新连接后生效");
+        assert_eq!(
+            saved.status_message(false),
+            "代理配置已保存，重新连接后生效"
+        );
         saved.applied = true;
         assert_eq!(saved.status_message(true), "代理配置已保存并生效");
-        assert_eq!(saved.status_message(false), "代理配置已保存，下次连接时应用");
+        assert_eq!(
+            saved.status_message(false),
+            "代理配置已保存，下次连接时应用"
+        );
     }
 }
 
@@ -926,14 +960,32 @@ mod failed_start_notice_tests {
     #[test]
     fn recovery_requires_the_owned_failure_and_a_new_ready_kernel() {
         let notice = FailedProxyStartNotice {
-            operation: ProxyOperation { id: 4, request: 4, kind: ProxyOperationKind::Start, previous_kernel_pid: Some(100) },
+            operation: ProxyOperation {
+                id: 4,
+                request: 4,
+                kind: ProxyOperationKind::Start,
+                previous_kernel_pid: Some(100),
+            },
             footer: "代理操作失败: 代理端口 9980 已被占用".into(),
         };
         assert!(notice.recovered_by(4, &notice.footer, &running(101)));
-        assert!(!notice.recovered_by(5, &notice.footer, &running(101)), "new operation owns the UI");
-        assert!(!notice.recovered_by(4, &notice.footer, &running(100)), "old live core is not recovery");
-        for footer in ["保存代理配置失败: 无效规则", "切换节点失败: 超时", "正在关闭内核..."] {
-            assert!(!notice.recovered_by(4, footer, &running(101)), "a newer message must survive");
+        assert!(
+            !notice.recovered_by(5, &notice.footer, &running(101)),
+            "new operation owns the UI"
+        );
+        assert!(
+            !notice.recovered_by(4, &notice.footer, &running(100)),
+            "old live core is not recovery"
+        );
+        for footer in [
+            "保存代理配置失败: 无效规则",
+            "切换节点失败: 超时",
+            "正在关闭内核...",
+        ] {
+            assert!(
+                !notice.recovered_by(4, footer, &running(101)),
+                "a newer message must survive"
+            );
         }
         let mut status = running(101);
         status.local_proxy_ready = false;
@@ -946,7 +998,12 @@ mod failed_start_notice_tests {
     #[test]
     fn a_failed_stop_is_not_resolved_by_a_running_kernel() {
         let notice = FailedProxyStartNotice {
-            operation: ProxyOperation { id: 7, request: 7, kind: ProxyOperationKind::Stop, previous_kernel_pid: Some(100) },
+            operation: ProxyOperation {
+                id: 7,
+                request: 7,
+                kind: ProxyOperationKind::Stop,
+                previous_kernel_pid: Some(100),
+            },
             footer: "代理操作失败: 停止超时".into(),
         };
         assert!(!notice.recovered_by(7, &notice.footer, &running(101)));

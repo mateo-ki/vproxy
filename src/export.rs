@@ -148,22 +148,55 @@ fn node_to_clash_proxy(node: &Node) -> Option<Value> {
             }
             Some(cfg)
         }
+        "juicity" => {
+            set_type(&mut cfg, "juicity");
+            ensure_server_port_name(&mut cfg, node);
+            if let Some(obj) = cfg.as_object_mut() {
+                obj.insert("udp".into(), json!(true));
+                let insecure = extract_skip_cert_verify(obj, node);
+                obj.remove("allowInsecure");
+                obj.insert("insecure".into(), json!(insecure));
+                // congestion / pinned 系列重名 alias 归一，防 serde duplicate field
+                let c1 = obj.remove("congestion-control");
+                let c2 = obj.remove("congestion_control");
+                let c3 = obj.remove("congestion-controller");
+                let c4 = obj.remove("congestion_controller");
+                if let Some(v) = c1.or(c2).or(c3).or(c4) {
+                    obj.insert("congestion-control".into(), v);
+                }
+                let p1 = obj.remove("pinned-cert-chain");
+                let p2 = obj.remove("pinned_cert_chain");
+                let p3 = obj.remove("pinnedCertChain");
+                if let Some(v) = p1.or(p2).or(p3) {
+                    obj.insert("pinned-cert-chain".into(), v);
+                }
+            }
+            Some(cfg)
+        }
         "anytls" => {
             set_type(&mut cfg, "anytls");
             ensure_server_port_name(&mut cfg, node);
             if let Some(obj) = cfg.as_object_mut() {
                 let security = first_str(obj, &["security", "tls"]).unwrap_or_default();
                 let sec_l = security.to_ascii_lowercase();
-                let is_reality = sec_l == "reality" || obj.contains_key("reality-opts") || obj.contains_key("pbk");
+                let is_reality = sec_l == "reality"
+                    || obj.contains_key("reality-opts")
+                    || obj.contains_key("pbk");
                 if is_reality {
                     let mut ro = Map::new();
-                    if let Some(pbk) = first_str(obj, &["pbk", "public-key"]).filter(|s| !s.is_empty()) {
+                    if let Some(pbk) =
+                        first_str(obj, &["pbk", "public-key"]).filter(|s| !s.is_empty())
+                    {
                         ro.insert("public-key".into(), json!(pbk));
                     }
-                    if let Some(sid) = first_str(obj, &["sid", "short-id"]).filter(|s| !s.is_empty()) {
+                    if let Some(sid) =
+                        first_str(obj, &["sid", "short-id"]).filter(|s| !s.is_empty())
+                    {
                         ro.insert("short-id".into(), json!(sid));
                     }
-                    if let Some(spx) = first_str(obj, &["spx", "spider-x"]).filter(|s| !s.is_empty()) {
+                    if let Some(spx) =
+                        first_str(obj, &["spx", "spider-x"]).filter(|s| !s.is_empty())
+                    {
                         ro.insert("spider-x".into(), json!(spx));
                     }
                     obj.insert("reality-opts".into(), Value::Object(ro));
@@ -719,14 +752,13 @@ fn normalize_hysteria(cfg: &mut Value, node: &Node) -> Value {
         return cfg.clone();
     };
 
-    let auth = first_str(obj, &["auth-str", "auth_str", "auth", "password"])
-        .or_else(|| {
-            if let Some(map) = node.config.as_object() {
-                first_str(map, &["auth-str", "auth_str", "auth", "password"])
-            } else {
-                None
-            }
-        });
+    let auth = first_str(obj, &["auth-str", "auth_str", "auth", "password"]).or_else(|| {
+        if let Some(map) = node.config.as_object() {
+            first_str(map, &["auth-str", "auth_str", "auth", "password"])
+        } else {
+            None
+        }
+    });
     if let Some(a) = auth {
         obj.insert("auth-str".into(), json!(a));
         obj.insert("auth_str".into(), json!(a));
@@ -738,8 +770,8 @@ fn normalize_hysteria(cfg: &mut Value, node: &Node) -> Value {
     obj.insert("skip-cert-verify".into(), json!(insecure));
     obj.insert("udp".into(), json!(true));
 
-    if let Some(sni) = first_str(obj, &["sni", "peer", "server_name", "server-name"])
-        .filter(|s| !s.is_empty())
+    if let Some(sni) =
+        first_str(obj, &["sni", "peer", "server_name", "server-name"]).filter(|s| !s.is_empty())
     {
         obj.insert("sni".into(), json!(sni));
     }
@@ -800,6 +832,13 @@ fn node_to_share_uri(node: &Node) -> Option<String> {
         "socks5" | "socks" => rebuild_socks_uri(cfg, node),
         "http" | "https" => rebuild_http_uri(cfg, node),
         "masque" => crate::parser::warp_masque::rebuild_masque_uri(cfg, node),
+        "snell" => rebuild_snell_uri(cfg, node),
+        "naive" => rebuild_naive_uri(cfg, node),
+        "mieru" => rebuild_mieru_uri(cfg, node),
+        "ssh" => rebuild_ssh_uri(cfg, node),
+        "tailscale" => rebuild_tailscale_uri(cfg, node),
+        "juicity" => rebuild_juicity_uri(cfg, node),
+        "shadowtls" => rebuild_shadowtls_uri(cfg, node),
         _ => None,
     } {
         return Some(uri);
@@ -856,6 +895,10 @@ fn looks_like_share_uri(raw: &str) -> bool {
 }
 
 fn rebuild_ss_uri(cfg: &Value, node: &Node) -> Option<String> {
+    // shadow-tls 插件形态（shadowtls:// 内层合并节点）→ 重建 shadowtls:// 链接
+    if str_field(cfg, &["plugin"]).as_deref() == Some("shadow-tls") {
+        return rebuild_shadowtls_uri(cfg, node);
+    }
     let method = str_field(cfg, &["cipher", "method"])?;
     let password = str_field(cfg, &["password"])?;
     let server = str_field(cfg, &["server"]).unwrap_or_else(|| node.server.clone());
@@ -866,6 +909,249 @@ fn rebuild_ss_uri(cfg: &Value, node: &Node) -> Option<String> {
     if let Some(plugin) = str_field(cfg, &["plugin"]).filter(|s| !s.is_empty()) {
         uri.push_str(&format!("?plugin={}", urlencoding_lite(&plugin)));
     }
+    if !name.is_empty() {
+        uri.push('#');
+        uri.push_str(&urlencoding_lite(&name));
+    }
+    Some(uri)
+}
+
+fn rebuild_snell_uri(cfg: &Value, node: &Node) -> Option<String> {
+    let psk = str_field(cfg, &["psk", "password"])?;
+    let server = str_field(cfg, &["server"]).unwrap_or_else(|| node.server.clone());
+    let port = port_field(cfg).unwrap_or(node.port);
+    let name = str_field(cfg, &["name"]).unwrap_or_else(|| node.name.clone());
+    let mut q: Vec<(String, String)> = Vec::new();
+    q.push((
+        "version".into(),
+        str_field(cfg, &["version"]).unwrap_or_else(|| "4".into()),
+    ));
+    if let Some(obfs) = str_field(cfg, &["obfs"]).filter(|s| !s.is_empty()) {
+        q.push(("obfs".into(), obfs));
+        if let Some(h) = str_field(cfg, &["obfs-host"]).filter(|s| !s.is_empty()) {
+            q.push(("obfs-host".into(), h));
+        }
+    }
+    let query = q
+        .into_iter()
+        .map(|(k, v)| format!("{}={}", k, urlencoding_lite(&v)))
+        .collect::<Vec<_>>()
+        .join("&");
+    let mut uri = format!("snell://{psk}@{server}:{port}?{query}");
+    if !name.is_empty() {
+        uri.push('#');
+        uri.push_str(&urlencoding_lite(&name));
+    }
+    Some(uri)
+}
+
+fn rebuild_naive_uri(cfg: &Value, node: &Node) -> Option<String> {
+    let username = str_field(cfg, &["username"])?;
+    let password = str_field(cfg, &["password"])?;
+    let server = str_field(cfg, &["server"]).unwrap_or_else(|| node.server.clone());
+    let port = port_field(cfg).unwrap_or(node.port);
+    let name = str_field(cfg, &["name"]).unwrap_or_else(|| node.name.clone());
+    let mut q: Vec<(String, String)> = Vec::new();
+    if let Some(sni) = str_field(cfg, &["sni", "servername"]).filter(|s| !s.is_empty()) {
+        q.push(("sni".into(), sni));
+    }
+    let mut uri = format!("naive+https://{username}:{password}@{server}:{port}");
+    if !q.is_empty() {
+        let query = q
+            .into_iter()
+            .map(|(k, v)| format!("{}={}", k, urlencoding_lite(&v)))
+            .collect::<Vec<_>>()
+            .join("&");
+        uri.push('?');
+        uri.push_str(&query);
+    }
+    if !name.is_empty() {
+        uri.push('#');
+        uri.push_str(&urlencoding_lite(&name));
+    }
+    Some(uri)
+}
+
+fn rebuild_mieru_uri(cfg: &Value, node: &Node) -> Option<String> {
+    let username = str_field(cfg, &["username"])?;
+    let password = str_field(cfg, &["password"])?;
+    let server = str_field(cfg, &["server"]).unwrap_or_else(|| node.server.clone());
+    let port = port_field(cfg).unwrap_or(node.port);
+    let name = str_field(cfg, &["name"]).unwrap_or_else(|| node.name.clone());
+    let mut q: Vec<(String, String)> = Vec::new();
+    if let Some(t) = str_field(cfg, &["transport"]).filter(|s| !s.is_empty()) {
+        q.push(("transport".into(), t));
+    }
+    if let Some(m) = str_field(cfg, &["multiplexing"]).filter(|s| !s.is_empty()) {
+        q.push(("multiplexing".into(), m));
+    }
+    if let Some(pr) = str_field(cfg, &["port-range", "portrange"]).filter(|s| !s.is_empty()) {
+        q.push(("portRange".into(), pr));
+    }
+    let mut uri = format!("mieru://{username}:{password}@{server}:{port}");
+    if !q.is_empty() {
+        let query = q
+            .into_iter()
+            .map(|(k, v)| format!("{}={}", k, urlencoding_lite(&v)))
+            .collect::<Vec<_>>()
+            .join("&");
+        uri.push('?');
+        uri.push_str(&query);
+    }
+    if !name.is_empty() {
+        uri.push('#');
+        uri.push_str(&urlencoding_lite(&name));
+    }
+    Some(uri)
+}
+
+fn rebuild_ssh_uri(cfg: &Value, node: &Node) -> Option<String> {
+    let username = str_field(cfg, &["username", "user"])?;
+    let server = str_field(cfg, &["server"]).unwrap_or_else(|| node.server.clone());
+    let port = port_field(cfg).unwrap_or(node.port);
+    let name = str_field(cfg, &["name"]).unwrap_or_else(|| node.name.clone());
+    let password = str_field(cfg, &["password"]);
+    let mut q: Vec<(String, String)> = Vec::new();
+    if let Some(hk) = str_field(cfg, &["host-key", "host_key"]).filter(|s| !s.is_empty()) {
+        q.push(("host-key".into(), hk));
+    }
+    // 私钥 PEM 多行文本 → base64 内联进查询串（无密码登录的节点也能完整分享）
+    if let Some(pk) = str_field(cfg, &["private-key", "private_key"]).filter(|s| !s.is_empty()) {
+        q.push(("private-key".into(), B64.encode(pk.as_bytes())));
+    }
+    let mut uri = match &password {
+        Some(p) => format!("ssh://{username}:{p}@{server}:{port}"),
+        None => format!("ssh://{username}@{server}:{port}"),
+    };
+    if !q.is_empty() {
+        let query = q
+            .into_iter()
+            .map(|(k, v)| format!("{}={}", k, urlencoding_lite(&v)))
+            .collect::<Vec<_>>()
+            .join("&");
+        uri.push('?');
+        uri.push_str(&query);
+    }
+    if !name.is_empty() {
+        uri.push('#');
+        uri.push_str(&urlencoding_lite(&name));
+    }
+    Some(uri)
+}
+
+fn rebuild_tailscale_uri(cfg: &Value, node: &Node) -> Option<String> {
+    let server = str_field(cfg, &["server"]).unwrap_or_else(|| node.server.clone());
+    let port = port_field(cfg).unwrap_or(node.port);
+    let name = str_field(cfg, &["name"]).unwrap_or_else(|| node.name.clone());
+    let authkey = str_field(cfg, &["auth-key", "authkey", "auth_key"]).unwrap_or_default();
+    let mut q: Vec<(String, String)> = Vec::new();
+    if let Some(h) = str_field(cfg, &["hostname"]).filter(|s| !s.is_empty()) {
+        q.push(("hostname".into(), h));
+    }
+    if let Some(en) = str_field(cfg, &["exit-node", "exit_node"]).filter(|s| !s.is_empty()) {
+        q.push(("exit-node".into(), en));
+        if let Some(b) = cfg.get("exit-node-allow-lan").and_then(|v| v.as_bool()) {
+            if b {
+                q.push(("exit-node-allow-lan".into(), "1".into()));
+            }
+        }
+    }
+    if let Some(cu) = str_field(cfg, &["control-url", "control_url"]).filter(|s| !s.is_empty()) {
+        q.push(("control-url".into(), cu));
+    }
+    let userinfo = if authkey.is_empty() {
+        String::new()
+    } else {
+        format!("{authkey}@")
+    };
+    let mut uri = format!("tailscale://{userinfo}{server}:{port}");
+    if !q.is_empty() {
+        let query = q
+            .into_iter()
+            .map(|(k, v)| format!("{}={}", k, urlencoding_lite(&v)))
+            .collect::<Vec<_>>()
+            .join("&");
+        uri.push('?');
+        uri.push_str(&query);
+    }
+    if !name.is_empty() {
+        uri.push('#');
+        uri.push_str(&urlencoding_lite(&name));
+    }
+    Some(uri)
+}
+
+fn rebuild_juicity_uri(cfg: &Value, node: &Node) -> Option<String> {
+    let uuid = str_field(cfg, &["uuid"])?;
+    let password = str_field(cfg, &["password"]).unwrap_or_default();
+    let server = str_field(cfg, &["server"]).unwrap_or_else(|| node.server.clone());
+    let port = port_field(cfg).unwrap_or(node.port);
+    let name = str_field(cfg, &["name"]).unwrap_or_else(|| node.name.clone());
+    let mut q: Vec<(String, String)> = Vec::new();
+    if let Some(sni) = str_field(cfg, &["sni"]).filter(|s| !s.is_empty()) {
+        q.push(("sni".into(), sni));
+    }
+    if let Some(cc) =
+        str_field(cfg, &["congestion-control", "congestion_control"]).filter(|s| !s.is_empty())
+    {
+        q.push(("congestion_control".into(), cc));
+    }
+    if let Some(true) = cfg.get("insecure").and_then(|v| v.as_bool()) {
+        q.push(("allow_insecure".into(), "1".into()));
+    }
+    if let Some(chain) =
+        str_field(cfg, &["pinned-cert-chain", "pinned_cert_chain"]).filter(|s| !s.is_empty())
+    {
+        q.push(("pinned_cert_chain".into(), chain));
+    }
+    let mut uri = format!("juicity://{uuid}:{password}@{server}:{port}");
+    if !q.is_empty() {
+        let query = q
+            .into_iter()
+            .map(|(k, v)| format!("{}={}", k, urlencoding_lite(&v)))
+            .collect::<Vec<_>>()
+            .join("&");
+        uri.push('?');
+        uri.push_str(&query);
+    }
+    if !name.is_empty() {
+        uri.push('#');
+        uri.push_str(&urlencoding_lite(&name));
+    }
+    Some(uri)
+}
+
+/// shadowtls://password@host:port?sni=..&version=..&next=<内层 ss 链接>#name
+/// （cfg 为内层合并后的 ss + plugin 形态；无内层字段时输出存档形态）
+fn rebuild_shadowtls_uri(cfg: &Value, node: &Node) -> Option<String> {
+    let server = str_field(cfg, &["server"]).unwrap_or_else(|| node.server.clone());
+    let port = port_field(cfg).unwrap_or(node.port);
+    let name = str_field(cfg, &["name"]).unwrap_or_else(|| node.name.clone());
+    let opts = cfg.get("plugin-opts").cloned().unwrap_or(Value::Null);
+    let password = str_field(&opts, &["password"])
+        .or_else(|| str_field(cfg, &["password"]).filter(|_| cfg.get("plugin").is_none()))?;
+    let mut q: Vec<(String, String)> = Vec::new();
+    if let Some(host) = str_field(&opts, &["host", "sni"]).filter(|s| !s.is_empty()) {
+        q.push(("sni".into(), host));
+    }
+    q.push((
+        "version".into(),
+        str_field(&opts, &["version"]).unwrap_or_else(|| "3".into()),
+    ));
+    // 内层 ss 链接（plugin 形态才携带 next=）
+    if cfg.get("plugin").and_then(|v| v.as_str()) == Some("shadow-tls") {
+        let method = str_field(cfg, &["cipher", "method"])?;
+        let inner_password = str_field(cfg, &["password"])?;
+        let userinfo = B64.encode(format!("{method}:{inner_password}"));
+        let inner = format!("ss://{userinfo}@{server}:{port}");
+        q.push(("next".into(), inner));
+    }
+    let query = q
+        .into_iter()
+        .map(|(k, v)| format!("{}={}", k, urlencoding_lite(&v)))
+        .collect::<Vec<_>>()
+        .join("&");
+    let mut uri = format!("shadowtls://{password}@{server}:{port}?{query}");
     if !name.is_empty() {
         uri.push('#');
         uri.push_str(&urlencoding_lite(&name));
@@ -1095,10 +1381,13 @@ fn rebuild_hysteria1_uri(cfg: &Value, node: &Node) -> Option<String> {
     if !auth.is_empty() {
         q.push(("auth".into(), auth));
     }
-    if let Some(sni) = str_field(cfg, &["sni", "peer", "server_name", "server-name"]).filter(|s| !s.is_empty()) {
+    if let Some(sni) =
+        str_field(cfg, &["sni", "peer", "server_name", "server-name"]).filter(|s| !s.is_empty())
+    {
         q.push(("peer".into(), sni));
     }
-    let insecure = extract_skip_cert_verify(cfg.as_object().unwrap_or(&serde_json::Map::new()), node);
+    let insecure =
+        extract_skip_cert_verify(cfg.as_object().unwrap_or(&serde_json::Map::new()), node);
     if insecure {
         q.push(("insecure".into(), "1".into()));
     }
@@ -1582,5 +1871,160 @@ mod tests {
         assert!(uris[0].contains("auth=secret"));
         assert!(uris[0].contains("insecure=1"));
         assert!(uris[0].contains("#my-hy1"));
+    }
+
+    #[test]
+    fn rebuild_snell_share_uri() {
+        let node = sample_node(
+            "snell",
+            json!({
+                "type": "snell",
+                "server": "5.6.7.8",
+                "port": 6160,
+                "psk": "psk-secret",
+                "version": 4,
+                "name": "my-snell"
+            }),
+            "",
+        );
+        let uris = nodes_to_share_uris(&[node]);
+        assert_eq!(uris.len(), 1);
+        assert!(uris[0].starts_with("snell://psk-secret@5.6.7.8:6160"));
+        assert!(uris[0].contains("version=4"));
+        assert!(uris[0].contains("#my-snell"));
+    }
+
+    #[test]
+    fn rebuild_naive_share_uri() {
+        let node = sample_node(
+            "naive",
+            json!({
+                "type": "naive",
+                "server": "9.9.9.9",
+                "port": 443,
+                "username": "alice",
+                "password": "wonder",
+                "sni": "naive.example.com",
+                "name": "my-naive"
+            }),
+            "",
+        );
+        let uris = nodes_to_share_uris(&[node]);
+        assert_eq!(uris.len(), 1);
+        assert!(uris[0].starts_with("naive+https://alice:wonder@9.9.9.9:443"));
+        assert!(uris[0].contains("sni=naive.example.com"));
+        assert!(uris[0].contains("#my-naive"));
+    }
+
+    #[test]
+    fn rebuild_mieru_share_uri() {
+        let node = sample_node(
+            "mieru",
+            json!({
+                "type": "mieru",
+                "server": "7.7.7.7",
+                "port": 28888,
+                "username": "bob",
+                "password": "builder",
+                "transport": "wss",
+                "multiplexing": "QUIC",
+                "name": "my-mieru"
+            }),
+            "",
+        );
+        let uris = nodes_to_share_uris(&[node]);
+        assert_eq!(uris.len(), 1);
+        assert!(uris[0].starts_with("mieru://bob:builder@7.7.7.7:28888"));
+        assert!(uris[0].contains("transport=wss"));
+        assert!(uris[0].contains("multiplexing=QUIC"));
+        assert!(uris[0].contains("#my-mieru"));
+    }
+
+    #[test]
+    fn rebuild_ssh_share_uri() {
+        let node = sample_node(
+            "ssh",
+            json!({
+                "type": "ssh",
+                "server": "8.8.8.8",
+                "port": 22,
+                "username": "root",
+                "password": "toor",
+                "name": "my-ssh"
+            }),
+            "",
+        );
+        let uris = nodes_to_share_uris(&[node]);
+        assert_eq!(uris.len(), 1);
+        assert!(uris[0].starts_with("ssh://root:toor@8.8.8.8:22"));
+        assert!(uris[0].contains("#my-ssh"));
+    }
+
+    #[test]
+    fn rebuild_juicity_share_uri() {
+        let node = sample_node(
+            "juicity",
+            json!({
+                "type": "juicity",
+                "server": "6.6.6.6",
+                "port": 8443,
+                "uuid": "b54d39f7-9204-4680-ba76-2e84c59ff06a",
+                "password": "juice",
+                "sni": "jc.example.com",
+                "congestion-control": "bbr",
+                "name": "my-juicity"
+            }),
+            "",
+        );
+        let uris = nodes_to_share_uris(&[node]);
+        assert_eq!(uris.len(), 1);
+        assert!(uris[0]
+            .starts_with("juicity://b54d39f7-9204-4680-ba76-2e84c59ff06a:juice@6.6.6.6:8443"));
+        assert!(uris[0].contains("sni=jc.example.com"));
+        assert!(uris[0].contains("congestion_control=bbr"));
+        assert!(uris[0].contains("#my-juicity"));
+    }
+
+    #[test]
+    fn rebuild_shadowtls_merged_share_uri() {
+        let node = sample_node(
+            "shadowsocks",
+            json!({
+                "type": "ss",
+                "server": "st.example.com",
+                "port": 443,
+                "cipher": "aes-128-gcm",
+                "password": "sspass",
+                "plugin": "shadow-tls",
+                "plugin-opts": {
+                    "host": "www.apple.com",
+                    "password": "stls-pass",
+                    "version": 3
+                },
+                "name": "my-stls"
+            }),
+            "",
+        );
+        let uris = nodes_to_share_uris(&[node]);
+        assert_eq!(uris.len(), 1);
+        assert!(uris[0].starts_with("shadowtls://stls-pass@st.example.com:443"));
+        assert!(uris[0].contains("sni=www.apple.com"));
+        assert!(uris[0].contains("version=3"));
+        // 内层 ss 链接以 next= 形式携带（URL 编码）
+        assert!(uris[0].contains("next=ss%3A%2F%2F"));
+        assert!(uris[0].contains("#my-stls"));
+
+        // 导出的链接应能被解析器无损还原
+        let parsed = crate::parser::parse_uri(&uris[0], None).expect("round-trip parse");
+        assert_eq!(parsed.protocol, "shadowsocks");
+        assert_eq!(parsed.server, "st.example.com");
+        assert_eq!(
+            parsed.config.get("cipher").and_then(|v| v.as_str()),
+            Some("aes-128-gcm")
+        );
+        assert_eq!(
+            parsed.config.get("password").and_then(|v| v.as_str()),
+            Some("sspass")
+        );
     }
 }

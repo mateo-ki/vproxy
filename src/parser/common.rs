@@ -8,12 +8,12 @@ use regex::Regex;
 
 static URI_RE: Lazy<Regex> = Lazy::new(|| {
     // Match common proxy share links in free text.
-    Regex::new(r"(?i)\b((?:ss|ssr|shadowsocksr|vmess|vless|trojan|tuic|hysteria|hysteria2|hy2|wireguard|wg|socks5|socks|http|https|masque)://[^\s<>'\]\)]+)")
+    Regex::new(r"(?i)\b((?:ss|ssr|shadowsocksr|vmess|vless|trojan|tuic|hysteria|hysteria2|hy2|wireguard|wg|socks5|socks|http|https|masque|snell|naive\+https|naive\+quic|naive|mieru|ssh|tailscale|juicity|shadowtls)://[^\s<>'\]\)]+)")
         .expect("uri regex")
 });
 
 static LINE_URI_RE: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"(?i)^(ss|ssr|shadowsocksr|vmess|vless|trojan|tuic|hysteria|hysteria2|hy2|wireguard|wg|socks5|socks|masque)://\S+")
+    Regex::new(r"(?i)^(ss|ssr|shadowsocksr|vmess|vless|trojan|tuic|hysteria|hysteria2|hy2|wireguard|wg|socks5|socks|masque|snell|naive\+https|naive\+quic|naive|mieru|ssh|tailscale|juicity|shadowtls)://\S+")
         .expect("line uri regex")
 });
 
@@ -304,4 +304,3 @@ mod tests {
         assert!(decoded_str.contains("vless://"));
     }
 }
-

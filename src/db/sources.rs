@@ -42,11 +42,17 @@ impl Database {
         }
 
         // 动态校准未分组/导入源的当前真实节点总数（若节点分片库已落盘）
-        if let Some(ungrouped) = sources.iter_mut().find(|s| s.id == super::UNGROUPED_SOURCE_ID) {
+        if let Some(ungrouped) = sources
+            .iter_mut()
+            .find(|s| s.id == super::UNGROUPED_SOURCE_ID)
+        {
             let ungrouped_path = self.node_db_path(None);
             if ungrouped_path.exists() {
                 if let Ok(pool) = self.open_node_pool(None).await {
-                    if let Ok(count) = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM nodes").fetch_one(&pool).await {
+                    if let Ok(count) = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM nodes")
+                        .fetch_one(&pool)
+                        .await
+                    {
                         ungrouped.last_node_count = count;
                     }
                 }

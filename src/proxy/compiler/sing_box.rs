@@ -7,9 +7,7 @@ use anyhow::{anyhow, Result};
 use serde_json::{json, Map, Value};
 use std::collections::HashSet;
 
-pub use crate::constants::proxy::{
-    GEOIP_CN_URL, GEOSITE_ADS_URL, GEOSITE_CN_URL, GEOSITE_GFW_URL,
-};
+pub use crate::constants::proxy::{GEOIP_CN_URL, GEOSITE_ADS_URL, GEOSITE_CN_URL, GEOSITE_GFW_URL};
 
 pub struct SingBoxCompiler {
     capabilities: CompilerCapabilities,
@@ -66,10 +64,19 @@ impl BackendCompiler for SingBoxCompiler {
             node.protocol.to_ascii_lowercase().as_str(),
             "wireguard" | "wg"
         );
+        let mut shadowtls_endpoint: Option<Value> = None;
         let proxy = if wireguard {
             build_wireguard_endpoint(node)?
         } else {
-            build_proxy_outbound(node, plan)?
+            // shadow-tls 链式节点（内层 ss + plugin: shadow-tls）→
+            // sing-box 1.11+ endpoint 形态：ss 出站 detour 到 shadowtls endpoint
+            match build_shadowtls_pair(node) {
+                Some((ss_out, stls_ep)) => {
+                    shadowtls_endpoint = Some(stls_ep);
+                    ss_out
+                }
+                None => build_proxy_outbound(node, plan)?,
+            }
         };
 
         // 入站构建
@@ -159,10 +166,13 @@ impl BackendCompiler for SingBoxCompiler {
                         rule_obj.insert("process_name".into(), json!([p]));
                     }
                     IRMatcher::Network(proto) => {
-                        rule_obj.insert("network".into(), json!(match proto {
-                            crate::proxy::NetworkProtocol::Tcp => "tcp",
-                            crate::proxy::NetworkProtocol::Udp => "udp",
-                        }));
+                        rule_obj.insert(
+                            "network".into(),
+                            json!(match proto {
+                                crate::proxy::NetworkProtocol::Tcp => "tcp",
+                                crate::proxy::NetworkProtocol::Udp => "udp",
+                            }),
+                        );
                     }
                     IRMatcher::Inbound(tag) => {
                         rule_obj.insert("inbound".into(), json!([tag]));
@@ -247,6 +257,8 @@ impl BackendCompiler for SingBoxCompiler {
         if wireguard {
             config["endpoints"] = json!([proxy]);
             config["outbounds"] = json!([{ "type": "direct", "tag": "direct" }]);
+        } else if let Some(ep) = shadowtls_endpoint {
+            config["endpoints"] = json!([ep]);
         }
 
         Ok(CompiledArtifact::Json(config))
@@ -292,14 +304,101 @@ pub fn build_dns(nameservers: &[String], ipv6: bool) -> Result<Value> {
     }))
 }
 
+/// shadow-tls 链式节点（内层 ss + `plugin: shadow-tls`）→
+/// (ss 出站带 detour, shadowtls endpoint)。非该形态节点返回 None。
+fn build_shadowtls_pair(node: &Node) -> Option<(Value, Value)> {
+    let cfg = &node.config;
+    if cfg.get("type").and_then(Value::as_str) != Some("ss") {
+        return None;
+    }
+    if cfg.get("plugin").and_then(Value::as_str) != Some("shadow-tls") {
+        return None;
+    }
+    let opts = cfg.get("plugin-opts")?;
+    let stls_password = opts.get("password").and_then(Value::as_str)?;
+    let sni = opts
+        .get("host")
+        .or_else(|| opts.get("sni"))
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+        .unwrap_or(&node.server);
+    let version = opts
+        .get("version")
+        .and_then(Value::as_u64)
+        .unwrap_or(3)
+        .clamp(1, 3);
+    let method = str_field_ss(cfg)?;
+    let ss_password = cfg.get("password").and_then(Value::as_str)?;
+
+    let mut ss_out = common_outbound("ss", node);
+    ss_out.insert("method".into(), json!(method));
+    ss_out.insert("password".into(), json!(ss_password));
+    ss_out.insert("detour".into(), json!("shadowtls-endpoint"));
+    if cfg.get("udp").and_then(Value::as_bool) != Some(false) {
+        ss_out.insert("udp_over_tcp".into(), json!(false));
+    }
+
+    let mut endpoint = Map::new();
+    endpoint.insert("type".into(), json!("shadowtls"));
+    endpoint.insert("tag".into(), json!("shadowtls-endpoint"));
+    endpoint.insert("server".into(), json!(node.server));
+    endpoint.insert("server_port".into(), json!(node.port));
+    endpoint.insert("version".into(), json!(version));
+    endpoint.insert("password".into(), json!(stls_password));
+    endpoint.insert("tls".into(), json!({ "enabled": true, "server_name": sni }));
+    Some((Value::Object(ss_out), Value::Object(endpoint)))
+}
+
+/// ss 节点加密方法（cipher/method 双键兼容）
+fn str_field_ss(cfg: &Value) -> Option<String> {
+    ["cipher", "method"]
+        .iter()
+        .find_map(|k| cfg.get(*k).and_then(Value::as_str).map(String::from))
+        .filter(|s| !s.is_empty())
+}
+
 fn build_proxy_outbound(node: &Node, plan: &RoutingPlan) -> Result<Value> {
     let protocol = node.protocol.to_ascii_lowercase();
     match protocol.as_str() {
         "hysteria2" | "hy2" => build_hysteria2(node, plan),
         "tuic" => build_tuic(node, plan),
         "anytls" => build_anytls(node, plan),
+        "ssh" => build_ssh(node),
         _ => Err(anyhow!("Sing-box 暂不支持协议转换: {}", node.protocol)),
     }
+}
+
+/// sing-box SSH 出站：user + 密码 / 私钥（二选一），host_key 为数组语义
+fn build_ssh(node: &Node) -> Result<Value> {
+    let username = string_value(&node.config, &["username", "user"])
+        .ok_or_else(|| anyhow!("SSH 节点缺少 username"))?;
+    let mut outbound = common_outbound("ssh", node);
+    outbound.insert("user".into(), json!(username));
+    if let Some(password) = string_value(&node.config, &["password"]).filter(|s| !s.is_empty()) {
+        outbound.insert("password".into(), json!(password));
+    }
+    if let Some(private_key) =
+        string_value(&node.config, &["private-key", "private_key"]).filter(|s| !s.is_empty())
+    {
+        outbound.insert("private_key".into(), json!(private_key));
+    }
+    if let Some(private_key_passphrase) = string_value(
+        &node.config,
+        &["private-key-passphrase", "private_key_passphrase"],
+    )
+    .filter(|s| !s.is_empty())
+    {
+        outbound.insert(
+            "private_key_passphrase".into(),
+            json!(private_key_passphrase),
+        );
+    }
+    if let Some(host_key) =
+        string_value(&node.config, &["host-key", "host_key"]).filter(|s| !s.is_empty())
+    {
+        outbound.insert("host_key".into(), json!([host_key]));
+    }
+    Ok(Value::Object(outbound))
 }
 
 fn build_hysteria2(node: &Node, plan: &RoutingPlan) -> Result<Value> {
@@ -316,7 +415,10 @@ fn build_hysteria2(node: &Node, plan: &RoutingPlan) -> Result<Value> {
     if plan.outbounds.udp_port_hopping && !plan.outbounds.hop_ports.trim().is_empty() {
         outbound.insert("hop_interval".into(), json!("30s"));
     }
-    outbound.insert("tls".into(), tls_config(node, plan.outbounds.client_fingerprint.as_deref()));
+    outbound.insert(
+        "tls".into(),
+        tls_config(node, plan.outbounds.client_fingerprint.as_deref()),
+    );
     Ok(Value::Object(outbound))
 }
 
@@ -335,7 +437,10 @@ fn build_tuic(node: &Node, plan: &RoutingPlan) -> Result<Value> {
         .unwrap_or("cubic")),
     );
     outbound.insert("udp_relay_mode".into(), json!("native"));
-    outbound.insert("tls".into(), tls_config(node, plan.outbounds.client_fingerprint.as_deref()));
+    outbound.insert(
+        "tls".into(),
+        tls_config(node, plan.outbounds.client_fingerprint.as_deref()),
+    );
     Ok(Value::Object(outbound))
 }
 
@@ -343,7 +448,10 @@ fn build_anytls(node: &Node, plan: &RoutingPlan) -> Result<Value> {
     let password = required_string(&node.config, &["password"])?;
     let mut outbound = common_outbound("anytls", node);
     outbound.insert("password".into(), json!(password));
-    outbound.insert("tls".into(), tls_config(node, plan.outbounds.client_fingerprint.as_deref()));
+    outbound.insert(
+        "tls".into(),
+        tls_config(node, plan.outbounds.client_fingerprint.as_deref()),
+    );
     Ok(Value::Object(outbound))
 }
 
@@ -422,7 +530,8 @@ fn tls_config(node: &Node, client_fingerprint: Option<&str>) -> Value {
     if let Some(alpn) = node.config.get("alpn").and_then(Value::as_array) {
         tls.insert("alpn".into(), Value::Array(alpn.clone()));
     }
-    let fp = client_fingerprint.or_else(|| string_value(&node.config, &["fp", "client-fingerprint"]));
+    let fp =
+        client_fingerprint.or_else(|| string_value(&node.config, &["fp", "client-fingerprint"]));
     if let Some(fp_str) = fp {
         tls.insert(
             "utls".into(),
@@ -498,4 +607,77 @@ fn bool_value(config: &Value, keys: &[&str]) -> Option<bool> {
         Value::Number(n) => Some(n.as_i64() == Some(1)),
         _ => None,
     })
+}
+
+#[cfg(test)]
+mod shadowtls_export_tests {
+    use super::*;
+    use crate::proxy::ir::lower_options_to_ir;
+    use crate::proxy::MihomoConfigOptions;
+    use serde_json::json;
+
+    fn test_node(config: Value) -> Node {
+        Node {
+            id: "t".into(),
+            source_id: None,
+            name: "st-node".into(),
+            protocol: "shadowsocks".into(),
+            server: "st.example.com".into(),
+            port: 443,
+            raw: String::new(),
+            config,
+            country: None,
+            latency_ms: None,
+            latency_ok: None,
+            download_kbps: None,
+            latency_kernel: None,
+            latency_test_kind: None,
+            latency_tested_at: None,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        }
+    }
+
+    #[test]
+    fn shadowtls_ss_compiles_to_endpoint_with_detour() {
+        let node = test_node(json!({
+            "type": "ss",
+            "server": "st.example.com",
+            "port": 443,
+            "cipher": "aes-128-gcm",
+            "password": "ss-pass",
+            "plugin": "shadow-tls",
+            "plugin-opts": {
+                "host": "www.apple.com",
+                "password": "stls-pass",
+                "version": 3
+            },
+            "name": "st-node"
+        }));
+        let plan = lower_options_to_ir(&MihomoConfigOptions::default(), Some(&node));
+        let artifact = SingBoxCompiler::new().compile(&plan).expect("compile");
+        let val = artifact.as_json_value().expect("json");
+
+        let endpoints = val
+            .get("endpoints")
+            .and_then(|v| v.as_array())
+            .expect("endpoints");
+        assert_eq!(endpoints.len(), 1);
+        let ep = &endpoints[0];
+        assert_eq!(ep["type"], "shadowtls");
+        assert_eq!(ep["tag"], "shadowtls-endpoint");
+        assert_eq!(ep["server"], "st.example.com");
+        assert_eq!(ep["version"], 3);
+        assert_eq!(ep["password"], "stls-pass");
+        assert_eq!(ep["tls"]["server_name"], "www.apple.com");
+
+        let outbounds = val["outbounds"].as_array().expect("outbounds");
+        let ss = outbounds
+            .iter()
+            .find(|o| o["type"] == "ss")
+            .expect("ss outbound");
+        assert_eq!(ss["detour"], "shadowtls-endpoint");
+        assert_eq!(ss["method"], "aes-128-gcm");
+        assert_eq!(ss["password"], "ss-pass");
+    }
 }

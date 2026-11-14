@@ -1,5 +1,8 @@
 # 代理运行 MVP 任务清单
 
+> **存档说明（2026-11-14）**：阶段 1–16 已全部交付，仅个别手工 GUI 验证项未勾选；阶段 17（节点发布平台）属独立服务端仓库。
+> 本清单此后不再滚动更新，当前能力口径见 **[docs/architecture.md](docs/architecture.md)**，版本变更见 [RELEASE_NOTES.md](RELEASE_NOTES.md)。
+
 ## 阶段 1：内核管理地基
 
 - [x] 新增 `src/kernel` 模块。

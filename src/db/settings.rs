@@ -138,7 +138,8 @@ impl Database {
                 .map(|value| crate::models::clamp_ui_scale(value as f32))
                 .unwrap_or_else(|_| crate::models::AppSettings::default().ui_scale),
             ui_dark: sqlx::Row::try_get::<i64, _>(&row, "ui_dark").unwrap_or(0) != 0,
-            sidebar_expanded: sqlx::Row::try_get::<i64, _>(&row, "sidebar_expanded").unwrap_or(0) != 0,
+            sidebar_expanded: sqlx::Row::try_get::<i64, _>(&row, "sidebar_expanded").unwrap_or(0)
+                != 0,
             kernel_source: sqlx::Row::try_get::<String, _>(&row, "kernel_source")
                 .unwrap_or_else(|_| crate::models::AppSettings::default().kernel_source),
             firewall_auto_allow: sqlx::Row::try_get::<i64, _>(&row, "firewall_auto_allow")
@@ -158,11 +159,9 @@ impl Database {
                 .unwrap_or(1)
                 != 0,
             // 缺列时按"开"读：新装默认管理员启动，不能因为列暂时不在就变成关。
-            launch_as_admin: sqlx::Row::try_get::<i64, _>(&row, "launch_as_admin")
-                .unwrap_or(1)
+            launch_as_admin: sqlx::Row::try_get::<i64, _>(&row, "launch_as_admin").unwrap_or(1)
                 != 0,
-            launch_at_startup: sqlx::Row::try_get::<i64, _>(&row, "launch_at_startup")
-                .unwrap_or(0)
+            launch_at_startup: sqlx::Row::try_get::<i64, _>(&row, "launch_at_startup").unwrap_or(0)
                 != 0,
             speedtest_added_source: sqlx::Row::try_get::<i64, _>(&row, "speedtest_added_source")
                 .unwrap_or(1)

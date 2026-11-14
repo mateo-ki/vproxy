@@ -88,9 +88,7 @@ impl Database {
             node_pools: std::sync::Arc::new(
                 std::sync::Mutex::new(std::collections::HashMap::new()),
             ),
-            node_summaries_cache: std::sync::Arc::new(
-                tokio::sync::RwLock::new(None),
-            ),
+            node_summaries_cache: std::sync::Arc::new(tokio::sync::RwLock::new(None)),
         };
         db.migrate().await?;
         let _ = db.prune_telemetry().await;
@@ -230,7 +228,9 @@ impl Database {
             }
         }
         // 同时释放主库连接池中未使用的缓存页
-        let _ = sqlx::query("PRAGMA shrink_memory;").execute(&self.pool).await;
+        let _ = sqlx::query("PRAGMA shrink_memory;")
+            .execute(&self.pool)
+            .await;
     }
 
     pub(crate) async fn find_node_pool(&self, id: &str) -> Result<Option<SqlitePool>> {
@@ -397,7 +397,6 @@ pub(crate) fn dedupe_keep_score(n: &Node) -> i64 {
     score += n.updated_at.timestamp() / 1_000_000;
     score
 }
-
 
 #[cfg(test)]
 mod tests;
