@@ -658,7 +658,10 @@ mod policy_group_filter_tests {
         use super::visible_group_names;
 
         // 什么都没配：整条胶囊只有「全部」。
-        assert_eq!(visible_group_names(false, None, None, &[]), vec!["全部".to_string()]);
+        assert_eq!(
+            visible_group_names(false, None, None, &[]),
+            vec!["全部".to_string()]
+        );
 
         // 反向判据：内置的「普通代理」按节点匹配能命中每一个节点，
         // 但配置里没有它就不该出现 —— 否则这条改动等于没做。
@@ -707,14 +710,18 @@ mod policy_group_filter_tests {
     fn test_override_yaml_groups_count_as_configured() {
         use super::{override_group_names, visible_group_names};
 
-        let document = "proxy-groups:\n  - name: 我的分组\n    type: select\n    proxies: [DIRECT]\n";
+        let document =
+            "proxy-groups:\n  - name: 我的分组\n    type: select\n    proxies: [DIRECT]\n";
         assert_eq!(
             override_group_names(Some(document)),
             vec!["我的分组".to_string()]
         );
         // 覆写也允许直接给一个组数组（与 proxy 侧应用覆写时的分叉一致）。
         let bare = "- name: 裸数组分组\n  type: url-test\n";
-        assert_eq!(override_group_names(Some(bare)), vec!["裸数组分组".to_string()]);
+        assert_eq!(
+            override_group_names(Some(bare)),
+            vec!["裸数组分组".to_string()]
+        );
         assert!(override_group_names(None).is_empty());
         assert!(override_group_names(Some("   ")).is_empty());
         // 坏 YAML 不许带崩界面：按"没有覆写组"处理。
@@ -822,7 +829,11 @@ mod egress_ip_badge_tests {
         }
     }
 
-    fn view(risk: Option<&crate::ip_risk::IpRisk>, failed: bool, checking: bool) -> EgressRiskView<'_> {
+    fn view(
+        risk: Option<&crate::ip_risk::IpRisk>,
+        failed: bool,
+        checking: bool,
+    ) -> EgressRiskView<'_> {
         EgressRiskView {
             risk,
             failed,
@@ -864,7 +875,13 @@ mod egress_ip_badge_tests {
         let got = display_risk(Some("n1"), Some("n1"), None, Some("n1"), Some(&front));
         assert_eq!(got.map(|risk| risk.datacenter), Some(true));
         // 出口真的查到了，才轮到它优先。
-        let both = display_risk(Some("n1"), Some("n1"), Some(&egress), Some("n1"), Some(&front));
+        let both = display_risk(
+            Some("n1"),
+            Some("n1"),
+            Some(&egress),
+            Some("n1"),
+            Some(&front),
+        );
         assert_eq!(both.map(|risk| risk.datacenter), Some(false));
         // 归属是别的节点的，不许串过来。
         let none = display_risk(Some("n1"), None, None, Some("n2"), Some(&front));

@@ -8,7 +8,11 @@ impl VpnApp {
     pub(crate) fn ui_extensions(&mut self, ui: &mut Ui) {
         let tabs = [
             (ExtensionsTab::Security, Icon::Shield, self.tr("隐私安全")),
-            (ExtensionsTab::PortMappings, Icon::Plug, self.tr("活动节点列表")),
+            (
+                ExtensionsTab::PortMappings,
+                Icon::Plug,
+                self.tr("活动节点列表"),
+            ),
         ];
 
         macos_segmented_tabs(ui, &mut self.extensions_tab, &tabs);

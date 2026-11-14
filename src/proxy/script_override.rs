@@ -232,9 +232,10 @@ fn main(config) {
         let mut config = json!({ "mixed-port": 7890 });
         // fn main 里改了字段但忘写 return config; —— Rhai 返回 unit，
         // 必须报"如何修"而不是 serde 天书。
-        let err = apply_script_override(&mut config, "fn main(config) { config.mixed_port = 9090; }")
-            .unwrap_err()
-            .to_string();
+        let err =
+            apply_script_override(&mut config, "fn main(config) { config.mixed_port = 9090; }")
+                .unwrap_err()
+                .to_string();
         assert!(
             err.contains("return config"),
             "缺少 return 的报错必须指引补上 return config;: {err}"

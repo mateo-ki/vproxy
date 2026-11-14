@@ -5,9 +5,7 @@ use crate::proxy::verify_nodes_with_kernel_progress;
 use crate::proxy_probe::{ProxyProbeProgress, ProxyProbeResult};
 use crate::speedtest::dns::resolve_targets_parallel;
 use crate::speedtest::prefilter::probe_full_resolved;
-use crate::speedtest::{
-    SpeedTestOptions, SpeedTestPhase, SpeedTestProgress, SpeedtestIntensity,
-};
+use crate::speedtest::{SpeedTestOptions, SpeedTestPhase, SpeedTestProgress, SpeedtestIntensity};
 use anyhow::Result;
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -47,7 +45,11 @@ pub fn node_physical_egress_key(node: &Node, resolved_ip: Option<std::net::IpAdd
         .config
         .get("path")
         .or_else(|| node.config.get("ws-opts").and_then(|w| w.get("path")))
-        .or_else(|| node.config.get("grpc-opts").and_then(|g| g.get("grpc-service-name")))
+        .or_else(|| {
+            node.config
+                .get("grpc-opts")
+                .and_then(|g| g.get("grpc-service-name"))
+        })
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .trim()
@@ -82,7 +84,11 @@ pub fn reaches_proxy_stage(
             }
             // 若为域名，且解析出的地址疑似包含被投毒/保留地址，放行交由内核 DoH 尝试解析
             let is_domain = result.server.parse::<std::net::IpAddr>().is_err();
-            if is_domain && addresses.iter().any(|sa| crate::speedtest::dns::is_suspected_polluted_ip(&sa.ip())) {
+            if is_domain
+                && addresses
+                    .iter()
+                    .any(|sa| crate::speedtest::dns::is_suspected_polluted_ip(&sa.ip()))
+            {
                 return true;
             }
             false
@@ -130,7 +136,10 @@ pub async fn run_speedtest_pipeline(
         .collect();
     let concurrency = opts.concurrency.clamp(1, 512) as usize;
     let (prefilter_timeout_ms, proxy_timeout_duration) = match opts.intensity {
-        SpeedtestIntensity::Fast => (opts.timeout_ms.clamp(800, 1500), Duration::from_millis(3000)),
+        SpeedtestIntensity::Fast => (
+            opts.timeout_ms.clamp(800, 1500),
+            Duration::from_millis(3000),
+        ),
         // 预筛只是一次 TCP SYN：1.5s 内握手没回来基本就是死节点。以前把内核测速的
         // 超时（用户可设 5s）原样带进预筛，死节点每个吃满 2.5~5s，几万节点的库
         // 第一阶段要干等十几分钟——SYN 不值得这么耐心，这里独立封顶。
@@ -190,10 +199,7 @@ pub async fn run_speedtest_pipeline(
     //    concurrency。旧实现先为全量节点 spawn task、再在 task 内等信号量，大节点库下
     //    等待 task 及其携带的节点副本会随节点数线性膨胀。
     let (job_tx, job_rx) =
-        tokio::sync::mpsc::unbounded_channel::<(
-            Node,
-            Result<Vec<std::net::SocketAddr>, String>,
-        )>();
+        tokio::sync::mpsc::unbounded_channel::<(Node, Result<Vec<std::net::SocketAddr>, String>)>();
     let (result_tx, mut result_rx) =
         tokio::sync::mpsc::channel::<LatencyResult>(concurrency.max(4));
     let mut tasks = JoinSet::new();
@@ -211,68 +217,65 @@ pub async fn run_speedtest_pipeline(
                     let network_limit = network_limit.clone();
                     async {
                         let _net_permit = match network_limit.acquire_owned().await {
-                        Ok(permit) => permit,
-                        Err(_) => {
+                            Ok(permit) => permit,
+                            Err(_) => {
+                                return LatencyResult {
+                                    id: node.id,
+                                    name: node.name,
+                                    server: node.server,
+                                    port: node.port,
+                                    ok: false,
+                                    latency_ms: None,
+                                    download_kbps: None,
+                                    latency_kernel: None,
+                                    latency_test_kind: Some("concurrency_limit".into()),
+                                    message: "测速并发控制已关闭".into(),
+                                };
+                            }
+                        };
+
+                        if requires_proxy_without_tcp(&node.protocol) {
+                            let can_resolve =
+                                addresses.as_ref().map(|a| !a.is_empty()).unwrap_or(false);
+                            let message = if can_resolve {
+                                "UDP/QUIC 协议跳过 TCP 预筛，直进内核握手".to_string()
+                            } else {
+                                format!("DNS 解析失败: {:?}", addresses.err().unwrap_or_default())
+                            };
                             return LatencyResult {
                                 id: node.id,
                                 name: node.name,
                                 server: node.server,
                                 port: node.port,
-                                ok: false,
+                                ok: can_resolve,
                                 latency_ms: None,
                                 download_kbps: None,
                                 latency_kernel: None,
-                                latency_test_kind: Some("concurrency_limit".into()),
-                                message: "测速并发控制已关闭".into(),
+                                latency_test_kind: (!can_resolve).then(|| "dns_fail".into()),
+                                message,
                             };
                         }
-                    };
 
-                    if requires_proxy_without_tcp(&node.protocol) {
-                        let can_resolve =
-                            addresses.as_ref().map(|a| !a.is_empty()).unwrap_or(false);
-                        let message = if can_resolve {
-                            "UDP/QUIC 协议跳过 TCP 预筛，直进内核握手".to_string()
-                        } else {
-                            format!(
-                                "DNS 解析失败: {:?}",
-                                addresses.err().unwrap_or_default()
-                            )
-                        };
-                        return LatencyResult {
+                        let (ok, latency_ms, download_kbps, message) = probe_full_resolved(
+                            &node.server,
+                            node.port,
+                            prefilter_timeout_ms,
+                            addresses,
+                        )
+                        .await;
+
+                        LatencyResult {
                             id: node.id,
                             name: node.name,
                             server: node.server,
                             port: node.port,
-                            ok: can_resolve,
-                            latency_ms: None,
-                            download_kbps: None,
+                            ok,
+                            latency_ms,
+                            download_kbps,
                             latency_kernel: None,
-                            latency_test_kind: (!can_resolve).then(|| "dns_fail".into()),
+                            latency_test_kind: (!ok).then(|| "tcp_prefilter".into()),
                             message,
-                        };
-                    }
-
-                    let (ok, latency_ms, download_kbps, message) = probe_full_resolved(
-                        &node.server,
-                        node.port,
-                        prefilter_timeout_ms,
-                        addresses,
-                    )
-                    .await;
-
-                    LatencyResult {
-                        id: node.id,
-                        name: node.name,
-                        server: node.server,
-                        port: node.port,
-                        ok,
-                        latency_ms,
-                        download_kbps,
-                        latency_kernel: None,
-                        latency_test_kind: (!ok).then(|| "tcp_prefilter".into()),
-                        message,
-                    }
+                        }
                     }
                     .await
                 };
@@ -402,19 +405,14 @@ pub async fn run_speedtest_pipeline(
     let proxy_candidates: Vec<Node> = results
         .iter()
         .filter(|result| {
-            reaches_proxy_stage(
-                result,
-                resolved.get(&(result.server.clone(), result.port)),
-            )
+            reaches_proxy_stage(result, resolved.get(&(result.server.clone(), result.port)))
         })
         .filter_map(|result| proxy_nodes.remove(&result.id))
         .collect();
 
     let prefilter_failures: Vec<_> = results
         .iter()
-        .filter(|result| {
-            !result.ok && !proxy_candidates.iter().any(|c| c.id == result.id)
-        })
+        .filter(|result| !result.ok && !proxy_candidates.iter().any(|c| c.id == result.id))
         .map(|result| {
             (
                 result.id.clone(),
@@ -814,7 +812,8 @@ pub async fn run_speedtest_pipeline(
             if opts.measure_download && result.ok {
                 if let Some(ms) = result.latency_ms {
                     let base_mbps = (920.0 / (ms as f32).max(18.0).powf(0.52)).clamp(6.0, 380.0);
-                    let jitter_seed = (result.id.as_bytes().iter().map(|&b| b as u32).sum::<u32>() % 41) as f32;
+                    let jitter_seed =
+                        (result.id.as_bytes().iter().map(|&b| b as u32).sum::<u32>() % 41) as f32;
                     let variance = 0.85 + (jitter_seed / 200.0);
                     let dl_mbps = ((base_mbps * variance) * 10.0).round() / 10.0;
                     result.download_kbps = Some((dl_mbps * 1000.0 / 8.0) as f64);

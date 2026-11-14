@@ -20,10 +20,7 @@ pub fn compact_node_card(
     } else if is_active {
         (theme::accent_bg(), Stroke::new(1.5_f32, theme::accent()))
     } else if is_focused {
-        (
-            theme::panel_hover(),
-            Stroke::new(1.0_f32, theme::border()),
-        )
+        (theme::panel_hover(), Stroke::new(1.0_f32, theme::border()))
     } else {
         (theme::panel(), Stroke::new(1.0_f32, theme::border_subtle()))
     };
@@ -87,26 +84,17 @@ pub fn compact_node_card(
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         Frame::NONE
                             .fill(active_green.gamma_multiply(0.18))
-                            .stroke(Stroke::new(
-                                1.0_f32,
-                                active_green.gamma_multiply(0.4),
-                            ))
+                            .stroke(Stroke::new(1.0_f32, active_green.gamma_multiply(0.4)))
                             .corner_radius(CornerRadius::same(8))
                             .inner_margin(Margin::symmetric(5, 1))
                             .show(ui, |ui| {
                                 ui.horizontal(|ui| {
                                     let (beacon, _) =
                                         ui.allocate_exact_size(Vec2::splat(6.0), Sense::hover());
-                                    ui.painter().circle_filled(
-                                        beacon.center(),
-                                        2.5,
-                                        active_green,
-                                    );
+                                    ui.painter()
+                                        .circle_filled(beacon.center(), 2.5, active_green);
                                     ui.label(
-                                        RichText::new("活跃")
-                                            .small()
-                                            .strong()
-                                            .color(active_green),
+                                        RichText::new("活跃").small().strong().color(active_green),
                                     );
                                 });
                             });
@@ -132,11 +120,7 @@ pub fn compact_node_card(
 
                 if let Some(country) = &node.country {
                     let (_flag, name) = country_flag_and_name(country);
-                    ui.label(
-                        RichText::new(name)
-                            .small()
-                            .color(theme::text_secondary()),
-                    );
+                    ui.label(RichText::new(name).small().color(theme::text_secondary()));
                 }
 
                 if let Some(src) = source_name.filter(|s| !s.is_empty()) {
@@ -167,4 +151,3 @@ pub fn compact_node_card(
 
     response
 }
-

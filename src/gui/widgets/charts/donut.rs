@@ -65,14 +65,17 @@ pub fn render_protocol_donut_chart_sized(
             .map(|i| {
                 let t = i as f32 / steps as f32;
                 let angle = current_angle + t * sweep;
-                egui::pos2(center.x + radius * angle.cos(), center.y + radius * angle.sin())
+                egui::pos2(
+                    center.x + radius * angle.cos(),
+                    center.y + radius * angle.sin(),
+                )
             })
             .collect();
 
         // 方案二：莫兰迪低饱和环形图色彩体系 (柔和护眼 · 层次丰富)
         let color = match idx {
             0 => theme::accent(),
-            1 => Color32::from_rgb(82, 121, 111),  // 莫兰迪鼠尾草绿 #52796F
+            1 => Color32::from_rgb(82, 121, 111), // 莫兰迪鼠尾草绿 #52796F
             2 => Color32::from_rgb(168, 101, 116), // 莫兰迪陶土玫瑰 #A86574
             3 => Color32::from_rgb(122, 154, 139), // 莫兰迪柔和橄榄 #7A9A8B
             4 => Color32::from_rgb(136, 132, 158), // 莫兰迪雾霭紫 #88849E
@@ -86,7 +89,12 @@ pub fn render_protocol_donut_chart_sized(
         current_angle += sweep + gap;
 
         let pct = ratio * 100.0;
-        tooltip_lines.push(format!("• {}: {:.1}% ({} 节点)", s.protocol.to_uppercase(), pct, s.count));
+        tooltip_lines.push(format!(
+            "• {}: {:.1}% ({} 节点)",
+            s.protocol.to_uppercase(),
+            pct,
+            s.count
+        ));
     }
 
     // 中心数字读数 (例如 1248 节点)
@@ -115,4 +123,3 @@ pub fn render_protocol_donut_chart_sized(
 
     response.on_hover_text(tooltip_lines.join("\n"));
 }
-

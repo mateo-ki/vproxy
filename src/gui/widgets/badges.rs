@@ -31,12 +31,7 @@ pub fn protocol_pill(ui: &mut Ui, protocol: &str) {
         .corner_radius(CornerRadius::same(5))
         .inner_margin(Margin::symmetric(6, 2))
         .show(ui, |ui| {
-            ui.label(
-                RichText::new(protocol)
-                    .strong()
-                    .size(10.5)
-                    .color(color),
-            );
+            ui.label(RichText::new(protocol).strong().size(10.5).color(color));
         });
 }
 
@@ -81,7 +76,6 @@ pub fn subscription_pill(ui: &mut Ui, source_name: &str, max_text_width: f32) {
         });
 }
 
-
 /// 协议专属色彩标识
 pub fn protocol_color(protocol: &str) -> Color32 {
     let lower = protocol.to_lowercase();
@@ -97,7 +91,6 @@ pub fn protocol_color(protocol: &str) -> Color32 {
         _ => theme::text_secondary(),
     }
 }
-
 
 #[allow(dead_code)]
 pub fn stat_chip(ui: &mut Ui, label: &str, value: &str, color: Color32) {
@@ -192,12 +185,24 @@ pub fn protocol_stat_chip(
     let (badge_bg, badge_fg) = match code {
         "All" => (theme::panel_hover(), theme::text_primary()),
         "VL" => (theme::accent_bg(), theme::accent_strong()),
-        "VM" => (Color32::from_rgb(224, 242, 254), Color32::from_rgb(2, 132, 199)),
+        "VM" => (
+            Color32::from_rgb(224, 242, 254),
+            Color32::from_rgb(2, 132, 199),
+        ),
         "TR" => (theme::warning_bg(), theme::warning()),
         "SS" | "SR" => (theme::success_bg(), theme::success()),
-        "HY" => (Color32::from_rgb(243, 232, 255), Color32::from_rgb(147, 51, 234)),
-        "WG" => (Color32::from_rgb(238, 242, 255), Color32::from_rgb(79, 70, 229)),
-        "MQ" => (Color32::from_rgb(204, 251, 241), Color32::from_rgb(13, 148, 136)),
+        "HY" => (
+            Color32::from_rgb(243, 232, 255),
+            Color32::from_rgb(147, 51, 234),
+        ),
+        "WG" => (
+            Color32::from_rgb(238, 242, 255),
+            Color32::from_rgb(79, 70, 229),
+        ),
+        "MQ" => (
+            Color32::from_rgb(204, 251, 241),
+            Color32::from_rgb(13, 148, 136),
+        ),
         _ => (theme::panel_hover(), theme::text_secondary()),
     };
 
@@ -211,7 +216,11 @@ pub fn protocol_stat_chip(
     let count_galley = egui::WidgetText::from(
         RichText::new(&count_str)
             .strong()
-            .color(if is_active { theme::accent_strong() } else { theme::text_primary() })
+            .color(if is_active {
+                theme::accent_strong()
+            } else {
+                theme::text_primary()
+            })
             .size(12.0),
     )
     .into_galley(ui, None, f32::INFINITY, egui::TextStyle::Body);
@@ -252,10 +261,9 @@ pub fn protocol_stat_chip(
             egui::StrokeKind::Inside,
         );
 
-        let initial_galley = egui::WidgetText::from(
-            RichText::new(code).strong().color(badge_fg).size(10.5),
-        )
-        .into_galley(ui, None, f32::INFINITY, egui::TextStyle::Body);
+        let initial_galley =
+            egui::WidgetText::from(RichText::new(code).strong().color(badge_fg).size(10.5))
+                .into_galley(ui, None, f32::INFINITY, egui::TextStyle::Body);
         let init_pos = egui::pos2(
             badge_rect.center().x - initial_galley.size().x / 2.0,
             badge_rect.center().y - initial_galley.size().y / 2.0,
@@ -273,7 +281,12 @@ pub fn protocol_stat_chip(
     let tooltip = if protocol == "all" || protocol == "All" || protocol == "全部" {
         format!("全部节点：{} 个节点（点击展示全部）", count)
     } else {
-        format!("{} ({}) 协议：{} 个节点（点击快速筛选）", protocol.to_uppercase(), code, count)
+        format!(
+            "{} ({}) 协议：{} 个节点（点击快速筛选）",
+            protocol.to_uppercase(),
+            code,
+            count
+        )
     };
     response.on_hover_text(tooltip)
 }
@@ -289,7 +302,6 @@ pub fn icon_tile(ui: &mut Ui, icon: Icon, fg: Color32, bg: Color32) {
         crate::gui::icons::draw_icon(painter, rect.shrink(9.5), icon, fg);
     }
 }
-
 
 pub fn country_flag_and_name(code: &str) -> (&'static str, &'static str) {
     match code.to_ascii_uppercase().as_str() {
@@ -321,17 +333,17 @@ pub fn country_code_and_color(code: &str) -> (&'static str, Color32) {
     match code.to_ascii_uppercase().as_str() {
         "HK" => ("HK", Color32::from_rgb(168, 85, 247)), // 紫荆洋紫
         "JP" => ("JP", Color32::from_rgb(239, 68, 68)),  // 樱花绯红
-        "US" => ("US", Color32::from_rgb(59, 130, 246)),  // 经典钴蓝
+        "US" => ("US", Color32::from_rgb(59, 130, 246)), // 经典钴蓝
         "SG" => ("SG", Color32::from_rgb(244, 63, 94)),  // 鱼尾狮红
         "TW" => ("TW", Color32::from_rgb(6, 182, 212)),  // 海岛翠碧
-        "KR" => ("KR", Color32::from_rgb(99, 102, 241)),  // 太极靛蓝
+        "KR" => ("KR", Color32::from_rgb(99, 102, 241)), // 太极靛蓝
         "GB" | "UK" => ("UK", Color32::from_rgb(79, 70, 229)), // 大英深蓝
         "DE" => ("DE", Color32::from_rgb(245, 158, 11)), // 黑金暖琥珀
         "FR" => ("FR", Color32::from_rgb(37, 99, 235)),  // 法兰西蓝
-        "CA" => ("CA", Color32::from_rgb(248, 113, 113)),// 枫叶艳红
+        "CA" => ("CA", Color32::from_rgb(248, 113, 113)), // 枫叶艳红
         "AU" => ("AU", Color32::from_rgb(16, 185, 129)), // 欧泊翠绿
         "CN" => ("CN", Color32::from_rgb(225, 29, 72)),  // 中国红
-        "RU" => ("RU", Color32::from_rgb(100, 116, 139)),// 石板蓝灰
+        "RU" => ("RU", Color32::from_rgb(100, 116, 139)), // 石板蓝灰
         "IN" => ("IN", Color32::from_rgb(234, 88, 12)),  // 藏红花橙
         "NL" => ("NL", Color32::from_rgb(249, 115, 22)), // 郁金香橙
         "MY" => ("MY", Color32::from_rgb(234, 179, 8)),  // 马来琥珀黄
@@ -346,13 +358,7 @@ pub fn country_code_and_color(code: &str) -> (&'static str, Color32) {
 /// 方案 B：极简双色无框字母国旗标识 (Pure Typography Country Code)
 pub fn render_country_code_badge(ui: &mut Ui, code: &str) -> egui::Response {
     let (code_str, color) = country_code_and_color(code);
-    ui.add(
-        egui::Label::new(
-            RichText::new(code_str)
-                .strong()
-                .size(12.0)
-                .color(color),
-        ),
-    )
+    ui.add(egui::Label::new(
+        RichText::new(code_str).strong().size(12.0).color(color),
+    ))
 }
-

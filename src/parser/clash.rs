@@ -1,4 +1,4 @@
-﻿use super::make_node;
+use super::make_node;
 use crate::models::Node;
 use serde_json::{json, Value};
 
@@ -68,7 +68,8 @@ pub fn extract_clash_rules(content: &str) -> Vec<crate::proxy::TrafficRule> {
                     let lower = tag.to_ascii_lowercase();
                     match lower.as_str() {
                         "reject" | "reject-list" | "ad" | "ads" | "advertising" => {
-                            rule.matcher = crate::proxy::RuleMatcher::GeoSite("category-ads-all".into());
+                            rule.matcher =
+                                crate::proxy::RuleMatcher::GeoSite("category-ads-all".into());
                             true
                         }
                         "direct" | "direct-list" | "cn" | "china" => {
@@ -76,7 +77,8 @@ pub fn extract_clash_rules(content: &str) -> Vec<crate::proxy::TrafficRule> {
                             true
                         }
                         "proxy" | "proxy-list" => {
-                            rule.matcher = crate::proxy::RuleMatcher::GeoSite("geolocation-!cn".into());
+                            rule.matcher =
+                                crate::proxy::RuleMatcher::GeoSite("geolocation-!cn".into());
                             true
                         }
                         "gfw" | "gfwlist" => {
@@ -162,7 +164,9 @@ pub fn extract_clash_rules_yaml(content: &str) -> Option<String> {
 /// 从 Clash YAML 中提取原生策略组的 YAML 文本（proxy-groups: [...] 块）
 pub fn extract_clash_groups_yaml(content: &str) -> Option<String> {
     let root = serde_yaml::from_str::<serde_yaml::Value>(content).ok()?;
-    let groups = root.get("proxy-groups").or_else(|| root.get("Proxy Group"))?;
+    let groups = root
+        .get("proxy-groups")
+        .or_else(|| root.get("Proxy Group"))?;
     if let Some(arr) = groups.as_sequence() {
         if !arr.is_empty() {
             return serde_yaml::to_string(groups).ok();

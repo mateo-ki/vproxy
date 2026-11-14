@@ -15,7 +15,11 @@ impl VpnApp {
                 let token_opt = self.api_controller.token().map(|t| t.to_string());
                 if let Some(token) = token_opt {
                     ui.horizontal(|ui| {
-                        ui.label(RichText::new(self.tr("访问令牌:")).small().color(theme::muted()));
+                        ui.label(
+                            RichText::new(self.tr("访问令牌:"))
+                                .small()
+                                .color(theme::muted()),
+                        );
                         if ui
                             .add(
                                 egui::Label::new(RichText::new(&token).small().strong())
@@ -30,7 +34,10 @@ impl VpnApp {
                     });
                 }
                 if ui
-                    .add(icons::danger_icon_btn(Icon::Stop, self.tr("关闭 HTTP 服务")))
+                    .add(icons::danger_icon_btn(
+                        Icon::Stop,
+                        self.tr("关闭 HTTP 服务"),
+                    ))
                     .on_hover_text("停止后台 HTTP API 监听")
                     .clicked()
                 {
@@ -43,7 +50,10 @@ impl VpnApp {
                         .color(theme::muted()),
                 );
                 if ui
-                    .add(icons::primary_icon_btn(Icon::Play, self.tr("启动 HTTP 服务")))
+                    .add(icons::primary_icon_btn(
+                        Icon::Play,
+                        self.tr("启动 HTTP 服务"),
+                    ))
                     .on_hover_text("启动后台 HTTP API 监听")
                     .clicked()
                 {

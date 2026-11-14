@@ -293,7 +293,9 @@ impl TrafficRule {
         let rule = match &self.matcher {
             RuleMatcher::Domain(value) => render_value_rule("DOMAIN", value, target)?,
             RuleMatcher::DomainSuffix(value) => render_value_rule("DOMAIN-SUFFIX", value, target)?,
-            RuleMatcher::DomainKeyword(value) => render_value_rule("DOMAIN-KEYWORD", value, target)?,
+            RuleMatcher::DomainKeyword(value) => {
+                render_value_rule("DOMAIN-KEYWORD", value, target)?
+            }
             RuleMatcher::GeoSite(value) => render_value_rule("GEOSITE", value, target)?,
             RuleMatcher::GeoIp(value) => {
                 let rendered = render_value_rule("GEOIP", value, target)?;

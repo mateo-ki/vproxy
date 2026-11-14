@@ -1,12 +1,12 @@
+use super::types::{
+    DnsPlan, IRAction, IRMatcher, IRRule, InboundPlan, OutboundPlan, RoutingPlan, RuleSource,
+};
 use crate::models::Node;
 use crate::proxy::config::{
     gfwlist_traffic_rules, optimize_traffic_rules, recommended_traffic_rules, RoutingMode,
     RuleAction, RuleMatcher,
 };
 use crate::proxy::types::MihomoConfigOptions;
-use super::types::{
-    DnsPlan, IRAction, IRMatcher, IRRule, InboundPlan, OutboundPlan, RoutingPlan, RuleSource,
-};
 
 /// 默认 Fake-IP 过滤域名（不分配 Fake-IP，直接真解析或放行）
 pub const DEFAULT_FAKE_IP_FILTERS: &[&str] = &[
@@ -62,7 +62,10 @@ pub const DEFAULT_FAKE_IP_FILTERS: &[&str] = &[
 ];
 
 /// 将应用配置 (ProxyOptions/MihomoConfigOptions) 与主节点 Lower 降阶为统一的 RoutingPlan
-pub fn lower_options_to_ir(options: &MihomoConfigOptions, primary_node: Option<&Node>) -> RoutingPlan {
+pub fn lower_options_to_ir(
+    options: &MihomoConfigOptions,
+    primary_node: Option<&Node>,
+) -> RoutingPlan {
     // 1. 构建 InboundPlan
     let inbounds = InboundPlan {
         mixed_port: options.mixed_port,
@@ -272,7 +275,9 @@ pub fn lower_options_to_ir(options: &MihomoConfigOptions, primary_node: Option<&
 
     // 5. 兜底动作 (Default Action)
     let default_action = match options.routing_mode {
-        RoutingMode::Rule | RoutingMode::ChinaDirect | RoutingMode::Global | RoutingMode::Chain => IRAction::Proxy(None),
+        RoutingMode::Rule | RoutingMode::ChinaDirect | RoutingMode::Global | RoutingMode::Chain => {
+            IRAction::Proxy(None)
+        }
         RoutingMode::GfwList | RoutingMode::Direct => IRAction::Direct,
         RoutingMode::Subscription => {
             if let Some(ref text) = options.subscription_rules_yaml {
@@ -419,8 +424,11 @@ pub fn parse_clash_rules_yaml_to_ir(rules_yaml: Option<&str>, source: RuleSource
             }
             "IP-CIDR" | "IP-CIDR6" => IRMatcher::IpCidr(target.to_string()),
             "DST-PORT" | "PORT" => {
-                if let Some((start, end)) = target.split_once('-').or_else(|| target.split_once(':')) {
-                    if let (Ok(s), Ok(e)) = (start.trim().parse::<u16>(), end.trim().parse::<u16>()) {
+                if let Some((start, end)) =
+                    target.split_once('-').or_else(|| target.split_once(':'))
+                {
+                    if let (Ok(s), Ok(e)) = (start.trim().parse::<u16>(), end.trim().parse::<u16>())
+                    {
                         IRMatcher::PortRange(s, e)
                     } else {
                         continue;
@@ -436,24 +444,22 @@ pub fn parse_clash_rules_yaml_to_ir(rules_yaml: Option<&str>, source: RuleSource
         };
 
         let action_upper = action_str.to_ascii_uppercase();
-        let mut action = if action_upper == "DIRECT"
-            || action_upper == "PASS"
-            || action_str.contains("直连")
-        {
-            IRAction::Direct
-        } else if action_upper == "REJECT"
-            || action_upper == "REJECT-DROP"
-            || action_upper == "DROP"
-            || action_str.contains("拦截")
-            || action_str.contains("广告")
-            || action_str.contains("丢弃")
-        {
-            IRAction::Reject
-        } else if action_upper == "PROXY" {
-            IRAction::Proxy(None)
-        } else {
-            IRAction::Proxy(Some(action_str.to_string()))
-        };
+        let mut action =
+            if action_upper == "DIRECT" || action_upper == "PASS" || action_str.contains("直连") {
+                IRAction::Direct
+            } else if action_upper == "REJECT"
+                || action_upper == "REJECT-DROP"
+                || action_upper == "DROP"
+                || action_str.contains("拦截")
+                || action_str.contains("广告")
+                || action_str.contains("丢弃")
+            {
+                IRAction::Reject
+            } else if action_upper == "PROXY" {
+                IRAction::Proxy(None)
+            } else {
+                IRAction::Proxy(Some(action_str.to_string()))
+            };
 
         let is_private_ip = matches!(matcher_type.as_str(), "IP-CIDR" | "IP-CIDR6")
             && crate::hostutil::is_private_cidr(target);

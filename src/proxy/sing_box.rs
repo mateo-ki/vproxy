@@ -21,9 +21,7 @@ use tokio::task::JoinSet;
 use uuid::Uuid;
 
 #[allow(unused_imports)]
-use crate::constants::proxy::{
-    GEOIP_CN_URL, GEOSITE_ADS_URL, GEOSITE_CN_URL, GEOSITE_GFW_URL,
-};
+use crate::constants::proxy::{GEOIP_CN_URL, GEOSITE_ADS_URL, GEOSITE_CN_URL, GEOSITE_GFW_URL};
 const SING_BOX_BATCH_SIZE: usize = 64;
 
 fn sing_box_batch_count(node_count: usize) -> usize {
@@ -203,8 +201,7 @@ async fn probe_batch_with_sing_box(
     if !endpoints.is_empty() {
         config["endpoints"] = Value::Array(endpoints);
     }
-    let directory =
-        std::env::temp_dir().join(format!("vproxy-sing-box-batch-{}", Uuid::new_v4()));
+    let directory = std::env::temp_dir().join(format!("vproxy-sing-box-batch-{}", Uuid::new_v4()));
     tokio::fs::create_dir_all(&directory).await?;
     let config_path = directory.join("config.json");
     let log_path = directory.join("sing-box.log");

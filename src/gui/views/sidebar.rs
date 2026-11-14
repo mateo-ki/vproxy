@@ -31,7 +31,11 @@ impl VpnApp {
         ui.add_space(8.0);
 
         let is_running = matches!(self.proxy_status.state, ProxyState::Running);
-        let proxy_dot = if is_running { Some(theme::accent()) } else { None };
+        let proxy_dot = if is_running {
+            Some(theme::accent())
+        } else {
+            None
+        };
         let nodes_tip = self
             .stats
             .as_ref()
@@ -176,7 +180,8 @@ impl VpnApp {
                 } else {
                     Color32::from_rgb(52, 211, 153)
                 };
-                let arrow_rect = egui::Rect::from_center_size(rect.center(), egui::Vec2::splat(20.0));
+                let arrow_rect =
+                    egui::Rect::from_center_size(rect.center(), egui::Vec2::splat(20.0));
                 crate::gui::icons::draw_icon(&painter, arrow_rect, Icon::ArrowUp, arrow_color);
 
                 // 右上角科技翡翠绿发光微标圆点
@@ -306,13 +311,25 @@ impl VpnApp {
                 );
                 stat_chip(ui, "节点", &s.node_count.to_string(), theme::accent());
                 stat_chip(ui, "已测", &s.tested_count.to_string(), theme::warning());
-                stat_chip(ui, "可用", &s.alive_count.to_string(), theme::accent_strong());
+                stat_chip(
+                    ui,
+                    "可用",
+                    &s.alive_count.to_string(),
+                    theme::accent_strong(),
+                );
 
                 // 仅在「节点池」上方展示协议首字母缩写图标 + 数量
                 if is_nodes_tab {
                     for p in &s.protocol_stats {
                         let is_active = current_proto.eq_ignore_ascii_case(&p.protocol);
-                        if crate::gui::widgets::protocol_stat_chip(ui, &p.protocol, p.count, is_active).clicked() {
+                        if crate::gui::widgets::protocol_stat_chip(
+                            ui,
+                            &p.protocol,
+                            p.count,
+                            is_active,
+                        )
+                        .clicked()
+                        {
                             if is_active {
                                 switch_proto = Some("".to_string());
                             } else {
@@ -526,7 +543,10 @@ mod update_marker_probe_tests {
     fn a_long_nav_label_is_cut_off_inside_the_row() {
         let width = crate::gui::SIDEBAR_EXPANDED_WIDTH;
         let long = nav_probe(width, Some("扩展功能 / 分流规则 / 端口映射"));
-        assert!(!long.painted.is_empty(), "长名字一个像素都没画出来：{long:?}");
+        assert!(
+            !long.painted.is_empty(),
+            "长名字一个像素都没画出来：{long:?}"
+        );
         let row_w = long.row_right - long.row_left;
         assert!(
             long.text_right <= long.row_left + row_w - 10.0,

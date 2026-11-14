@@ -1,5 +1,4 @@
 use super::*;
-use anyhow::Result;
 use crate::kernel::KernelKind;
 use crate::models::Node;
 use crate::proxy::adapter::kernel_adapter;
@@ -11,1768 +10,1928 @@ use crate::proxy::ir::{lower_options_to_ir, IRAction, IRMatcher, RuleSource};
 use crate::proxy::mihomo::{URL_TEST_INTERVAL_SECS, URL_TEST_TIMEOUT_MS, URL_TEST_TOLERANCE_MS};
 use crate::proxy_probe::PROXY_CONNECTIVITY_TEST_URL;
 use crate::system_proxy::{SystemProxyControl, SystemProxySnapshot};
+use anyhow::Result;
 use serde_json::Value;
 use std::sync::Arc;
 use std::time::Duration;
-    /// 三种启动结局各自说什么话。反向对照很关键：TUN 模式不许提"请把应用指向端口"，
-    /// 写了系统代理也不许再教他怎么指 —— 多出来的那半句会让人以为还没生效。
-    #[test]
-    fn the_start_message_differs_per_mode_and_platform_capability() {
-        let owned = start_success_message("Mihomo", 4200, ProxyMode::System, true, true, 9980);
-        assert!(owned.contains("运行中"), "{owned}");
+/// 三种启动结局各自说什么话。反向对照很关键：TUN 模式不许提"请把应用指向端口"，
+/// 写了系统代理也不许再教他怎么指 —— 多出来的那半句会让人以为还没生效。
+#[test]
+fn the_start_message_differs_per_mode_and_platform_capability() {
+    let owned = start_success_message("Mihomo", 4200, ProxyMode::System, true, true, 9980);
+    assert!(owned.contains("运行中"), "{owned}");
+    assert!(
+        !owned.contains("127.0.0.1"),
+        "写过就不该再教他怎么指: {owned}"
+    );
+
+    let tun = start_success_message("Mihomo", 4200, ProxyMode::Tun, false, true, 9980);
+    assert!(!tun.contains("127.0.0.1"), "TUN 不该让他去找端口: {tun}");
+
+    let local_port = start_success_message("Mihomo", 4200, ProxyMode::System, false, false, 9980);
+    assert!(local_port.contains("127.0.0.1:9980"), "{local_port}");
+    assert!(local_port.contains("没有系统代理"), "{local_port}");
+}
+
+/// "能不能写系统代理"必须是唯一一个判据：启动流程用它决定要不要写、
+/// `local_proxy_ready` 用它决定点不点亮、界面用它决定 chip 上写什么字。
+/// 三处各写一份 `cfg!(windows)` 迟早会漂，漂了就出现"界面说本地端口、状态说拥有系统代理"。
+#[test]
+fn the_system_proxy_capability_is_one_answer_for_three_consumers() {
+    // 平台实现与系统判据必须同意同一个答案（不是各自另判一次）。
+    assert_eq!(
+        crate::system_proxy::platform_system_proxy().supported(),
+        crate::system_proxy::system_proxy_supported_on_this_platform()
+    );
+    if cfg!(any(windows, target_os = "macos")) {
+        assert!(crate::system_proxy::system_proxy_supported_on_this_platform());
+    }
+}
+use chrono::Utc;
+use serde_json::json;
+use std::sync::Mutex as StdMutex;
+
+#[test]
+fn self_referential_system_proxy_snapshot_is_reset_to_off() {
+    // 上次会话残留的"就是我们自己端口"的系统代理，不能当成还原目标。
+    let leftover = SystemProxySnapshot {
+        enabled: true,
+        server: Some("127.0.0.1:9980".into()),
+        override_list: Some("<local>;localhost".into()),
+    };
+    let cleaned = sanitize_self_referential(leftover, "127.0.0.1:9980");
+    assert!(!cleaned.enabled);
+    assert_eq!(cleaned.server, None);
+    assert_eq!(cleaned.override_list, None);
+
+    // 用户原本的代理要原样保留。
+    let users = SystemProxySnapshot {
+        enabled: true,
+        server: Some("127.0.0.1:10808".into()),
+        override_list: None,
+    };
+    let kept = sanitize_self_referential(users.clone(), "127.0.0.1:9980");
+    assert_eq!(kept, users);
+
+    // 协议分组形式（http=...;https=...）里指向我方端口，同样要清掉。
+    let grouped = SystemProxySnapshot {
+        enabled: true,
+        server: Some("http=127.0.0.1:9980;https=127.0.0.1:9980".into()),
+        override_list: None,
+    };
+    assert!(!sanitize_self_referential(grouped, "127.0.0.1:9980").enabled);
+
+    // 本来就未启用的快照保持原样。
+    let off = SystemProxySnapshot {
+        enabled: false,
+        server: Some("127.0.0.1:9980".into()),
+        override_list: None,
+    };
+    assert!(!sanitize_self_referential(off.clone(), "127.0.0.1:9980").enabled);
+    assert_eq!(
+        sanitize_self_referential(off.clone(), "127.0.0.1:9980").server,
+        off.server
+    );
+}
+
+#[test]
+fn test_diagnose_mihomo_config_with_recommended_override() {
+    use super::CLASH_VERGE_RECOMMENDED_OVERRIDE;
+    let node = Node {
+        id: "test1".into(),
+        source_id: None,
+        protocol: "ss".into(),
+        name: "香港01".into(),
+        server: "1.1.1.1".into(),
+        port: 443,
+        raw: "".into(),
+        config: serde_json::from_str(
+            r#"{"server":"1.1.1.1","server_port":443,"password":"pass","method":"aes-128-gcm"}"#,
+        )
+        .unwrap(),
+        country: Some("HK".into()),
+        latency_ms: Some(50),
+        latency_ok: Some(true),
+        download_kbps: Some(5000.0),
+        latency_kernel: Some("mihomo".into()),
+        latency_test_kind: Some("google_proxy".into()),
+        latency_tested_at: None,
+        created_at: chrono::Utc::now(),
+        updated_at: chrono::Utc::now(),
+    };
+    let mut options = MihomoConfigOptions::default();
+    options.smart_routing = true;
+    options.override_yaml = Some(CLASH_VERGE_RECOMMENDED_OVERRIDE.to_string());
+    let config_val = build_mihomo_config(&node, options).expect("build config");
+    let yaml_str = serde_yaml::to_string(&config_val).expect("to yaml");
+    std::fs::write("target/diagnose_mihomo.yaml", &yaml_str).expect("write yaml");
+
+    let exe = crate::kernel::find_kernel_executable(KernelKind::Mihomo);
+    if let Some(exe_path) = exe {
+        let output = std::process::Command::new(exe_path)
+            .arg("-t")
+            .arg("-d")
+            .arg(crate::kernel::managed_kernel_root().join("mihomo"))
+            .arg("-f")
+            .arg("target/diagnose_mihomo.yaml")
+            .output()
+            .expect("run mihomo -t");
         assert!(
-            !owned.contains("127.0.0.1"),
-            "写过就不该再教他怎么指: {owned}"
+            output.status.success(),
+            "mihomo validation failed: stdout: {}, stderr: {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
         );
-
-        let tun = start_success_message("Mihomo", 4200, ProxyMode::Tun, false, true, 9980);
-        assert!(!tun.contains("127.0.0.1"), "TUN 不该让他去找端口: {tun}");
-
-        let local_port =
-            start_success_message("Mihomo", 4200, ProxyMode::System, false, false, 9980);
-        assert!(local_port.contains("127.0.0.1:9980"), "{local_port}");
-        assert!(local_port.contains("没有系统代理"), "{local_port}");
     }
+}
 
-    /// "能不能写系统代理"必须是唯一一个判据：启动流程用它决定要不要写、
-    /// `local_proxy_ready` 用它决定点不点亮、界面用它决定 chip 上写什么字。
-    /// 三处各写一份 `cfg!(windows)` 迟早会漂，漂了就出现"界面说本地端口、状态说拥有系统代理"。
-    #[test]
-    fn the_system_proxy_capability_is_one_answer_for_three_consumers() {
-        // 平台实现与系统判据必须同意同一个答案（不是各自另判一次）。
-        assert_eq!(
-            crate::system_proxy::platform_system_proxy().supported(),
-            crate::system_proxy::system_proxy_supported_on_this_platform()
-        );
-        if cfg!(any(windows, target_os = "macos")) {
-            assert!(crate::system_proxy::system_proxy_supported_on_this_platform());
-        }
-    }
-    use chrono::Utc;
-    use serde_json::json;
-    use std::sync::Mutex as StdMutex;
+#[derive(Default)]
+struct FakeSystemProxy {
+    enabled: StdMutex<Vec<String>>,
+    restored: StdMutex<Vec<SystemProxySnapshot>>,
+}
 
-    #[test]
-    fn self_referential_system_proxy_snapshot_is_reset_to_off() {
-        // 上次会话残留的"就是我们自己端口"的系统代理，不能当成还原目标。
-        let leftover = SystemProxySnapshot {
-            enabled: true,
-            server: Some("127.0.0.1:9980".into()),
-            override_list: Some("<local>;localhost".into()),
-        };
-        let cleaned = sanitize_self_referential(leftover, "127.0.0.1:9980");
-        assert!(!cleaned.enabled);
-        assert_eq!(cleaned.server, None);
-        assert_eq!(cleaned.override_list, None);
-
-        // 用户原本的代理要原样保留。
-        let users = SystemProxySnapshot {
-            enabled: true,
-            server: Some("127.0.0.1:10808".into()),
-            override_list: None,
-        };
-        let kept = sanitize_self_referential(users.clone(), "127.0.0.1:9980");
-        assert_eq!(kept, users);
-
-        // 协议分组形式（http=...;https=...）里指向我方端口，同样要清掉。
-        let grouped = SystemProxySnapshot {
-            enabled: true,
-            server: Some("http=127.0.0.1:9980;https=127.0.0.1:9980".into()),
-            override_list: None,
-        };
-        assert!(!sanitize_self_referential(grouped, "127.0.0.1:9980").enabled);
-
-        // 本来就未启用的快照保持原样。
-        let off = SystemProxySnapshot {
+impl SystemProxyControl for FakeSystemProxy {
+    fn capture(&self) -> Result<SystemProxySnapshot> {
+        Ok(SystemProxySnapshot {
             enabled: false,
-            server: Some("127.0.0.1:9980".into()),
-            override_list: None,
-        };
-        assert!(!sanitize_self_referential(off.clone(), "127.0.0.1:9980").enabled);
-        assert_eq!(
-            sanitize_self_referential(off.clone(), "127.0.0.1:9980").server,
-            off.server
-        );
+            server: Some("old-proxy:8080".into()),
+            override_list: Some("<local>".into()),
+        })
     }
 
-    #[test]
-    fn test_diagnose_mihomo_config_with_recommended_override() {
-        use super::CLASH_VERGE_RECOMMENDED_OVERRIDE;
-        let node = Node {
-            id: "test1".into(),
-            source_id: None,
-            protocol: "ss".into(),
-            name: "香港01".into(),
-            server: "1.1.1.1".into(),
-            port: 443,
-            raw: "".into(),
-            config: serde_json::from_str(r#"{"server":"1.1.1.1","server_port":443,"password":"pass","method":"aes-128-gcm"}"#).unwrap(),
-            country: Some("HK".into()),
-            latency_ms: Some(50),
-            latency_ok: Some(true),
-            download_kbps: Some(5000.0),
-            latency_kernel: Some("mihomo".into()),
-            latency_test_kind: Some("google_proxy".into()),
-            latency_tested_at: None,
-            created_at: chrono::Utc::now(),
-            updated_at: chrono::Utc::now(),
-        };
-        let mut options = MihomoConfigOptions::default();
-        options.smart_routing = true;
-        options.override_yaml = Some(CLASH_VERGE_RECOMMENDED_OVERRIDE.to_string());
-        let config_val = build_mihomo_config(&node, options).expect("build config");
-        let yaml_str = serde_yaml::to_string(&config_val).expect("to yaml");
-        std::fs::write("target/diagnose_mihomo.yaml", &yaml_str).expect("write yaml");
-
-        let exe = crate::kernel::find_kernel_executable(KernelKind::Mihomo);
-        if let Some(exe_path) = exe {
-            let output = std::process::Command::new(exe_path)
-                .arg("-t")
-                .arg("-d")
-                .arg(crate::kernel::managed_kernel_root().join("mihomo"))
-                .arg("-f")
-                .arg("target/diagnose_mihomo.yaml")
-                .output()
-                .expect("run mihomo -t");
-            assert!(
-                output.status.success(),
-                "mihomo validation failed: stdout: {}, stderr: {}",
-                String::from_utf8_lossy(&output.stdout),
-                String::from_utf8_lossy(&output.stderr)
-            );
-        }
+    fn enable(&self, server: &str) -> Result<()> {
+        self.enabled.lock().unwrap().push(server.into());
+        Ok(())
     }
 
-    #[derive(Default)]
-    struct FakeSystemProxy {
-        enabled: StdMutex<Vec<String>>,
-        restored: StdMutex<Vec<SystemProxySnapshot>>,
+    fn restore(&self, snapshot: &SystemProxySnapshot) -> Result<()> {
+        self.restored.lock().unwrap().push(snapshot.clone());
+        Ok(())
     }
+}
 
-    impl SystemProxyControl for FakeSystemProxy {
-        fn capture(&self) -> Result<SystemProxySnapshot> {
-            Ok(SystemProxySnapshot {
-                enabled: false,
-                server: Some("old-proxy:8080".into()),
-                override_list: Some("<local>".into()),
-            })
-        }
-
-        fn enable(&self, server: &str) -> Result<()> {
-            self.enabled.lock().unwrap().push(server.into());
-            Ok(())
-        }
-
-        fn restore(&self, snapshot: &SystemProxySnapshot) -> Result<()> {
-            self.restored.lock().unwrap().push(snapshot.clone());
-            Ok(())
-        }
+fn node(protocol: &str, config: serde_json::Value) -> Node {
+    let now = Utc::now();
+    Node {
+        id: format!("{protocol}-id"),
+        source_id: None,
+        protocol: protocol.into(),
+        name: "test-node".into(),
+        server: config["server"].as_str().unwrap().into(),
+        port: config["port"].as_u64().unwrap() as u16,
+        raw: String::new(),
+        config,
+        country: None,
+        latency_ms: None,
+        latency_ok: None,
+        download_kbps: None,
+        latency_kernel: None,
+        latency_test_kind: None,
+        latency_tested_at: None,
+        created_at: now,
+        updated_at: now,
     }
+}
 
-    fn node(protocol: &str, config: serde_json::Value) -> Node {
-        let now = Utc::now();
-        Node {
-            id: format!("{protocol}-id"),
-            source_id: None,
-            protocol: protocol.into(),
-            name: "test-node".into(),
-            server: config["server"].as_str().unwrap().into(),
-            port: config["port"].as_u64().unwrap() as u16,
-            raw: String::new(),
-            config,
-            country: None,
-            latency_ms: None,
-            latency_ok: None,
-            download_kbps: None,
-            latency_kernel: None,
-            latency_test_kind: None,
-            latency_tested_at: None,
-            created_at: now,
-            updated_at: now,
-        }
+#[test]
+fn stopped_status_uses_default_ports() {
+    let status = ProxyRuntimeStatus::stopped(MihomoConfigOptions::default());
+
+    assert_eq!(status.state, ProxyState::Stopped);
+    assert_eq!(status.mode, ProxyMode::System);
+    assert_eq!(status.mixed_port, 9980);
+    assert_eq!(status.controller_port, 9090);
+    assert!(status.node_id.is_none());
+    assert!(!status.local_proxy_ready);
+    assert!(!status.system_proxy_enabled);
+    assert!(status.last_error.is_none());
+}
+
+#[test]
+fn startup_proxy_verification_uses_five_second_total_budget() {
+    assert_eq!(STARTUP_PROXY_TOTAL_TIMEOUT, Duration::from_secs(15));
+    assert_eq!(STARTUP_PROXY_VERIFY_TIMEOUT, Duration::from_millis(1_500));
+    assert_eq!(STARTUP_SYSTEM_PROXY_RESERVE, Duration::from_millis(250));
+    assert_eq!(STARTUP_PROXY_VERIFY_URLS, [PROXY_CONNECTIVITY_TEST_URL]);
+}
+
+#[test]
+fn startup_requires_google_connectivity_verification() {
+    assert!(VERIFY_CONNECTIVITY_ON_START);
+}
+
+#[test]
+fn mihomo_requires_both_proxy_and_controller_ports() {
+    let options = MihomoConfigOptions {
+        mixed_port: 17890,
+        controller_port: 19090,
+        ..MihomoConfigOptions::default()
+    };
+
+    assert_eq!(
+        required_startup_ports(KernelKind::Mihomo, &options),
+        [17890, 19090]
+    );
+    assert_eq!(
+        required_startup_ports(KernelKind::SingBox, &options),
+        [17890]
+    );
+}
+
+#[test]
+fn kernel_adapters_expose_runtime_and_batch_contracts() {
+    let options = MihomoConfigOptions::default();
+    let cases = [
+        (KernelKind::Mihomo, 256, options.controller_port, 2),
+        (KernelKind::SingBox, 64, options.mixed_port, 1),
+        (KernelKind::Xray, 64, options.mixed_port, 1),
+    ];
+
+    for (kind, batch_size, ready_port, port_count) in cases {
+        let adapter = kernel_adapter(kind);
+        assert_eq!(adapter.kind(), kind);
+        assert_eq!(adapter.batch_size(), batch_size);
+        assert_eq!(adapter.readiness_port(&options), ready_port);
+        assert_eq!(adapter.required_ports(&options).len(), port_count);
     }
+    assert!(kernel_adapter(KernelKind::Xray).supports_protocol("vless"));
+    assert!(!kernel_adapter(KernelKind::Xray).supports_protocol("hysteria2"));
+}
 
-    #[test]
-    fn stopped_status_uses_default_ports() {
-        let status = ProxyRuntimeStatus::stopped(MihomoConfigOptions::default());
+#[test]
+fn classifies_only_node_connectivity_startup_failures() {
+    assert!(is_node_connectivity_failure(
+        "节点连通性验证失败: 本地代理无法访问测试地址"
+    ));
+    assert!(!is_node_connectivity_failure("Mihomo 配置生成失败"));
+    assert!(!is_node_connectivity_failure("代理端口 7890 已被占用"));
+}
 
-        assert_eq!(status.state, ProxyState::Stopped);
-        assert_eq!(status.mode, ProxyMode::System);
-        assert_eq!(status.mixed_port, 9980);
-        assert_eq!(status.controller_port, 9090);
-        assert!(status.node_id.is_none());
-        assert!(!status.local_proxy_ready);
-        assert!(!status.system_proxy_enabled);
-        assert!(status.last_error.is_none());
+#[test]
+fn builds_minimal_mihomo_config_for_selected_node() {
+    let selected = node(
+        "vless",
+        json!({
+            "server": "1.2.3.4",
+            "port": 443,
+            "uuid": "11111111-1111-1111-1111-111111111111",
+            "network": "ws",
+            "security": "tls"
+        }),
+    );
+
+    let config = build_mihomo_config(&selected, MihomoConfigOptions::default()).unwrap();
+
+    assert_eq!(config["mixed-port"], 9980);
+    assert_eq!(config["external-controller"], "127.0.0.1:9090");
+    assert_eq!(config["proxies"].as_array().unwrap().len(), 1);
+    assert_eq!(config["proxy-groups"][0]["name"], "PROXY");
+    // 智能规则（全自动版本）：即使没有配置任何用户自定义规则，也自动集成完整的推荐分流（国内直连、广告拦截、局域网放行）
+    let rules = config["rules"].as_array().unwrap();
+    assert!(rules.iter().any(|r| r == "GEOSITE,cn,DIRECT"));
+    assert!(rules.iter().any(|r| r == "GEOIP,CN,DIRECT"));
+    for host in crate::geo::MIRROR_DIRECT_HOSTS {
+        assert!(rules
+            .iter()
+            .any(|r| r == &format!("DOMAIN-SUFFIX,{host},DIRECT")));
     }
+    assert_eq!(rules.last().unwrap(), "MATCH,PROXY");
+}
 
-    #[test]
-    fn startup_proxy_verification_uses_five_second_total_budget() {
-        assert_eq!(STARTUP_PROXY_TOTAL_TIMEOUT, Duration::from_secs(15));
-        assert_eq!(STARTUP_PROXY_VERIFY_TIMEOUT, Duration::from_millis(1_500));
-        assert_eq!(STARTUP_SYSTEM_PROXY_RESERVE, Duration::from_millis(250));
-        assert_eq!(STARTUP_PROXY_VERIFY_URLS, [PROXY_CONNECTIVITY_TEST_URL]);
-    }
+#[test]
+fn recommended_routing_preserves_order_enables_geo_and_keeps_proxy_fallback_last() {
+    let selected = node(
+        "vless",
+        json!({
+            "server": "1.2.3.4",
+            "port": 443,
+            "uuid": "11111111-1111-1111-1111-111111111111",
+            "network": "ws",
+            "security": "tls"
+        }),
+    );
+    let options = MihomoConfigOptions {
+        rules: recommended_traffic_rules(),
+        ..MihomoConfigOptions::default()
+    };
 
-    #[test]
-    fn startup_requires_google_connectivity_verification() {
-        assert!(VERIFY_CONNECTIVITY_ON_START);
-    }
+    let config = build_mihomo_config(&selected, options).unwrap();
+    let rules = config["rules"].as_array().unwrap();
 
-    #[test]
-    fn mihomo_requires_both_proxy_and_controller_ports() {
-        let options = MihomoConfigOptions {
-            mixed_port: 17890,
-            controller_port: 19090,
-            ..MihomoConfigOptions::default()
-        };
+    assert_eq!(config["geodata-mode"], true);
+    // 20 条规则（包含 MATCH 兜底） + 镜像钉直连。
+    assert_eq!(rules.len(), 20 + crate::geo::MIRROR_DIRECT_HOSTS.len());
+    assert_eq!(rules[11], "GEOSITE,category-ads-all,REJECT");
+    assert_eq!(rules[12], "DOMAIN-SUFFIX,cn,DIRECT");
+    assert_eq!(rules[13], "DOMAIN-SUFFIX,yunaq.com,DIRECT");
+    assert_eq!(rules[14], "GEOSITE,cn,DIRECT");
+    assert_eq!(rules[15], "GEOSITE,google,PROXY");
+    assert_eq!(rules[16], "GEOSITE,youtube,PROXY");
+    assert_eq!(rules[17], "GEOIP,CN,DIRECT");
+    assert_eq!(rules.last().unwrap(), "MATCH,PROXY");
+}
 
-        assert_eq!(
-            required_startup_ports(KernelKind::Mihomo, &options),
-            [17890, 19090]
-        );
-        assert_eq!(
-            required_startup_ports(KernelKind::SingBox, &options),
-            [17890]
-        );
-    }
+#[test]
+fn rule_mode_acts_as_fully_automatic_with_user_exceptions_prioritized() {
+    let sample = node(
+        "vless",
+        json!({"server": "1.2.3.4", "port": 443, "uuid": "u1", "network": "ws", "security": "tls"}),
+    );
 
-    #[test]
-    fn kernel_adapters_expose_runtime_and_batch_contracts() {
-        let options = MihomoConfigOptions::default();
-        let cases = [
-            (KernelKind::Mihomo, 256, options.controller_port, 2),
-            (KernelKind::SingBox, 64, options.mixed_port, 1),
-            (KernelKind::Xray, 64, options.mixed_port, 1),
-        ];
+    // 场景 1：用户无任何自定义规则时，Rule 模式自动应用全套推荐分流
+    let options_empty = MihomoConfigOptions {
+        routing_mode: RoutingMode::Rule,
+        rules: Vec::new(),
+        ..MihomoConfigOptions::default()
+    };
+    let plan_empty = lower_options_to_ir(&options_empty, Some(&sample));
+    assert!(plan_empty.rules.iter().any(|r| {
+        r.action == IRAction::Direct && r.matchers.contains(&IRMatcher::GeoSite("cn".into()))
+    }));
+    assert!(plan_empty.rules.iter().any(|r| {
+        r.action == IRAction::Direct && r.matchers.contains(&IRMatcher::GeoIp("CN".into()))
+    }));
+    assert!(plan_empty.rules.iter().any(|r| {
+        r.action == IRAction::Reject
+            && r.matchers
+                .contains(&IRMatcher::GeoSite("category-ads-all".into()))
+    }));
 
-        for (kind, batch_size, ready_port, port_count) in cases {
-            let adapter = kernel_adapter(kind);
-            assert_eq!(adapter.kind(), kind);
-            assert_eq!(adapter.batch_size(), batch_size);
-            assert_eq!(adapter.readiness_port(&options), ready_port);
-            assert_eq!(adapter.required_ports(&options).len(), port_count);
-        }
-        assert!(kernel_adapter(KernelKind::Xray).supports_protocol("vless"));
-        assert!(!kernel_adapter(KernelKind::Xray).supports_protocol("hysteria2"));
-    }
+    // 场景 2：用户配置了自定义例外规则时，自定义规则排在最前作为高优先级，推荐规则在后兜底
+    let options_custom = MihomoConfigOptions {
+        routing_mode: RoutingMode::Rule,
+        rules: vec![
+            TrafficRule {
+                matcher: RuleMatcher::DomainSuffix("company-intranet.com".into()),
+                action: RuleAction::Direct,
+            },
+            TrafficRule {
+                matcher: RuleMatcher::Domain("special-proxy-service.cn".into()),
+                action: RuleAction::Proxy,
+            },
+        ],
+        ..MihomoConfigOptions::default()
+    };
+    let plan_custom = lower_options_to_ir(&options_custom, Some(&sample));
+    // 首两条必须是用户的例外规则，且 source 标记为 User
+    assert_eq!(plan_custom.rules[0].action, IRAction::Direct);
+    assert_eq!(
+        plan_custom.rules[0].matchers,
+        vec![IRMatcher::DomainSuffix("company-intranet.com".into())]
+    );
+    assert_eq!(
+        plan_custom.rules[0].source,
+        crate::proxy::ir::RuleSource::User
+    );
 
-    #[test]
-    fn classifies_only_node_connectivity_startup_failures() {
-        assert!(is_node_connectivity_failure(
-            "节点连通性验证失败: 本地代理无法访问测试地址"
-        ));
-        assert!(!is_node_connectivity_failure("Mihomo 配置生成失败"));
-        assert!(!is_node_connectivity_failure("代理端口 7890 已被占用"));
-    }
+    assert!(matches!(plan_custom.rules[1].action, IRAction::Proxy(_)));
+    assert_eq!(
+        plan_custom.rules[1].matchers,
+        vec![IRMatcher::Domain("special-proxy-service.cn".into())]
+    );
+    assert_eq!(
+        plan_custom.rules[1].source,
+        crate::proxy::ir::RuleSource::User
+    );
 
-    #[test]
-    fn builds_minimal_mihomo_config_for_selected_node() {
-        let selected = node(
-            "vless",
-            json!({
-                "server": "1.2.3.4",
-                "port": 443,
-                "uuid": "11111111-1111-1111-1111-111111111111",
-                "network": "ws",
-                "security": "tls"
-            }),
-        );
+    // 其后紧随自动追加的 Preset 规则
+    let has_cn_direct = plan_custom.rules.iter().skip(2).any(|r| {
+        r.action == IRAction::Direct
+            && r.matchers.contains(&IRMatcher::GeoSite("cn".into()))
+            && r.source == crate::proxy::ir::RuleSource::Preset
+    });
+    assert!(
+        has_cn_direct,
+        "用户例外规则之后必须自动包含 GeoSite CN 国内直连规则"
+    );
+}
 
-        let config = build_mihomo_config(&selected, MihomoConfigOptions::default()).unwrap();
+#[test]
+fn url_test_mode_emits_three_groups_and_routes_match_to_final_group() {
+    let current = node(
+        "vless",
+        json!({"server": "1.2.3.4", "port": 443, "uuid": "u1", "network": "ws", "security": "tls"}),
+    );
+    let candidate = node(
+        "vless",
+        json!({"server": "5.6.7.8", "port": 443, "uuid": "u2", "network": "ws", "security": "tls"}),
+    );
+    let mut options = MihomoConfigOptions {
+        routing_mode: RoutingMode::ChinaDirect,
+        url_test: true,
+        url_test_size: 3,
+        ..MihomoConfigOptions::default()
+    };
+    options.url_test_nodes =
+        crate::export::nodes_to_clash_proxies(std::slice::from_ref(&candidate));
 
-        assert_eq!(config["mixed-port"], 9980);
-        assert_eq!(config["external-controller"], "127.0.0.1:9090");
-        assert_eq!(config["proxies"].as_array().unwrap().len(), 1);
-        assert_eq!(config["proxy-groups"][0]["name"], "PROXY");
-        // 智能规则（全自动版本）：即使没有配置任何用户自定义规则，也自动集成完整的推荐分流（国内直连、广告拦截、局域网放行）
-        let rules = config["rules"].as_array().unwrap();
-        assert!(rules.iter().any(|r| r == "GEOSITE,cn,DIRECT"));
-        assert!(rules.iter().any(|r| r == "GEOIP,CN,DIRECT"));
-        for host in crate::geo::MIRROR_DIRECT_HOSTS {
-            assert!(rules.iter().any(|r| r == &format!("DOMAIN-SUFFIX,{host},DIRECT")));
-        }
-        assert_eq!(rules.last().unwrap(), "MATCH,PROXY");
-    }
+    let config = build_mihomo_config(&current, options).unwrap();
+    let groups = config["proxy-groups"].as_array().unwrap();
+    let names: Vec<&str> = groups
+        .iter()
+        .map(|group| group["name"].as_str().unwrap_or_default())
+        .collect();
+    assert_eq!(names, vec!["PROXY", URL_TEST_GROUP, FINAL_GROUP]);
+    assert_eq!(groups[1]["type"], "url-test");
+    // PROXY 的第一个成员必须是「自动选择」：默认让内核自己挑，锁定单节点才只是
+    // 一次 PUT /proxies/PROXY。
+    assert_eq!(groups[0]["proxies"][0], URL_TEST_GROUP);
+    assert_eq!(
+        config["rules"].as_array().unwrap().last().unwrap(),
+        &Value::String(format!("MATCH,{FINAL_GROUP}"))
+    );
+    assert_eq!(config["proxies"].as_array().unwrap().len(), 2);
+}
 
-    #[test]
-    fn recommended_routing_preserves_order_enables_geo_and_keeps_proxy_fallback_last() {
-        let selected = node(
-            "vless",
-            json!({
-                "server": "1.2.3.4",
-                "port": 443,
-                "uuid": "11111111-1111-1111-1111-111111111111",
-                "network": "ws",
-                "security": "tls"
-            }),
-        );
-        let options = MihomoConfigOptions {
-            rules: recommended_traffic_rules(),
-            ..MihomoConfigOptions::default()
-        };
-
-        let config = build_mihomo_config(&selected, options).unwrap();
-        let rules = config["rules"].as_array().unwrap();
-
-        assert_eq!(config["geodata-mode"], true);
-        // 20 条规则（包含 MATCH 兜底） + 镜像钉直连。
-        assert_eq!(rules.len(), 20 + crate::geo::MIRROR_DIRECT_HOSTS.len());
-        assert_eq!(rules[11], "GEOSITE,category-ads-all,REJECT");
-        assert_eq!(rules[12], "DOMAIN-SUFFIX,cn,DIRECT");
-        assert_eq!(rules[13], "DOMAIN-SUFFIX,yunaq.com,DIRECT");
-        assert_eq!(rules[14], "GEOSITE,cn,DIRECT");
-        assert_eq!(rules[15], "GEOSITE,google,PROXY");
-        assert_eq!(rules[16], "GEOSITE,youtube,PROXY");
-        assert_eq!(rules[17], "GEOIP,CN,DIRECT");
-        assert_eq!(rules.last().unwrap(), "MATCH,PROXY");
-    }
-
-    #[test]
-    fn rule_mode_acts_as_fully_automatic_with_user_exceptions_prioritized() {
-        let sample = node(
-            "vless",
-            json!({"server": "1.2.3.4", "port": 443, "uuid": "u1", "network": "ws", "security": "tls"}),
-        );
-
-        // 场景 1：用户无任何自定义规则时，Rule 模式自动应用全套推荐分流
-        let options_empty = MihomoConfigOptions {
-            routing_mode: RoutingMode::Rule,
-            rules: Vec::new(),
-            ..MihomoConfigOptions::default()
-        };
-        let plan_empty = lower_options_to_ir(&options_empty, Some(&sample));
-        assert!(plan_empty.rules.iter().any(|r| {
-            r.action == IRAction::Direct && r.matchers.contains(&IRMatcher::GeoSite("cn".into()))
-        }));
-        assert!(plan_empty.rules.iter().any(|r| {
-            r.action == IRAction::Direct && r.matchers.contains(&IRMatcher::GeoIp("CN".into()))
-        }));
-        assert!(plan_empty.rules.iter().any(|r| {
-            r.action == IRAction::Reject && r.matchers.contains(&IRMatcher::GeoSite("category-ads-all".into()))
-        }));
-
-        // 场景 2：用户配置了自定义例外规则时，自定义规则排在最前作为高优先级，推荐规则在后兜底
-        let options_custom = MihomoConfigOptions {
-            routing_mode: RoutingMode::Rule,
-            rules: vec![
-                TrafficRule {
-                    matcher: RuleMatcher::DomainSuffix("company-intranet.com".into()),
-                    action: RuleAction::Direct,
-                },
-                TrafficRule {
-                    matcher: RuleMatcher::Domain("special-proxy-service.cn".into()),
-                    action: RuleAction::Proxy,
-                },
-            ],
-            ..MihomoConfigOptions::default()
-        };
-        let plan_custom = lower_options_to_ir(&options_custom, Some(&sample));
-        // 首两条必须是用户的例外规则，且 source 标记为 User
-        assert_eq!(plan_custom.rules[0].action, IRAction::Direct);
-        assert_eq!(plan_custom.rules[0].matchers, vec![IRMatcher::DomainSuffix("company-intranet.com".into())]);
-        assert_eq!(plan_custom.rules[0].source, crate::proxy::ir::RuleSource::User);
-
-        assert!(matches!(plan_custom.rules[1].action, IRAction::Proxy(_)));
-        assert_eq!(plan_custom.rules[1].matchers, vec![IRMatcher::Domain("special-proxy-service.cn".into())]);
-        assert_eq!(plan_custom.rules[1].source, crate::proxy::ir::RuleSource::User);
-
-        // 其后紧随自动追加的 Preset 规则
-        let has_cn_direct = plan_custom.rules.iter().skip(2).any(|r| {
-            r.action == IRAction::Direct
-                && r.matchers.contains(&IRMatcher::GeoSite("cn".into()))
-                && r.source == crate::proxy::ir::RuleSource::Preset
-        });
-        assert!(has_cn_direct, "用户例外规则之后必须自动包含 GeoSite CN 国内直连规则");
-    }
-
-    #[test]
-    fn url_test_mode_emits_three_groups_and_routes_match_to_final_group() {
-        let current = node(
-            "vless",
-            json!({"server": "1.2.3.4", "port": 443, "uuid": "u1", "network": "ws", "security": "tls"}),
-        );
-        let candidate = node(
-            "vless",
-            json!({"server": "5.6.7.8", "port": 443, "uuid": "u2", "network": "ws", "security": "tls"}),
-        );
+#[test]
+fn auto_routing_strategies_emit_matching_group_types() {
+    let current = node(
+        "vless",
+        json!({"server": "1.2.3.4", "port": 443, "uuid": "u1", "network": "ws", "security": "tls"}),
+    );
+    let candidate = node(
+        "vless",
+        json!({"server": "5.6.7.8", "port": 443, "uuid": "u2", "network": "ws", "security": "tls"}),
+    );
+    for (strategy, expected_type) in [
+        (AutoRoutingStrategy::UrlTest, "url-test"),
+        (AutoRoutingStrategy::Fallback, "fallback"),
+        (AutoRoutingStrategy::LoadBalance, "load-balance"),
+    ] {
         let mut options = MihomoConfigOptions {
             routing_mode: RoutingMode::ChinaDirect,
             url_test: true,
-            url_test_size: 3,
+            auto_strategy: strategy,
             ..MihomoConfigOptions::default()
         };
         options.url_test_nodes =
             crate::export::nodes_to_clash_proxies(std::slice::from_ref(&candidate));
-
         let config = build_mihomo_config(&current, options).unwrap();
         let groups = config["proxy-groups"].as_array().unwrap();
-        let names: Vec<&str> = groups
-            .iter()
-            .map(|group| group["name"].as_str().unwrap_or_default())
-            .collect();
-        assert_eq!(names, vec!["PROXY", URL_TEST_GROUP, FINAL_GROUP]);
-        assert_eq!(groups[1]["type"], "url-test");
-        // PROXY 的第一个成员必须是「自动选择」：默认让内核自己挑，锁定单节点才只是
-        // 一次 PUT /proxies/PROXY。
-        assert_eq!(groups[0]["proxies"][0], URL_TEST_GROUP);
-        assert_eq!(
-            config["rules"].as_array().unwrap().last().unwrap(),
-            &Value::String(format!("MATCH,{FINAL_GROUP}"))
-        );
-        assert_eq!(config["proxies"].as_array().unwrap().len(), 2);
+        assert_eq!(groups[1]["type"], expected_type);
     }
+}
 
-    #[test]
-    fn auto_routing_strategies_emit_matching_group_types() {
-        let current = node(
-            "vless",
-            json!({"server": "1.2.3.4", "port": 443, "uuid": "u1", "network": "ws", "security": "tls"}),
-        );
-        let candidate = node(
-            "vless",
-            json!({"server": "5.6.7.8", "port": 443, "uuid": "u2", "network": "ws", "security": "tls"}),
-        );
-        for (strategy, expected_type) in [
-            (AutoRoutingStrategy::UrlTest, "url-test"),
-            (AutoRoutingStrategy::Fallback, "fallback"),
-            (AutoRoutingStrategy::LoadBalance, "load-balance"),
-        ] {
-            let mut options = MihomoConfigOptions {
-                routing_mode: RoutingMode::ChinaDirect,
-                url_test: true,
-                auto_strategy: strategy,
-                ..MihomoConfigOptions::default()
-            };
-            options.url_test_nodes =
-                crate::export::nodes_to_clash_proxies(std::slice::from_ref(&candidate));
-            let config = build_mihomo_config(&current, options).unwrap();
-            let groups = config["proxy-groups"].as_array().unwrap();
-            assert_eq!(groups[1]["type"], expected_type);
-        }
-    }
+/// 候选注入 → runtime.options → 配置生成 这条链以前是静默断的（SQL 拼参报错被
+/// 吞掉），所以把三段接起来测一次。
+#[tokio::test]
+async fn set_url_test_candidates_reaches_generated_config() {
+    let candidate_a = node(
+        "vless",
+        json!({"server": "5.6.7.8", "port": 443, "uuid": "ua", "network": "ws", "security": "tls"}),
+    );
+    let candidate_b = node(
+        "vless",
+        json!({"server": "9.9.9.9", "port": 443, "uuid": "ub", "network": "ws", "security": "tls"}),
+    );
+    let manager = ProxyManager::new(MihomoConfigOptions {
+        url_test: true,
+        url_test_size: 20,
+        ..MihomoConfigOptions::default()
+    });
+    assert_eq!(
+        manager
+            .set_url_test_candidates(vec![candidate_a, candidate_b])
+            .await,
+        2
+    );
 
-    /// 候选注入 → runtime.options → 配置生成 这条链以前是静默断的（SQL 拼参报错被
-    /// 吞掉），所以把三段接起来测一次。
-    #[tokio::test]
-    async fn set_url_test_candidates_reaches_generated_config() {
-        let candidate_a = node(
-            "vless",
-            json!({"server": "5.6.7.8", "port": 443, "uuid": "ua", "network": "ws", "security": "tls"}),
-        );
-        let candidate_b = node(
-            "vless",
-            json!({"server": "9.9.9.9", "port": 443, "uuid": "ub", "network": "ws", "security": "tls"}),
-        );
-        let manager = ProxyManager::new(MihomoConfigOptions {
-            url_test: true,
-            url_test_size: 20,
-            ..MihomoConfigOptions::default()
-        });
-        assert_eq!(
-            manager
-                .set_url_test_candidates(vec![candidate_a, candidate_b])
-                .await,
-            2
-        );
+    let current = node(
+        "vless",
+        json!({"server": "1.2.3.4", "port": 443, "uuid": "u1", "network": "ws", "security": "tls"}),
+    );
+    let config = build_mihomo_config(&current, manager.config().await).unwrap();
+    let groups = config["proxy-groups"].as_array().unwrap();
+    assert_eq!(groups.len(), 3, "候选应该生成 PROXY / 自动选择 / 漏网之鱼");
+    assert_eq!(groups[1]["type"], "url-test");
+    assert_eq!(groups[1]["proxies"].as_array().unwrap().len(), 3);
+    // 判活节奏必须真的写进配置：这台客户端"坏节点长时间不被避开"就是栽在 300 秒一轮。
+    assert_eq!(groups[1]["interval"], json!(URL_TEST_INTERVAL_SECS));
+    assert_eq!(groups[1]["tolerance"], json!(URL_TEST_TOLERANCE_MS));
+    assert_eq!(groups[1]["timeout"], json!(URL_TEST_TIMEOUT_MS));
+    assert_eq!(
+        URL_TEST_INTERVAL_SECS, 60,
+        "url-test 间隔被改回分钟级，坏节点又要几分钟才被避开"
+    );
+}
 
-        let current = node(
-            "vless",
-            json!({"server": "1.2.3.4", "port": 443, "uuid": "u1", "network": "ws", "security": "tls"}),
-        );
-        let config = build_mihomo_config(&current, manager.config().await).unwrap();
-        let groups = config["proxy-groups"].as_array().unwrap();
-        assert_eq!(groups.len(), 3, "候选应该生成 PROXY / 自动选择 / 漏网之鱼");
-        assert_eq!(groups[1]["type"], "url-test");
-        assert_eq!(groups[1]["proxies"].as_array().unwrap().len(), 3);
-        // 判活节奏必须真的写进配置：这台客户端"坏节点长时间不被避开"就是栽在 300 秒一轮。
-        assert_eq!(groups[1]["interval"], json!(URL_TEST_INTERVAL_SECS));
-        assert_eq!(groups[1]["tolerance"], json!(URL_TEST_TOLERANCE_MS));
-        assert_eq!(groups[1]["timeout"], json!(URL_TEST_TIMEOUT_MS));
-        assert_eq!(
-            URL_TEST_INTERVAL_SECS, 60,
-            "url-test 间隔被改回分钟级，坏节点又要几分钟才被避开"
-        );
-    }
+#[test]
+fn url_test_off_keeps_single_select_group_and_proxy_match() {
+    let current = node(
+        "vless",
+        json!({"server": "1.2.3.4", "port": 443, "uuid": "u1", "network": "ws", "security": "tls"}),
+    );
+    let options = MihomoConfigOptions {
+        routing_mode: RoutingMode::ChinaDirect,
+        ..MihomoConfigOptions::default()
+    };
 
-    #[test]
-    fn url_test_off_keeps_single_select_group_and_proxy_match() {
-        let current = node(
-            "vless",
-            json!({"server": "1.2.3.4", "port": 443, "uuid": "u1", "network": "ws", "security": "tls"}),
-        );
-        let options = MihomoConfigOptions {
-            routing_mode: RoutingMode::ChinaDirect,
-            ..MihomoConfigOptions::default()
-        };
+    let config = build_mihomo_config(&current, options).unwrap();
+    assert_eq!(config["proxy-groups"].as_array().unwrap().len(), 1);
+    assert_eq!(config["proxies"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        config["rules"].as_array().unwrap().last().unwrap(),
+        &Value::String("MATCH,PROXY".into())
+    );
+}
 
-        let config = build_mihomo_config(&current, options).unwrap();
-        assert_eq!(config["proxy-groups"].as_array().unwrap().len(), 1);
-        assert_eq!(config["proxies"].as_array().unwrap().len(), 1);
-        assert_eq!(
-            config["rules"].as_array().unwrap().last().unwrap(),
-            &Value::String("MATCH,PROXY".into())
-        );
-    }
+#[test]
+fn smart_routing_creates_regional_and_scenario_groups_and_nested_proxy() {
+    let mut hk = node(
+        "vless",
+        json!({"server": "1.1.1.1", "port": 443, "uuid": "u1", "network": "ws", "security": "tls"}),
+    );
+    hk.name = "香港 01 专线".into();
+    hk.country = Some("HK".into());
 
-    #[test]
-    fn smart_routing_creates_regional_and_scenario_groups_and_nested_proxy() {
-        let mut hk = node(
-            "vless",
-            json!({"server": "1.1.1.1", "port": 443, "uuid": "u1", "network": "ws", "security": "tls"}),
-        );
-        hk.name = "香港 01 专线".into();
-        hk.country = Some("HK".into());
+    let mut jp = node(
+        "vless",
+        json!({"server": "2.2.2.2", "port": 443, "uuid": "u2", "network": "ws", "security": "tls"}),
+    );
+    jp.name = "东京 02 优质".into();
+    jp.country = Some("JP".into());
 
-        let mut jp = node(
-            "vless",
-            json!({"server": "2.2.2.2", "port": 443, "uuid": "u2", "network": "ws", "security": "tls"}),
-        );
-        jp.name = "东京 02 优质".into();
-        jp.country = Some("JP".into());
+    let mut sg = node(
+        "vless",
+        json!({"server": "3.3.3.3", "port": 443, "uuid": "u3", "network": "ws", "security": "tls"}),
+    );
+    sg.name = "新加坡 03 极速".into();
+    sg.country = Some("SG".into());
 
-        let mut sg = node(
-            "vless",
-            json!({"server": "3.3.3.3", "port": 443, "uuid": "u3", "network": "ws", "security": "tls"}),
-        );
-        sg.name = "新加坡 03 极速".into();
-        sg.country = Some("SG".into());
+    let mut us = node(
+        "vless",
+        json!({"server": "4.4.4.4", "port": 443, "uuid": "u4", "network": "ws", "security": "tls"}),
+    );
+    us.name = "美国洛杉矶 05".into();
+    us.country = Some("US".into());
 
-        let mut us = node(
-            "vless",
-            json!({"server": "4.4.4.4", "port": 443, "uuid": "u4", "network": "ws", "security": "tls"}),
-        );
-        us.name = "美国洛杉矶 05".into();
-        us.country = Some("US".into());
+    let mut options = MihomoConfigOptions {
+        routing_mode: RoutingMode::Rule,
+        smart_routing: true,
+        url_test: true,
+        ..MihomoConfigOptions::default()
+    };
+    options.url_test_nodes =
+        crate::export::nodes_to_clash_proxies(&[jp.clone(), sg.clone(), us.clone()]);
 
-        let mut options = MihomoConfigOptions {
-            routing_mode: RoutingMode::Rule,
-            smart_routing: true,
-            url_test: true,
-            ..MihomoConfigOptions::default()
-        };
-        options.url_test_nodes = crate::export::nodes_to_clash_proxies(&[
-            jp.clone(),
-            sg.clone(),
-            us.clone(),
-        ]);
+    let config = build_mihomo_config(&hk, options).unwrap();
+    let groups = config["proxy-groups"].as_array().unwrap();
+    let group_names: Vec<&str> = groups
+        .iter()
+        .map(|g| g["name"].as_str().unwrap_or_default())
+        .collect();
 
-        let config = build_mihomo_config(&hk, options).unwrap();
-        let groups = config["proxy-groups"].as_array().unwrap();
-        let group_names: Vec<&str> = groups
-            .iter()
-            .map(|g| g["name"].as_str().unwrap_or_default())
-            .collect();
+    // 顶层与场景策略组
+    assert!(group_names.contains(&"PROXY"));
+    assert!(group_names.contains(&"AI分组"));
+    assert!(group_names.contains(&"国际流媒体"));
+    assert!(group_names.contains(&"Telegram"));
+    assert!(group_names.contains(&"多线并发下载"));
 
-        // 顶层与场景策略组
-        assert!(group_names.contains(&"PROXY"));
-        assert!(group_names.contains(&"AI分组"));
-        assert!(group_names.contains(&"国际流媒体"));
-        assert!(group_names.contains(&"Telegram"));
-        assert!(group_names.contains(&"多线并发下载"));
+    // 地区自动测速选优组（根据多订阅节点自动划分生成）
+    assert!(group_names.contains(&"香港节点"));
+    assert!(group_names.contains(&"日本节点"));
+    assert!(group_names.contains(&"新加坡节点"));
+    assert!(group_names.contains(&"美国节点"));
+    assert!(group_names.contains(&"普通代理"));
+    assert!(group_names.contains(&URL_TEST_GROUP));
+    assert!(group_names.contains(&FINAL_GROUP));
 
-        // 地区自动测速选优组（根据多订阅节点自动划分生成）
-        assert!(group_names.contains(&"香港节点"));
-        assert!(group_names.contains(&"日本节点"));
-        assert!(group_names.contains(&"新加坡节点"));
-        assert!(group_names.contains(&"美国节点"));
-        assert!(group_names.contains(&"普通代理"));
-        assert!(group_names.contains(&URL_TEST_GROUP));
-        assert!(group_names.contains(&FINAL_GROUP));
+    // 验证 PROXY 总控组包含地区选优组与自动选择
+    let proxy_group = groups.iter().find(|g| g["name"] == "PROXY").unwrap();
+    let proxy_members: Vec<&str> = proxy_group["proxies"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| p.as_str().unwrap())
+        .collect();
+    assert_eq!(proxy_members[0], URL_TEST_GROUP);
+    assert!(proxy_members.contains(&"香港节点"));
+    assert!(proxy_members.contains(&"日本节点"));
+    assert!(proxy_members.contains(&"新加坡节点"));
+    assert!(proxy_members.contains(&"美国节点"));
+    assert!(proxy_members.contains(&"DIRECT"));
 
-        // 验证 PROXY 总控组包含地区选优组与自动选择
-        let proxy_group = groups.iter().find(|g| g["name"] == "PROXY").unwrap();
-        let proxy_members: Vec<&str> = proxy_group["proxies"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|p| p.as_str().unwrap())
-            .collect();
-        assert_eq!(proxy_members[0], URL_TEST_GROUP);
-        assert!(proxy_members.contains(&"香港节点"));
-        assert!(proxy_members.contains(&"日本节点"));
-        assert!(proxy_members.contains(&"新加坡节点"));
-        assert!(proxy_members.contains(&"美国节点"));
-        assert!(proxy_members.contains(&"DIRECT"));
+    // 验证规则自动映射：YouTube/Netflix 导向 国际流媒体，Telegram 导向 Telegram，OpenAI 导向 AI分组
+    let rules = config["rules"].as_array().unwrap();
+    assert!(rules
+        .iter()
+        .any(|r| r.as_str().unwrap().contains("GEOSITE,youtube,国际流媒体")));
+    assert!(rules
+        .iter()
+        .any(|r| r.as_str().unwrap().contains("GEOSITE,telegram,Telegram")));
+    assert!(rules.iter().any(|r| r
+        .as_str()
+        .unwrap()
+        .contains("DOMAIN-SUFFIX,openai.com,AI分组")));
+}
 
-        // 验证规则自动映射：YouTube/Netflix 导向 国际流媒体，Telegram 导向 Telegram，OpenAI 导向 AI分组
-        let rules = config["rules"].as_array().unwrap();
-        assert!(rules.iter().any(|r| r.as_str().unwrap().contains("GEOSITE,youtube,国际流媒体")));
-        assert!(rules.iter().any(|r| r.as_str().unwrap().contains("GEOSITE,telegram,Telegram")));
-        assert!(rules.iter().any(|r| r.as_str().unwrap().contains("DOMAIN-SUFFIX,openai.com,AI分组")));
-    }
+#[test]
+fn china_direct_mode_places_dns_poison_overrides_before_geoip() {
+    // 境内 DoH 把 googlevideo 污染成国内 IP 时，只有先按域名定性才不会误判直连。
+    let selected = node(
+        "vless",
+        json!({
+            "server": "1.2.3.4",
+            "port": 443,
+            "uuid": "11111111-1111-1111-1111-111111111111",
+            "network": "ws",
+            "security": "tls"
+        }),
+    );
+    let options = MihomoConfigOptions {
+        routing_mode: RoutingMode::ChinaDirect,
+        ..MihomoConfigOptions::default()
+    };
 
-    #[test]
-    fn china_direct_mode_places_dns_poison_overrides_before_geoip() {
-        // 境内 DoH 把 googlevideo 污染成国内 IP 时，只有先按域名定性才不会误判直连。
-        let selected = node(
-            "vless",
-            json!({
-                "server": "1.2.3.4",
-                "port": 443,
-                "uuid": "11111111-1111-1111-1111-111111111111",
-                "network": "ws",
-                "security": "tls"
-            }),
-        );
-        let options = MihomoConfigOptions {
-            routing_mode: RoutingMode::ChinaDirect,
-            ..MihomoConfigOptions::default()
-        };
+    let config = build_mihomo_config(&selected, options).unwrap();
+    let rules = config["rules"].as_array().unwrap();
+    let geoip = rules
+        .iter()
+        .position(|rule| rule == "GEOIP,CN,DIRECT")
+        .expect("GEOIP,CN,DIRECT");
+    assert_eq!(&rules[geoip - 2], "GEOSITE,google,PROXY");
+    assert_eq!(&rules[geoip - 1], "GEOSITE,youtube,PROXY");
+    assert_eq!(rules.last().unwrap(), "MATCH,PROXY");
+    assert!(config["dns"].get("fallback").is_none());
+}
 
-        let config = build_mihomo_config(&selected, options).unwrap();
-        let rules = config["rules"].as_array().unwrap();
-        let geoip = rules
-            .iter()
-            .position(|rule| rule == "GEOIP,CN,DIRECT")
-            .expect("GEOIP,CN,DIRECT");
-        assert_eq!(&rules[geoip - 2], "GEOSITE,google,PROXY");
-        assert_eq!(&rules[geoip - 1], "GEOSITE,youtube,PROXY");
-        assert_eq!(rules.last().unwrap(), "MATCH,PROXY");
-        assert!(config["dns"].get("fallback").is_none());
-    }
+#[test]
+fn routing_presets_generate_expected_mihomo_fallbacks() {
+    let selected = node(
+        "vless",
+        json!({
+            "server": "1.2.3.4",
+            "port": 443,
+            "uuid": "11111111-1111-1111-1111-111111111111",
+            "network": "ws",
+            "security": "tls"
+        }),
+    );
+    let cases = [
+        (RoutingMode::ChinaDirect, "MATCH,PROXY"),
+        (RoutingMode::GfwList, "MATCH,DIRECT"),
+        (RoutingMode::Global, "MATCH,PROXY"),
+        (RoutingMode::Direct, "MATCH,DIRECT"),
+    ];
 
-    #[test]
-    fn routing_presets_generate_expected_mihomo_fallbacks() {
-        let selected = node(
-            "vless",
-            json!({
-                "server": "1.2.3.4",
-                "port": 443,
-                "uuid": "11111111-1111-1111-1111-111111111111",
-                "network": "ws",
-                "security": "tls"
-            }),
-        );
-        let cases = [
-            (RoutingMode::ChinaDirect, "MATCH,PROXY"),
-            (RoutingMode::GfwList, "MATCH,DIRECT"),
-            (RoutingMode::Global, "MATCH,PROXY"),
-            (RoutingMode::Direct, "MATCH,DIRECT"),
-        ];
-
-        for (routing_mode, fallback) in cases {
-            let config = build_mihomo_config(
-                &selected,
-                MihomoConfigOptions {
-                    routing_mode,
-                    ..MihomoConfigOptions::default()
-                },
-            )
-            .unwrap();
-            assert_eq!(
-                config["rules"].as_array().unwrap().last().unwrap(),
-                fallback
-            );
-        }
-    }
-
-    #[test]
-    fn online_mihomo_presets_enable_geo_updates() {
-        let selected = node(
-            "trojan",
-            json!({"server":"1.2.3.4","port":443,"password":"p"}),
-        );
+    for (routing_mode, fallback) in cases {
         let config = build_mihomo_config(
             &selected,
             MihomoConfigOptions {
-                routing_mode: RoutingMode::GfwList,
+                routing_mode,
                 ..MihomoConfigOptions::default()
             },
         )
         .unwrap();
+        assert_eq!(
+            config["rules"].as_array().unwrap().last().unwrap(),
+            fallback
+        );
+    }
+}
 
-        assert_eq!(config["geo-auto-update"], false);
-        assert!(config["geox-url"]["geosite"]
-            .as_str()
+#[test]
+fn online_mihomo_presets_enable_geo_updates() {
+    let selected = node(
+        "trojan",
+        json!({"server":"1.2.3.4","port":443,"password":"p"}),
+    );
+    let config = build_mihomo_config(
+        &selected,
+        MihomoConfigOptions {
+            routing_mode: RoutingMode::GfwList,
+            ..MihomoConfigOptions::default()
+        },
+    )
+    .unwrap();
+
+    assert_eq!(config["geo-auto-update"], false);
+    assert!(config["geox-url"]["geosite"]
+        .as_str()
+        .unwrap()
+        .contains("Loyalsoldier"));
+    assert_eq!(config["rules"][1], "GEOSITE,gfw,PROXY");
+}
+
+#[test]
+fn builds_tun_dns_and_ordered_routing_config() {
+    let selected = node(
+        "vless",
+        json!({
+            "server": "1.2.3.4",
+            "port": 443,
+            "uuid": "11111111-1111-1111-1111-111111111111",
+            "network": "ws",
+            "security": "tls"
+        }),
+    );
+    let options = MihomoConfigOptions {
+        mode: ProxyMode::Tun,
+        rules: vec![
+            TrafficRule {
+                matcher: RuleMatcher::GeoSite("cn".into()),
+                action: RuleAction::Direct,
+            },
+            TrafficRule {
+                matcher: RuleMatcher::GeoIp("CN".into()),
+                action: RuleAction::Direct,
+            },
+            TrafficRule {
+                matcher: RuleMatcher::Quic,
+                action: RuleAction::Reject,
+            },
+        ],
+        ..MihomoConfigOptions::default()
+    };
+
+    let config = build_mihomo_config(&selected, options).unwrap();
+
+    assert_eq!(config["tun"]["enable"], true);
+    assert_eq!(config["tun"]["stack"], "mixed");
+    assert_eq!(config["tun"]["strict-route"], true);
+    assert_eq!(config["tun"]["dns-hijack"][0], "any:53");
+    assert_eq!(config["dns"]["enhanced-mode"], "fake-ip");
+    assert_eq!(config["dns"]["respect-rules"], true);
+    assert_eq!(
+        config["dns"]["nameserver-policy"]["geosite:cn"][0],
+        "223.5.5.5"
+    );
+    assert_eq!(
+        config["dns"]["nameserver-policy"]["geosite:geolocation-!cn"][0],
+        "https://1.1.1.1/dns-query"
+    );
+    assert_eq!(config["dns"]["default-nameserver"][0], "223.5.5.5");
+    assert_eq!(config["dns"]["nameserver"][0], DEFAULT_DNS_PRIMARY);
+    assert_eq!(config["dns"]["nameserver"][1], DEFAULT_DNS_SECONDARY);
+    assert_eq!(config["geodata-mode"], true);
+    assert_eq!(config["rules"][0], "GEOSITE,cn,DIRECT");
+    // 生成配置时污染免疫规则被插在 GEOIP,CN 之前，用户规则表本身不变。
+    assert_eq!(config["rules"][1], "GEOSITE,google,PROXY");
+    assert_eq!(config["rules"][2], "GEOSITE,youtube,PROXY");
+    assert_eq!(config["rules"][3], "GEOIP,CN,DIRECT");
+    assert_eq!(
+        config["rules"][4],
+        "AND,((NETWORK,udp),(DST-PORT,443)),REJECT"
+    );
+    for host in crate::geo::MIRROR_DIRECT_HOSTS {
+        assert!(config["rules"]
+            .as_array()
             .unwrap()
-            .contains("Loyalsoldier"));
-        assert_eq!(config["rules"][1], "GEOSITE,gfw,PROXY");
+            .iter()
+            .any(|r| r == &format!("DOMAIN-SUFFIX,{host},DIRECT")));
     }
+    assert_eq!(
+        config["rules"].as_array().unwrap().last().unwrap(),
+        "MATCH,PROXY"
+    );
+}
 
-    #[test]
-    fn builds_tun_dns_and_ordered_routing_config() {
-        let selected = node(
-            "vless",
-            json!({
-                "server": "1.2.3.4",
-                "port": 443,
-                "uuid": "11111111-1111-1111-1111-111111111111",
-                "network": "ws",
-                "security": "tls"
-            }),
-        );
-        let options = MihomoConfigOptions {
-            mode: ProxyMode::Tun,
-            rules: vec![
-                TrafficRule {
-                    matcher: RuleMatcher::GeoSite("cn".into()),
-                    action: RuleAction::Direct,
-                },
-                TrafficRule {
-                    matcher: RuleMatcher::GeoIp("CN".into()),
-                    action: RuleAction::Direct,
-                },
-                TrafficRule {
-                    matcher: RuleMatcher::Quic,
-                    action: RuleAction::Reject,
-                },
-            ],
-            ..MihomoConfigOptions::default()
-        };
+#[test]
+fn system_mode_does_not_emit_tun_config() {
+    let selected = node(
+        "vless",
+        json!({
+            "server": "1.2.3.4",
+            "port": 443,
+            "uuid": "11111111-1111-1111-1111-111111111111"
+        }),
+    );
 
-        let config = build_mihomo_config(&selected, options).unwrap();
+    let config = build_mihomo_config(&selected, MihomoConfigOptions::default()).unwrap();
 
-        assert_eq!(config["tun"]["enable"], true);
-        assert_eq!(config["tun"]["stack"], "mixed");
-        assert_eq!(config["tun"]["strict-route"], true);
-        assert_eq!(config["tun"]["dns-hijack"][0], "any:53");
-        assert_eq!(config["dns"]["enhanced-mode"], "fake-ip");
-        assert_eq!(config["dns"]["respect-rules"], true);
-        assert_eq!(config["dns"]["nameserver-policy"]["geosite:cn"][0], "223.5.5.5");
-        assert_eq!(config["dns"]["nameserver-policy"]["geosite:geolocation-!cn"][0], "https://1.1.1.1/dns-query");
-        assert_eq!(config["dns"]["default-nameserver"][0], "223.5.5.5");
-        assert_eq!(config["dns"]["nameserver"][0], DEFAULT_DNS_PRIMARY);
-        assert_eq!(config["dns"]["nameserver"][1], DEFAULT_DNS_SECONDARY);
-        assert_eq!(config["geodata-mode"], true);
-        assert_eq!(config["rules"][0], "GEOSITE,cn,DIRECT");
-        // 生成配置时污染免疫规则被插在 GEOIP,CN 之前，用户规则表本身不变。
-        assert_eq!(config["rules"][1], "GEOSITE,google,PROXY");
-        assert_eq!(config["rules"][2], "GEOSITE,youtube,PROXY");
-        assert_eq!(config["rules"][3], "GEOIP,CN,DIRECT");
-        assert_eq!(
-            config["rules"][4],
-            "AND,((NETWORK,udp),(DST-PORT,443)),REJECT"
-        );
-        for host in crate::geo::MIRROR_DIRECT_HOSTS {
-            assert!(config["rules"].as_array().unwrap().iter().any(|r| r == &format!("DOMAIN-SUFFIX,{host},DIRECT")));
-        }
-        assert_eq!(config["rules"].as_array().unwrap().last().unwrap(), "MATCH,PROXY");
-    }
+    assert!(config.get("tun").is_none());
+}
 
-    #[test]
-    fn system_mode_does_not_emit_tun_config() {
-        let selected = node(
-            "vless",
-            json!({
-                "server": "1.2.3.4",
-                "port": 443,
-                "uuid": "11111111-1111-1111-1111-111111111111"
-            }),
-        );
+#[test]
+fn rejects_node_unsupported_by_mihomo_export() {
+    // ssh 无 Clash 转换路径，必须被拒启（sing-box 才支持 ssh 出站）
+    let selected = node(
+        "ssh",
+        json!({"server": "1.2.3.4", "port": 22, "username": "root", "private-key": "k"}),
+    );
 
-        let config = build_mihomo_config(&selected, MihomoConfigOptions::default()).unwrap();
+    let error = build_mihomo_config(&selected, MihomoConfigOptions::default()).unwrap_err();
 
-        assert!(config.get("tun").is_none());
-    }
+    assert!(error.to_string().contains("不支持"));
+}
 
-    #[test]
-    fn rejects_node_unsupported_by_mihomo_export() {
-        // ssh 无 Clash 转换路径，必须被拒启（sing-box 才支持 ssh 出站）
-        let selected = node(
-            "ssh",
-            json!({"server": "1.2.3.4", "port": 22, "username": "root", "private-key": "k"}),
-        );
+#[test]
+fn exports_mieru_node_with_username_and_password() {
+    // mihomo ≥1.18.7 支持 mieru（username+password）
+    let selected = node(
+        "mieru",
+        json!({
+            "server": "1.2.3.4",
+            "port": 443,
+            "username": "alice",
+            "password": "secret"
+        }),
+    );
 
-        let error = build_mihomo_config(&selected, MihomoConfigOptions::default()).unwrap_err();
+    let config = build_mihomo_config(&selected, MihomoConfigOptions::default()).unwrap();
+    let proxies = config.get("proxies").and_then(|p| p.as_array()).unwrap();
+    let proxy = proxies.first().unwrap();
+    assert_eq!(proxy.get("type").and_then(|v| v.as_str()), Some("mieru"));
+    assert_eq!(
+        proxy.get("username").and_then(|v| v.as_str()),
+        Some("alice")
+    );
+}
 
-        assert!(error.to_string().contains("不支持"));
-    }
+#[tokio::test]
+async fn work_dir_uses_kernel_specific_paths_and_cleans_up() {
+    for (kernel, config_name, log_name) in [
+        (KernelKind::Mihomo, "config.yaml", "mihomo.log"),
+        (KernelKind::SingBox, "config.json", "sing-box.log"),
+        (KernelKind::Xray, "config.json", "xray.log"),
+        (KernelKind::Shoes, "config.yaml", "shoes.log"),
+        (KernelKind::Meow, "config.yaml", "meow.log"),
+        (KernelKind::VpCore, "config.yaml", "vpcore.log"),
+    ] {
+        let work_dir = ProxyWorkDir::create(kernel).await.unwrap();
+        let root = work_dir.root().to_path_buf();
 
-    #[test]
-    fn exports_mieru_node_with_username_and_password() {
-        // mihomo ≥1.18.7 支持 mieru（username+password）
-        let selected = node(
-            "mieru",
-            json!({
-                "server": "1.2.3.4",
-                "port": 443,
-                "username": "alice",
-                "password": "secret"
-            }),
-        );
-
-        let config = build_mihomo_config(&selected, MihomoConfigOptions::default()).unwrap();
-        let proxies = config.get("proxies").and_then(|p| p.as_array()).unwrap();
-        let proxy = proxies.first().unwrap();
-        assert_eq!(proxy.get("type").and_then(|v| v.as_str()), Some("mieru"));
-        assert_eq!(proxy.get("username").and_then(|v| v.as_str()), Some("alice"));
-    }
-
-    #[tokio::test]
-    async fn work_dir_uses_kernel_specific_paths_and_cleans_up() {
-        for (kernel, config_name, log_name) in [
-            (KernelKind::Mihomo, "config.yaml", "mihomo.log"),
-            (KernelKind::SingBox, "config.json", "sing-box.log"),
-            (KernelKind::Xray, "config.json", "xray.log"),
-            (KernelKind::Shoes, "config.yaml", "shoes.log"),
-            (KernelKind::Meow, "config.yaml", "meow.log"),
-            (KernelKind::VpCore, "config.yaml", "vpcore.log"),
-        ] {
-            let work_dir = ProxyWorkDir::create(kernel).await.unwrap();
-            let root = work_dir.root().to_path_buf();
-
-            assert!(root.is_dir());
-            assert_eq!(work_dir.config_path(), root.join(config_name));
-            assert_eq!(work_dir.log_path(), root.join(log_name));
-            match kernel {
-                KernelKind::Mihomo => assert_eq!(
-                    work_dir.data_root(),
-                    crate::kernel::managed_kernel_root().join("mihomo")
-                ),
-                KernelKind::SingBox | KernelKind::Xray | KernelKind::Shoes => {
-                    assert_eq!(work_dir.data_root(), root)
-                }
-                KernelKind::Meow => assert_eq!(
-                    work_dir.data_root(),
-                    crate::kernel::managed_kernel_root().join("meow")
-                ),
-                KernelKind::VpCore => assert_eq!(
-                    work_dir.data_root(),
-                    crate::kernel::managed_kernel_root().join("vpcore")
-                ),
+        assert!(root.is_dir());
+        assert_eq!(work_dir.config_path(), root.join(config_name));
+        assert_eq!(work_dir.log_path(), root.join(log_name));
+        match kernel {
+            KernelKind::Mihomo => assert_eq!(
+                work_dir.data_root(),
+                crate::kernel::managed_kernel_root().join("mihomo")
+            ),
+            KernelKind::SingBox | KernelKind::Xray | KernelKind::Shoes => {
+                assert_eq!(work_dir.data_root(), root)
             }
-
-            work_dir.cleanup().await.unwrap();
-            assert!(!root.exists());
+            KernelKind::Meow => assert_eq!(
+                work_dir.data_root(),
+                crate::kernel::managed_kernel_root().join("meow")
+            ),
+            KernelKind::VpCore => assert_eq!(
+                work_dir.data_root(),
+                crate::kernel::managed_kernel_root().join("vpcore")
+            ),
         }
+
+        work_dir.cleanup().await.unwrap();
+        assert!(!root.exists());
     }
+}
 
-    #[tokio::test]
-    async fn manager_starts_in_stopped_state() {
-        let manager = ProxyManager::new(MihomoConfigOptions::default());
+#[tokio::test]
+async fn manager_starts_in_stopped_state() {
+    let manager = ProxyManager::new(MihomoConfigOptions::default());
 
-        let status = manager.status().await;
+    let status = manager.status().await;
 
-        assert_eq!(status.state, ProxyState::Stopped);
-        assert!(status.node_id.is_none());
-    }
+    assert_eq!(status.state, ProxyState::Stopped);
+    assert!(status.node_id.is_none());
+}
 
-    #[test]
-    fn degraded_status_distinguishes_ready_and_waiting_states() {
-        let mut status = ProxyRuntimeStatus::stopped(MihomoConfigOptions::default());
-        status.state = ProxyState::Degraded;
-        status.system_proxy_enabled = true;
-        status.last_error = Some("验证超时".into());
+#[test]
+fn degraded_status_distinguishes_ready_and_waiting_states() {
+    let mut status = ProxyRuntimeStatus::stopped(MihomoConfigOptions::default());
+    status.state = ProxyState::Degraded;
+    status.system_proxy_enabled = true;
+    status.last_error = Some("验证超时".into());
 
-        status.local_proxy_ready = true;
-        assert!(status.local_proxy_active());
-        assert!(!status.config_editable());
+    status.local_proxy_ready = true;
+    assert!(status.local_proxy_active());
+    assert!(!status.config_editable());
 
-        status.local_proxy_ready = false;
-        assert!(!status.local_proxy_active());
-        assert!(status.config_editable());
-        let json = serde_json::to_value(status).unwrap();
-        assert_eq!(json["system_proxy_enabled"], true);
-        assert_eq!(json["last_error"], "验证超时");
-    }
+    status.local_proxy_ready = false;
+    assert!(!status.local_proxy_active());
+    assert!(status.config_editable());
+    let json = serde_json::to_value(status).unwrap();
+    assert_eq!(json["system_proxy_enabled"], true);
+    assert_eq!(json["last_error"], "验证超时");
+}
 
-    #[tokio::test]
-    async fn manager_updates_valid_config_while_stopped() {
-        let manager = ProxyManager::new(MihomoConfigOptions::default());
-        let mut options = manager.config().await;
-        options.mode = ProxyMode::Tun;
-        options.rules.push(TrafficRule {
-            matcher: RuleMatcher::GeoSite("cn".into()),
-            action: RuleAction::Direct,
-        });
+#[tokio::test]
+async fn manager_updates_valid_config_while_stopped() {
+    let manager = ProxyManager::new(MihomoConfigOptions::default());
+    let mut options = manager.config().await;
+    options.mode = ProxyMode::Tun;
+    options.rules.push(TrafficRule {
+        matcher: RuleMatcher::GeoSite("cn".into()),
+        action: RuleAction::Direct,
+    });
 
-        manager.update_config(options.clone()).await.unwrap();
+    manager.update_config(options.clone()).await.unwrap();
 
-        assert_eq!(manager.config().await, options);
-        assert_eq!(manager.status().await.mode, ProxyMode::Tun);
-    }
+    assert_eq!(manager.config().await, options);
+    assert_eq!(manager.status().await.mode, ProxyMode::Tun);
+}
 
-    #[tokio::test]
-    async fn manager_rejects_config_changes_while_running() {
-        let manager = ProxyManager::new(MihomoConfigOptions::default());
-        manager.runtime.lock().await.status.state = ProxyState::Running;
+#[tokio::test]
+async fn manager_rejects_config_changes_while_running() {
+    let manager = ProxyManager::new(MihomoConfigOptions::default());
+    manager.runtime.lock().await.status.state = ProxyState::Running;
 
-        let error = manager
-            .update_config(MihomoConfigOptions::default())
-            .await
-            .unwrap_err();
+    let error = manager
+        .update_config(MihomoConfigOptions::default())
+        .await
+        .unwrap_err();
 
-        assert!(error.to_string().contains("关闭内核"));
-    }
+    assert!(error.to_string().contains("关闭内核"));
+}
 
-    #[tokio::test]
-    async fn missing_mihomo_executable_sets_failed_status() {
-        let controller = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let controller_port = controller.local_addr().unwrap().port();
-        drop(controller);
+#[tokio::test]
+async fn missing_mihomo_executable_sets_failed_status() {
+    let controller = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let controller_port = controller.local_addr().unwrap().port();
+    drop(controller);
+    let mixed = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let mixed_port = mixed.local_addr().unwrap().port();
+    drop(mixed);
+    let manager = ProxyManager::new(MihomoConfigOptions {
+        mixed_port,
+        controller_port,
+        ..MihomoConfigOptions::default()
+    });
+    let selected = node(
+        "vless",
+        json!({
+            "server": "1.2.3.4",
+            "port": 443,
+            "uuid": "11111111-1111-1111-1111-111111111111",
+            "network": "ws",
+            "security": "tls"
+        }),
+    );
+    let missing = std::env::temp_dir().join(format!(
+        "vproxy-missing-mihomo-{}.exe",
+        uuid::Uuid::new_v4()
+    ));
+
+    let error = manager
+        .start_with_path(&selected, &missing)
+        .await
+        .unwrap_err();
+    let status = manager.status().await;
+
+    assert!(error.to_string().contains("启动"));
+    assert_eq!(status.state, ProxyState::Failed);
+    assert!(status.message.contains("启动"));
+    assert!(!status.local_proxy_ready);
+    assert_eq!(
+        status.last_error.as_deref(),
+        Some(error.to_string().as_str())
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn exited_and_timed_out_kernels_leave_a_failed_unready_status() {
+    use std::os::unix::fs::PermissionsExt;
+
+    for (script, expected_error) in [
+        ("#!/bin/sh\nexit 7\n", "退出码"),
+        ("#!/bin/sh\nexec /bin/sleep 30\n", "启动超时"),
+    ] {
         let mixed = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let mixed_port = mixed.local_addr().unwrap().port();
-        drop(mixed);
-        let manager = ProxyManager::new(MihomoConfigOptions {
-            mixed_port,
-            controller_port,
+        let controller = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let options = MihomoConfigOptions {
+            mode: ProxyMode::None,
+            routing_mode: RoutingMode::Global,
+            mixed_port: mixed.local_addr().unwrap().port(),
+            controller_port: controller.local_addr().unwrap().port(),
             ..MihomoConfigOptions::default()
-        });
-        let selected = node(
-            "vless",
-            json!({
-                "server": "1.2.3.4",
-                "port": 443,
-                "uuid": "11111111-1111-1111-1111-111111111111",
-                "network": "ws",
-                "security": "tls"
-            }),
-        );
-        let missing = std::env::temp_dir().join(format!(
-            "vproxy-missing-mihomo-{}.exe",
-            uuid::Uuid::new_v4()
-        ));
-
-        let error = manager
-            .start_with_path(&selected, &missing)
-            .await
-            .unwrap_err();
-        let status = manager.status().await;
-
-        assert!(error.to_string().contains("启动"));
-        assert_eq!(status.state, ProxyState::Failed);
-        assert!(status.message.contains("启动"));
-        assert!(!status.local_proxy_ready);
-        assert_eq!(status.last_error.as_deref(), Some(error.to_string().as_str()));
-    }
-
-    #[cfg(unix)]
-    #[tokio::test]
-    async fn exited_and_timed_out_kernels_leave_a_failed_unready_status() {
-        use std::os::unix::fs::PermissionsExt;
-
-        for (script, expected_error) in [
-            ("#!/bin/sh\nexit 7\n", "退出码"),
-            ("#!/bin/sh\nexec /bin/sleep 30\n", "启动超时"),
-        ] {
-            let mixed = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-            let controller = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-            let options = MihomoConfigOptions {
-                mode: ProxyMode::None,
-                routing_mode: RoutingMode::Global,
-                mixed_port: mixed.local_addr().unwrap().port(),
-                controller_port: controller.local_addr().unwrap().port(),
-                ..MihomoConfigOptions::default()
-            };
-            drop((mixed, controller));
-            let manager = ProxyManager::with_system_proxy(
-                options, Arc::new(FakeSystemProxy::default()),
-            );
-            let selected = node("ss", json!({
-                "server": "example.com", "port": 8388,
-                "cipher": "aes-128-gcm", "password": "test-only"
-            }));
-            let executable = std::env::temp_dir().join(format!(
-                "vproxy-startup-fixture-{}", uuid::Uuid::new_v4()
-            ));
-            std::fs::write(&executable, script).unwrap();
-            std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
-
-            let result = manager.start_with_path(&selected, &executable).await;
-            let _ = std::fs::remove_file(&executable);
-            let error = result.unwrap_err().to_string();
-            let status = manager.status().await;
-
-            assert!(error.contains(expected_error), "{error}");
-            assert_eq!(status.state, ProxyState::Failed);
-            assert!(!status.local_proxy_ready);
-            assert!(!status.system_proxy_enabled);
-            assert_eq!(status.last_error.as_deref(), Some(error.as_str()));
-        }
-    }
-
-    #[tokio::test]
-    async fn missing_sing_box_executable_keeps_selected_kernel_in_status() {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let mixed_port = listener.local_addr().unwrap().port();
-        drop(listener);
-        let manager = ProxyManager::new(MihomoConfigOptions {
-            mixed_port,
-            ..MihomoConfigOptions::default()
-        });
-        let selected = node(
-            "anytls",
-            json!({
-                "server": "anytls.example.com",
-                "port": 443,
-                "password": "secret"
-            }),
-        );
-        let missing = std::env::temp_dir().join(format!(
-            "vproxy-missing-sing-box-{}.exe",
-            uuid::Uuid::new_v4()
-        ));
-
-        let error = manager
-            .start_with_kernel_path(&selected, KernelKind::SingBox, &missing)
-            .await
-            .unwrap_err();
-        let status = manager.status().await;
-
-        assert!(error.to_string().contains("Sing-box"));
-        assert_eq!(status.state, ProxyState::Failed);
-        assert_eq!(status.kernel, Some(KernelKind::SingBox));
-        assert!(status.message.contains("Sing-box"));
-    }
-
-    #[tokio::test]
-    async fn occupied_controller_port_is_rejected() {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let port = listener.local_addr().unwrap().port();
-
-        let error = ensure_port_available(port).await.unwrap_err();
-
-        assert!(error.to_string().contains("已被占用"));
-    }
-
-    #[tokio::test]
-    async fn startup_probe_rejects_proxy_that_cannot_reach_test_url() {
-        use tokio::io::{AsyncReadExt, AsyncWriteExt};
-
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let port = listener.local_addr().unwrap().port();
-        tokio::spawn(async move {
-            let (mut stream, _) = listener.accept().await.unwrap();
-            let mut request = [0u8; 1024];
-            let _ = stream.read(&mut request).await;
-            stream
-                .write_all(b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n")
-                .await
-                .unwrap();
-        });
-
-        let started = tokio::time::Instant::now();
-        let error = verify_local_proxy(port, Duration::from_secs(1))
-            .await
-            .unwrap_err();
-
-        assert!(error.to_string().contains("本地代理无法访问测试地址"));
-        assert!(started.elapsed() < Duration::from_millis(1_500));
-    }
-
-    #[tokio::test]
-    async fn system_proxy_activation_returns_snapshot_for_restore() {
-        let controller = Arc::new(FakeSystemProxy::default());
-
-        let snapshot = activate_system_proxy(controller.clone(), "127.0.0.1:7890".into(), None)
-            .await
-            .unwrap();
-        restore_system_proxy(controller.clone(), snapshot.clone(), false)
-            .await
-            .unwrap();
-
-        assert_eq!(
-            controller.enabled.lock().unwrap().as_slice(),
-            ["127.0.0.1:7890"]
-        );
-        assert_eq!(controller.restored.lock().unwrap().as_slice(), [snapshot]);
-    }
-
-    #[tokio::test]
-    async fn restart_stop_preserves_system_proxy_without_restoring_it() {
-        let controller = Arc::new(FakeSystemProxy::default());
-        let manager =
-            ProxyManager::with_system_proxy(MihomoConfigOptions::default(), controller.clone());
-        let snapshot = SystemProxySnapshot {
-            enabled: false,
-            server: Some("old-proxy:8080".into()),
-            override_list: Some("<local>".into()),
         };
-        {
-            let mut runtime = manager.runtime.lock().await;
-            runtime.status.state = ProxyState::Running;
-            runtime.system_proxy_snapshot = Some(snapshot.clone());
-        }
-
-        let preserved = manager.stop_inner_for_restart().await.unwrap();
-
-        assert_eq!(preserved, Some(snapshot));
-        assert!(controller.restored.lock().unwrap().is_empty());
-    }
-
-    #[tokio::test]
-    async fn test_hot_toggle_system_proxy_transitions() {
-        let controller = Arc::new(FakeSystemProxy::default());
-        let mut opts = MihomoConfigOptions::default();
-        opts.mode = ProxyMode::Tun;
-        let manager = ProxyManager::with_system_proxy(opts, controller.clone());
-        {
-            let mut rt = manager.runtime.lock().await;
-            rt.status.state = ProxyState::Running;
-            rt.status.mode = ProxyMode::Tun;
-        }
-
-        // 1. 在 Tun 模式下热开启系统代理 -> Both
-        let msg = manager.hot_toggle_system_proxy(true).await.unwrap();
-        assert!(msg.contains("系统代理已即时开启"));
-        assert_eq!(manager.status().await.mode, ProxyMode::Both);
-        assert!(manager.status().await.system_proxy_enabled);
-        assert_eq!(manager.config().await.mode, ProxyMode::Both);
-
-        // 2. 在 Both 模式下热关闭系统代理 -> Tun
-        let msg = manager.hot_toggle_system_proxy(false).await.unwrap();
-        assert!(msg.contains("系统代理已即时关闭"));
-        assert_eq!(manager.status().await.mode, ProxyMode::Tun);
-        assert!(!manager.status().await.system_proxy_enabled);
-        assert_eq!(manager.config().await.mode, ProxyMode::Tun);
-
-        // 3. 在 None 模式下热开启系统代理 -> System
-        {
-            let mut rt = manager.runtime.lock().await;
-            rt.options.mode = ProxyMode::None;
-            rt.status.mode = ProxyMode::None;
-        }
-        let msg = manager.hot_toggle_system_proxy(true).await.unwrap();
-        assert!(msg.contains("系统代理已即时开启"));
-        assert_eq!(manager.status().await.mode, ProxyMode::System);
-        assert!(manager.status().await.system_proxy_enabled);
-
-        // 4. 在 System 模式下热关闭系统代理 -> None
-        let msg = manager.hot_toggle_system_proxy(false).await.unwrap();
-        assert!(msg.contains("系统代理已即时关闭"));
-        assert_eq!(manager.status().await.mode, ProxyMode::None);
-        assert!(!manager.status().await.system_proxy_enabled);
-    }
-
-    #[tokio::test]
-    async fn switch_node_falls_back_when_not_running() {
-        let manager = ProxyManager::new(MihomoConfigOptions::default());
-        let test_node = node(
+        drop((mixed, controller));
+        let manager =
+            ProxyManager::with_system_proxy(options, Arc::new(FakeSystemProxy::default()));
+        let selected = node(
             "ss",
             json!({
-                "server": "1.2.3.4",
-                "port": 8388,
-                "cipher": "aes-128-gcm",
-                "password": "pass"
+                "server": "example.com", "port": 8388,
+                "cipher": "aes-128-gcm", "password": "test-only"
             }),
         );
-        let res = manager.try_hot_reload_mihomo(&test_node).await.unwrap();
-        assert!(!res);
+        let executable =
+            std::env::temp_dir().join(format!("vproxy-startup-fixture-{}", uuid::Uuid::new_v4()));
+        std::fs::write(&executable, script).unwrap();
+        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
+
+        let result = manager.start_with_path(&selected, &executable).await;
+        let _ = std::fs::remove_file(&executable);
+        let error = result.unwrap_err().to_string();
+        let status = manager.status().await;
+
+        assert!(error.contains(expected_error), "{error}");
+        assert_eq!(status.state, ProxyState::Failed);
+        assert!(!status.local_proxy_ready);
+        assert!(!status.system_proxy_enabled);
+        assert_eq!(status.last_error.as_deref(), Some(error.as_str()));
+    }
+}
+
+#[tokio::test]
+async fn missing_sing_box_executable_keeps_selected_kernel_in_status() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let mixed_port = listener.local_addr().unwrap().port();
+    drop(listener);
+    let manager = ProxyManager::new(MihomoConfigOptions {
+        mixed_port,
+        ..MihomoConfigOptions::default()
+    });
+    let selected = node(
+        "anytls",
+        json!({
+            "server": "anytls.example.com",
+            "port": 443,
+            "password": "secret"
+        }),
+    );
+    let missing = std::env::temp_dir().join(format!(
+        "vproxy-missing-sing-box-{}.exe",
+        uuid::Uuid::new_v4()
+    ));
+
+    let error = manager
+        .start_with_kernel_path(&selected, KernelKind::SingBox, &missing)
+        .await
+        .unwrap_err();
+    let status = manager.status().await;
+
+    assert!(error.to_string().contains("Sing-box"));
+    assert_eq!(status.state, ProxyState::Failed);
+    assert_eq!(status.kernel, Some(KernelKind::SingBox));
+    assert!(status.message.contains("Sing-box"));
+}
+
+#[tokio::test]
+async fn occupied_controller_port_is_rejected() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+
+    let error = ensure_port_available(port).await.unwrap_err();
+
+    assert!(error.to_string().contains("已被占用"));
+}
+
+#[tokio::test]
+async fn startup_probe_rejects_proxy_that_cannot_reach_test_url() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let mut request = [0u8; 1024];
+        let _ = stream.read(&mut request).await;
+        stream
+            .write_all(b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n")
+            .await
+            .unwrap();
+    });
+
+    let started = tokio::time::Instant::now();
+    let error = verify_local_proxy(port, Duration::from_secs(1))
+        .await
+        .unwrap_err();
+
+    assert!(error.to_string().contains("本地代理无法访问测试地址"));
+    assert!(started.elapsed() < Duration::from_millis(1_500));
+}
+
+#[tokio::test]
+async fn system_proxy_activation_returns_snapshot_for_restore() {
+    let controller = Arc::new(FakeSystemProxy::default());
+
+    let snapshot = activate_system_proxy(controller.clone(), "127.0.0.1:7890".into(), None)
+        .await
+        .unwrap();
+    restore_system_proxy(controller.clone(), snapshot.clone(), false)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        controller.enabled.lock().unwrap().as_slice(),
+        ["127.0.0.1:7890"]
+    );
+    assert_eq!(controller.restored.lock().unwrap().as_slice(), [snapshot]);
+}
+
+#[tokio::test]
+async fn restart_stop_preserves_system_proxy_without_restoring_it() {
+    let controller = Arc::new(FakeSystemProxy::default());
+    let manager =
+        ProxyManager::with_system_proxy(MihomoConfigOptions::default(), controller.clone());
+    let snapshot = SystemProxySnapshot {
+        enabled: false,
+        server: Some("old-proxy:8080".into()),
+        override_list: Some("<local>".into()),
+    };
+    {
+        let mut runtime = manager.runtime.lock().await;
+        runtime.status.state = ProxyState::Running;
+        runtime.system_proxy_snapshot = Some(snapshot.clone());
     }
 
-    #[cfg(target_os = "macos")]
-    async fn macos_standard_child_with_controller() -> (
-        ProxyManager,
-        Arc<std::sync::atomic::AtomicUsize>,
-        tokio::task::JoinHandle<()>,
-    ) {
-        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let preserved = manager.stop_inner_for_restart().await.unwrap();
 
-        let controller = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let controller_port = controller.local_addr().unwrap().port();
-        let requests = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        let observed_requests = requests.clone();
-        // A successful controller exposes accidental hot reloads: these tests must
-        // refuse the operation before making an HTTP request to the ordinary core.
-        let server = tokio::spawn(async move {
-            while let Ok((mut stream, _)) = controller.accept().await {
-                observed_requests.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                let mut received = Vec::new();
-                let mut chunk = [0u8; 4096];
-                loop {
-                    let count = stream.read(&mut chunk).await.unwrap();
-                    if count == 0 {
-                        break;
-                    }
-                    received.extend_from_slice(&chunk[..count]);
-                    if let Some(header_end) = received.windows(4).position(|s| s == b"\r\n\r\n") {
-                        let headers = String::from_utf8_lossy(&received[..header_end]);
-                        let body_length = headers.lines().find_map(|line| {
+    assert_eq!(preserved, Some(snapshot));
+    assert!(controller.restored.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn test_hot_toggle_system_proxy_transitions() {
+    let controller = Arc::new(FakeSystemProxy::default());
+    let mut opts = MihomoConfigOptions::default();
+    opts.mode = ProxyMode::Tun;
+    let manager = ProxyManager::with_system_proxy(opts, controller.clone());
+    {
+        let mut rt = manager.runtime.lock().await;
+        rt.status.state = ProxyState::Running;
+        rt.status.mode = ProxyMode::Tun;
+    }
+
+    // 1. 在 Tun 模式下热开启系统代理 -> Both
+    let msg = manager.hot_toggle_system_proxy(true).await.unwrap();
+    assert!(msg.contains("系统代理已即时开启"));
+    assert_eq!(manager.status().await.mode, ProxyMode::Both);
+    assert!(manager.status().await.system_proxy_enabled);
+    assert_eq!(manager.config().await.mode, ProxyMode::Both);
+
+    // 2. 在 Both 模式下热关闭系统代理 -> Tun
+    let msg = manager.hot_toggle_system_proxy(false).await.unwrap();
+    assert!(msg.contains("系统代理已即时关闭"));
+    assert_eq!(manager.status().await.mode, ProxyMode::Tun);
+    assert!(!manager.status().await.system_proxy_enabled);
+    assert_eq!(manager.config().await.mode, ProxyMode::Tun);
+
+    // 3. 在 None 模式下热开启系统代理 -> System
+    {
+        let mut rt = manager.runtime.lock().await;
+        rt.options.mode = ProxyMode::None;
+        rt.status.mode = ProxyMode::None;
+    }
+    let msg = manager.hot_toggle_system_proxy(true).await.unwrap();
+    assert!(msg.contains("系统代理已即时开启"));
+    assert_eq!(manager.status().await.mode, ProxyMode::System);
+    assert!(manager.status().await.system_proxy_enabled);
+
+    // 4. 在 System 模式下热关闭系统代理 -> None
+    let msg = manager.hot_toggle_system_proxy(false).await.unwrap();
+    assert!(msg.contains("系统代理已即时关闭"));
+    assert_eq!(manager.status().await.mode, ProxyMode::None);
+    assert!(!manager.status().await.system_proxy_enabled);
+}
+
+#[tokio::test]
+async fn switch_node_falls_back_when_not_running() {
+    let manager = ProxyManager::new(MihomoConfigOptions::default());
+    let test_node = node(
+        "ss",
+        json!({
+            "server": "1.2.3.4",
+            "port": 8388,
+            "cipher": "aes-128-gcm",
+            "password": "pass"
+        }),
+    );
+    let res = manager.try_hot_reload_mihomo(&test_node).await.unwrap();
+    assert!(!res);
+}
+
+#[cfg(target_os = "macos")]
+async fn macos_standard_child_with_controller() -> (
+    ProxyManager,
+    Arc<std::sync::atomic::AtomicUsize>,
+    tokio::task::JoinHandle<()>,
+) {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let controller = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let controller_port = controller.local_addr().unwrap().port();
+    let requests = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let observed_requests = requests.clone();
+    // A successful controller exposes accidental hot reloads: these tests must
+    // refuse the operation before making an HTTP request to the ordinary core.
+    let server = tokio::spawn(async move {
+        while let Ok((mut stream, _)) = controller.accept().await {
+            observed_requests.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let mut received = Vec::new();
+            let mut chunk = [0u8; 4096];
+            loop {
+                let count = stream.read(&mut chunk).await.unwrap();
+                if count == 0 {
+                    break;
+                }
+                received.extend_from_slice(&chunk[..count]);
+                if let Some(header_end) = received.windows(4).position(|s| s == b"\r\n\r\n") {
+                    let headers = String::from_utf8_lossy(&received[..header_end]);
+                    let body_length = headers
+                        .lines()
+                        .find_map(|line| {
                             let (name, value) = line.split_once(':')?;
                             name.eq_ignore_ascii_case("content-length")
                                 .then(|| value.trim().parse::<usize>().ok())
                                 .flatten()
-                        }).unwrap_or(0);
-                        if received.len() >= header_end + 4 + body_length {
-                            break;
-                        }
+                        })
+                        .unwrap_or(0);
+                    if received.len() >= header_end + 4 + body_length {
+                        break;
                     }
                 }
-                let _ = stream.write_all(
-                    b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}",
-                ).await;
             }
-        });
-        let options = MihomoConfigOptions {
-            mode: ProxyMode::System,
-            controller_port,
-            ..MihomoConfigOptions::default()
-        };
-        let manager = ProxyManager::with_system_proxy(options, Arc::new(FakeSystemProxy::default()));
-        let child = tokio::process::Command::new("/bin/sleep")
-            .arg("30")
-            .kill_on_drop(true)
-            .spawn()
-            .unwrap();
-        let work_dir = ProxyWorkDir::create(KernelKind::Mihomo).await.unwrap();
-        let selected = node("ss", json!({
+            let _ = stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}")
+                .await;
+        }
+    });
+    let options = MihomoConfigOptions {
+        mode: ProxyMode::System,
+        controller_port,
+        ..MihomoConfigOptions::default()
+    };
+    let manager = ProxyManager::with_system_proxy(options, Arc::new(FakeSystemProxy::default()));
+    let child = tokio::process::Command::new("/bin/sleep")
+        .arg("30")
+        .kill_on_drop(true)
+        .spawn()
+        .unwrap();
+    let work_dir = ProxyWorkDir::create(KernelKind::Mihomo).await.unwrap();
+    let selected = node(
+        "ss",
+        json!({
             "server": "127.0.0.1",
             "port": 8388,
             "cipher": "aes-128-gcm",
             "password": "test-only"
-        }));
-        {
-            let mut runtime = manager.runtime.lock().await;
-            runtime.status.state = ProxyState::Running;
-            runtime.status.mode = ProxyMode::System;
-            runtime.status.kernel = Some(KernelKind::Mihomo);
-            runtime.status.local_proxy_ready = true;
-            runtime.child = Some(crate::proxy::manager::ProxyChild::Standard(child));
-            runtime.work_dir = Some(work_dir);
-            runtime.current_node = Some(selected);
-        }
-        (manager, requests, server)
+        }),
+    );
+    {
+        let mut runtime = manager.runtime.lock().await;
+        runtime.status.state = ProxyState::Running;
+        runtime.status.mode = ProxyMode::System;
+        runtime.status.kernel = Some(KernelKind::Mihomo);
+        runtime.status.local_proxy_ready = true;
+        runtime.child = Some(crate::proxy::manager::ProxyChild::Standard(child));
+        runtime.work_dir = Some(work_dir);
+        runtime.current_node = Some(selected);
     }
+    (manager, requests, server)
+}
 
-    #[cfg(target_os = "macos")]
-    #[tokio::test]
-    async fn macos_reload_defers_tun_until_the_standard_child_is_restarted() {
-        assert!(!crate::platform::is_elevated(), "run this regression test as a normal user");
-        for requested_mode in [ProxyMode::Tun, ProxyMode::Both] {
-            let (manager, requests, server) = macos_standard_child_with_controller().await;
-            let mut options = manager.config().await;
-            options.mode = requested_mode;
+#[cfg(target_os = "macos")]
+#[tokio::test]
+async fn macos_reload_defers_tun_until_the_standard_child_is_restarted() {
+    assert!(
+        !crate::platform::is_elevated(),
+        "run this regression test as a normal user"
+    );
+    for requested_mode in [ProxyMode::Tun, ProxyMode::Both] {
+        let (manager, requests, server) = macos_standard_child_with_controller().await;
+        let mut options = manager.config().await;
+        options.mode = requested_mode;
 
-            let applied = manager.reload_config(options).await;
-            let status = manager.status().await;
-            let pending = manager.config().await;
-            let stopped = manager.stop_inner_for_restart().await;
-            server.abort();
-            let _ = server.await;
+        let applied = manager.reload_config(options).await;
+        let status = manager.status().await;
+        let pending = manager.config().await;
+        let stopped = manager.stop_inner_for_restart().await;
+        server.abort();
+        let _ = server.await;
 
-            stopped.unwrap();
-            assert!(!applied.unwrap(), "{requested_mode:?} needs a restart through the macOS service");
-            assert_eq!(requests.load(std::sync::atomic::Ordering::SeqCst), 0);
-            assert_eq!(status.state, ProxyState::Running);
-            assert_eq!(status.mode, ProxyMode::System, "the UI must keep showing the active mode");
-            assert_eq!(pending.mode, requested_mode, "retain the requested mode for the service restart");
-        }
+        stopped.unwrap();
+        assert!(
+            !applied.unwrap(),
+            "{requested_mode:?} needs a restart through the macOS service"
+        );
+        assert_eq!(requests.load(std::sync::atomic::Ordering::SeqCst), 0);
+        assert_eq!(status.state, ProxyState::Running);
+        assert_eq!(
+            status.mode,
+            ProxyMode::System,
+            "the UI must keep showing the active mode"
+        );
+        assert_eq!(
+            pending.mode, requested_mode,
+            "retain the requested mode for the service restart"
+        );
     }
+}
 
-    #[cfg(target_os = "macos")]
-    #[tokio::test]
-    async fn macos_tun_hot_toggle_never_targets_a_standard_child() {
-        assert!(!crate::platform::is_elevated(), "run this regression test as a normal user");
-        for requested_mode in [ProxyMode::Tun, ProxyMode::Both] {
-            let (manager, requests, server) = macos_standard_child_with_controller().await;
-            let mut options = manager.config().await;
-            options.mode = requested_mode;
+#[cfg(target_os = "macos")]
+#[tokio::test]
+async fn macos_tun_hot_toggle_never_targets_a_standard_child() {
+    assert!(
+        !crate::platform::is_elevated(),
+        "run this regression test as a normal user"
+    );
+    for requested_mode in [ProxyMode::Tun, ProxyMode::Both] {
+        let (manager, requests, server) = macos_standard_child_with_controller().await;
+        let mut options = manager.config().await;
+        options.mode = requested_mode;
 
-            let applied = manager.try_hot_toggle_tun(options).await;
-            let status = manager.status().await;
-            let stopped = manager.stop_inner_for_restart().await;
-            server.abort();
-            let _ = server.await;
+        let applied = manager.try_hot_toggle_tun(options).await;
+        let status = manager.status().await;
+        let stopped = manager.stop_inner_for_restart().await;
+        server.abort();
+        let _ = server.await;
 
-            stopped.unwrap();
-            assert!(!applied.unwrap(), "{requested_mode:?} needs a new privileged child");
-            assert_eq!(requests.load(std::sync::atomic::Ordering::SeqCst), 0);
-            assert_eq!(status.state, ProxyState::Running);
-            assert_eq!(status.mode, ProxyMode::System);
-        }
+        stopped.unwrap();
+        assert!(
+            !applied.unwrap(),
+            "{requested_mode:?} needs a new privileged child"
+        );
+        assert_eq!(requests.load(std::sync::atomic::Ordering::SeqCst), 0);
+        assert_eq!(status.state, ProxyState::Running);
+        assert_eq!(status.mode, ProxyMode::System);
     }
+}
 
-    #[test]
-    fn format_kernel_diagnostic_cleans_raw_errors() {
-        let raw1 = r#"time="2026-09-04T13:00:45.748268800+08:00" level=warning msg="[TCP] dial PROXY (match Match/) 127.0.0.1:53655 --> www.google.com:443 error: failed to dial WebSocket: read tcp 192.168.0.103:53662->104.18.42.163:2087: wsarecv: An existing connection was forcibly closed by the remote host.""#;
-        let formatted1 = format_kernel_diagnostic(raw1);
-        assert!(formatted1.contains("远程服务器强制重置/关闭连接 (目标节点已不可用)"));
+#[test]
+fn format_kernel_diagnostic_cleans_raw_errors() {
+    let raw1 = r#"time="2026-09-04T13:00:45.748268800+08:00" level=warning msg="[TCP] dial PROXY (match Match/) 127.0.0.1:53655 --> www.google.com:443 error: failed to dial WebSocket: read tcp 192.168.0.103:53662->104.18.42.163:2087: wsarecv: An existing connection was forcibly closed by the remote host.""#;
+    let formatted1 = format_kernel_diagnostic(raw1);
+    assert!(formatted1.contains("远程服务器强制重置/关闭连接 (目标节点已不可用)"));
 
-        let raw2 = r#"error: dial tcp: i/o timeout"#;
-        let formatted2 = format_kernel_diagnostic(raw2);
-        assert!(formatted2.contains("连接远程服务器超时"));
+    let raw2 = r#"error: dial tcp: i/o timeout"#;
+    let formatted2 = format_kernel_diagnostic(raw2);
+    assert!(formatted2.contains("连接远程服务器超时"));
 
-        let raw3 = "\u{1b}[36mINFO\u{1b}[0m [\u{1b}[38;5;40m1600451608\u{1b}[0m 0ms] outbound/tuic[proxy]: outbound connection to www.google.com:443";
-        let formatted3 = format_kernel_diagnostic(raw3);
-        assert!(formatted3.contains("目标服务器无法连通") || formatted3.contains("节点连接超时"));
-        assert!(!formatted3.contains("\u{1b}"));
-    }
+    let raw3 = "\u{1b}[36mINFO\u{1b}[0m [\u{1b}[38;5;40m1600451608\u{1b}[0m 0ms] outbound/tuic[proxy]: outbound connection to www.google.com:443";
+    let formatted3 = format_kernel_diagnostic(raw3);
+    assert!(formatted3.contains("目标服务器无法连通") || formatted3.contains("节点连接超时"));
+    assert!(!formatted3.contains("\u{1b}"));
+}
 
-    #[test]
-    fn port_mapping_validation_checks() {
-        let mut options = MihomoConfigOptions::default();
-        options.port_mappings = vec![PortMapping {
+#[test]
+fn port_mapping_validation_checks() {
+    let mut options = MihomoConfigOptions::default();
+    options.port_mappings = vec![PortMapping {
+        id: "1".into(),
+        port: 80, // < 1024
+        node_id: "n1".into(),
+        node_name: "Node 1".into(),
+        enabled: true,
+    }];
+    assert!(options
+        .validate()
+        .unwrap_err()
+        .to_string()
+        .contains("保留端口"));
+
+    options.port_mappings[0].port = 9980; // mixed_port
+    assert!(options
+        .validate()
+        .unwrap_err()
+        .to_string()
+        .contains("主代理端口冲突"));
+
+    options.port_mappings[0].port = 9090; // controller_port
+    assert!(options
+        .validate()
+        .unwrap_err()
+        .to_string()
+        .contains("控制台端口冲突"));
+
+    options.port_mappings = vec![
+        PortMapping {
             id: "1".into(),
-            port: 80, // < 1024
+            port: 10810,
             node_id: "n1".into(),
             node_name: "Node 1".into(),
             enabled: true,
-        }];
-        assert!(options.validate().unwrap_err().to_string().contains("保留端口"));
+        },
+        PortMapping {
+            id: "2".into(),
+            port: 10810,
+            node_id: "n2".into(),
+            node_name: "Node 2".into(),
+            enabled: true,
+        },
+    ];
+    assert!(options.validate().unwrap_err().to_string().contains("重复"));
 
-        options.port_mappings[0].port = 9980; // mixed_port
-        assert!(options.validate().unwrap_err().to_string().contains("主代理端口冲突"));
+    options.port_mappings[1].port = 10811;
+    assert!(options.validate().is_ok());
+}
 
-        options.port_mappings[0].port = 9090; // controller_port
-        assert!(options.validate().unwrap_err().to_string().contains("控制台端口冲突"));
+#[test]
+fn port_mappings_generate_mihomo_listeners_and_in_port_rules() {
+    let current = node(
+        "vless",
+        json!({"server": "1.2.3.4", "port": 443, "uuid": "u1", "network": "ws", "security": "tls"}),
+    );
+    let mapped_node = node(
+        "vless",
+        json!({"server": "5.6.7.8", "port": 443, "uuid": "u2", "network": "ws", "security": "tls"}),
+    );
+    let clash_proxies = crate::export::nodes_to_clash_proxies(&[mapped_node.clone()]);
+    let mut options = MihomoConfigOptions {
+        port_mappings: vec![PortMapping {
+            id: "m1".into(),
+            port: 10810,
+            node_id: mapped_node.id.clone(),
+            node_name: mapped_node.name.clone(),
+            enabled: true,
+        }],
+        port_mapping_nodes: vec![(10810, mapped_node.name.clone(), clash_proxies[0].clone())],
+        ..MihomoConfigOptions::default()
+    };
 
-        options.port_mappings = vec![
-            PortMapping {
-                id: "1".into(),
-                port: 10810,
-                node_id: "n1".into(),
-                node_name: "Node 1".into(),
-                enabled: true,
-            },
-            PortMapping {
-                id: "2".into(),
-                port: 10810,
-                node_id: "n2".into(),
-                node_name: "Node 2".into(),
-                enabled: true,
-            },
-        ];
-        assert!(options.validate().unwrap_err().to_string().contains("重复"));
+    let config = build_mihomo_config(&current, options.clone()).unwrap();
+    let listeners = config["listeners"].as_array().expect("listeners array");
+    assert_eq!(listeners.len(), 1);
+    assert_eq!(listeners[0]["name"], "inbound-10810");
+    assert_eq!(listeners[0]["port"], 10810);
+    assert_eq!(listeners[0]["type"], "mixed");
 
-        options.port_mappings[1].port = 10811;
-        assert!(options.validate().is_ok());
-    }
+    let rules = config["rules"].as_array().expect("rules array");
+    assert!(rules[0].as_str().unwrap().starts_with("IN-PORT,10810,"));
 
-    #[test]
-    fn port_mappings_generate_mihomo_listeners_and_in_port_rules() {
-        let current = node(
-            "vless",
-            json!({"server": "1.2.3.4", "port": 443, "uuid": "u1", "network": "ws", "security": "tls"}),
-        );
-        let mapped_node = node(
-            "vless",
-            json!({"server": "5.6.7.8", "port": 443, "uuid": "u2", "network": "ws", "security": "tls"}),
-        );
-        let clash_proxies = crate::export::nodes_to_clash_proxies(&[mapped_node.clone()]);
-        let mut options = MihomoConfigOptions {
-            port_mappings: vec![PortMapping {
-                id: "m1".into(),
-                port: 10810,
-                node_id: mapped_node.id.clone(),
-                node_name: mapped_node.name.clone(),
-                enabled: true,
+    // 验证 required_ports 包含启用的映射端口
+    let adapter = kernel_adapter(KernelKind::Mihomo);
+    let ports = adapter.required_ports(&options);
+    assert!(ports.contains(&10810));
+
+    // 禁用后不应包含在 required_ports
+    options.port_mappings[0].enabled = false;
+    let ports_disabled = adapter.required_ports(&options);
+    assert!(!ports_disabled.contains(&10810));
+}
+
+#[test]
+fn security_privacy_protections_generate_expected_configs() {
+    let current = node(
+        "vless",
+        json!({"server": "1.2.3.4", "port": 443, "uuid": "u1", "network": "ws", "security": "tls"}),
+    );
+    let hy2_node = node(
+        "hysteria2",
+        json!({"server": "5.6.7.8", "port": 443, "password": "pass", "sni": "example.com"}),
+    );
+    let options = MihomoConfigOptions {
+        client_fingerprint: Some("chrome".to_string()),
+        block_webrtc: true,
+        block_trackers: true,
+        udp_port_hopping: true,
+        hop_ports: "30000-50000".to_string(),
+        ..MihomoConfigOptions::default()
+    };
+
+    // 1. Mihomo 验证
+    let config = build_mihomo_config(&current, options.clone()).unwrap();
+    let proxies = config["proxies"].as_array().expect("proxies");
+    assert_eq!(proxies[0]["client-fingerprint"], "chrome");
+
+    let rules = config["rules"].as_array().expect("rules");
+    assert!(rules.iter().any(|r| r == "DST-PORT,3478,REJECT"));
+    assert!(rules.iter().any(|r| r == "DST-PORT,3479,REJECT"));
+    assert!(rules.iter().any(|r| r == "DST-PORT,5349,REJECT"));
+    assert!(rules.iter().any(|r| r == "DST-PORT,5350,REJECT"));
+    assert!(rules.iter().any(|r| r == "DST-PORT,19302-19309,REJECT"));
+    assert!(rules.iter().any(|r| r == "DOMAIN-KEYWORD,stun,REJECT"));
+    assert!(rules.iter().any(|r| r == "DOMAIN-KEYWORD,turn,REJECT"));
+    assert!(rules.iter().any(|r| r == "DOMAIN-KEYWORD,webrtc,REJECT"));
+    assert!(rules.iter().any(|r| r == "GEOSITE,category-ads-all,REJECT"));
+
+    // 2. Sing-box 验证
+    let sing_box_cfg =
+        crate::proxy::sing_box::build_sing_box_config(&hy2_node, options.clone()).unwrap();
+    let sing_box_outbounds = sing_box_cfg["outbounds"].as_array().expect("outbounds");
+    assert_eq!(
+        sing_box_outbounds[0]["tls"]["utls"]["fingerprint"],
+        "chrome"
+    );
+    assert_eq!(sing_box_outbounds[0]["hop_interval"], "30s");
+
+    let sing_box_rules = sing_box_cfg["route"]["rules"]
+        .as_array()
+        .expect("route rules");
+    assert!(sing_box_rules
+        .iter()
+        .any(|r| r.get("domain_keyword").is_some()));
+    assert!(sing_box_rules.iter().any(|r| r.get("port_range").is_some()));
+
+    // 3. Xray 验证
+    let xray_cfg = crate::proxy::xray::build_xray_config(&current, options).unwrap();
+    let xray_outbounds = xray_cfg["outbounds"].as_array().expect("outbounds");
+    assert_eq!(
+        xray_outbounds[0]["streamSettings"]["tlsSettings"]["fingerprint"],
+        "chrome"
+    );
+    let xray_rules = xray_cfg["routing"]["rules"]
+        .as_array()
+        .expect("xray routing rules");
+    assert!(xray_rules.iter().any(|r| r
+        .get("port")
+        .and_then(|p| p.as_str())
+        .map_or(false, |s| s.contains("19302-19309"))));
+}
+
+#[test]
+fn compiler_capabilities_and_diagnostics_catch_incompatibilities() {
+    use crate::proxy::compiler::*;
+    use crate::proxy::ir::*;
+
+    let xray_compiler = XrayCompiler::new();
+    let sing_box_compiler = SingBoxCompiler::new();
+
+    let plan = lower_options_to_ir(
+        &MihomoConfigOptions {
+            mode: ProxyMode::Tun,
+            url_test: true,
+            rules: vec![TrafficRule {
+                matcher: RuleMatcher::ProcessName("chrome.exe".into()),
+                action: RuleAction::Direct,
             }],
-            port_mapping_nodes: vec![(10810, mapped_node.name.clone(), clash_proxies[0].clone())],
             ..MihomoConfigOptions::default()
-        };
+        },
+        None,
+    );
 
-        let config = build_mihomo_config(&current, options.clone()).unwrap();
-        let listeners = config["listeners"].as_array().expect("listeners array");
-        assert_eq!(listeners.len(), 1);
-        assert_eq!(listeners[0]["name"], "inbound-10810");
-        assert_eq!(listeners[0]["port"], 10810);
-        assert_eq!(listeners[0]["type"], "mixed");
+    // Xray 不支持 TUN 和 ProcessName
+    let xray_diagnostics = xray_compiler.validate(&plan);
+    assert!(xray_diagnostics
+        .iter()
+        .any(|d| d.severity == DiagnosticSeverity::Error && d.message.contains("TUN")));
+    assert!(xray_diagnostics
+        .iter()
+        .any(|d| d.severity == DiagnosticSeverity::Error && d.message.contains("进程名")));
 
-        let rules = config["rules"].as_array().expect("rules array");
-        assert!(rules[0].as_str().unwrap().starts_with("IN-PORT,10810,"));
+    // SingBox 不支持 url_test
+    let sing_box_diagnostics = sing_box_compiler.validate(&plan);
+    assert!(sing_box_diagnostics
+        .iter()
+        .any(|d| d.severity == DiagnosticSeverity::Warning && d.message.contains("url-test")));
+}
 
-        // 验证 required_ports 包含启用的映射端口
-        let adapter = kernel_adapter(KernelKind::Mihomo);
-        let ports = adapter.required_ports(&options);
-        assert!(ports.contains(&10810));
+#[test]
+fn kernel_validator_validates_compiled_configs_with_real_binaries() {
+    use crate::proxy::compiler::*;
+    use crate::proxy::ir::*;
+    use crate::proxy::validator::KernelValidator;
 
-        // 禁用后不应包含在 required_ports
-        options.port_mappings[0].enabled = false;
-        let ports_disabled = adapter.required_ports(&options);
-        assert!(!ports_disabled.contains(&10810));
-    }
+    // 测试场景 1：Shadowsocks + ChinaDirect
+    let ss_node = node(
+        "ss",
+        json!({"server": "1.2.3.4", "port": 8388, "cipher": "aes-128-gcm", "password": "pass"}),
+    );
+    let options_china = MihomoConfigOptions {
+        routing_mode: RoutingMode::ChinaDirect,
+        block_webrtc: true,
+        block_trackers: true,
+        ..MihomoConfigOptions::default()
+    };
+    let plan_china = lower_options_to_ir(&options_china, Some(&ss_node));
 
-    #[test]
-    fn security_privacy_protections_generate_expected_configs() {
-        let current = node(
-            "vless",
-            json!({"server": "1.2.3.4", "port": 443, "uuid": "u1", "network": "ws", "security": "tls"}),
-        );
-        let hy2_node = node(
-            "hysteria2",
-            json!({"server": "5.6.7.8", "port": 443, "password": "pass", "sni": "example.com"}),
-        );
-        let options = MihomoConfigOptions {
-            client_fingerprint: Some("chrome".to_string()),
-            block_webrtc: true,
-            block_trackers: true,
-            udp_port_hopping: true,
-            hop_ports: "30000-50000".to_string(),
-            ..MihomoConfigOptions::default()
-        };
+    let mihomo_artifact = MihomoCompiler::new().compile(&plan_china).unwrap();
+    assert!(KernelValidator::validate_artifact(KernelKind::Mihomo, &mihomo_artifact).is_ok());
 
-        // 1. Mihomo 验证
-        let config = build_mihomo_config(&current, options.clone()).unwrap();
-        let proxies = config["proxies"].as_array().expect("proxies");
-        assert_eq!(proxies[0]["client-fingerprint"], "chrome");
+    let xray_artifact = XrayCompiler::new().compile(&plan_china).unwrap();
+    KernelValidator::validate_artifact(KernelKind::Xray, &xray_artifact)
+        .expect("xray validation failed");
 
-        let rules = config["rules"].as_array().expect("rules");
-        assert!(rules.iter().any(|r| r == "DST-PORT,3478,REJECT"));
-        assert!(rules.iter().any(|r| r == "DST-PORT,3479,REJECT"));
-        assert!(rules.iter().any(|r| r == "DST-PORT,5349,REJECT"));
-        assert!(rules.iter().any(|r| r == "DST-PORT,5350,REJECT"));
-        assert!(rules.iter().any(|r| r == "DST-PORT,19302-19309,REJECT"));
-        assert!(rules.iter().any(|r| r == "DOMAIN-KEYWORD,stun,REJECT"));
-        assert!(rules.iter().any(|r| r == "DOMAIN-KEYWORD,turn,REJECT"));
-        assert!(rules.iter().any(|r| r == "DOMAIN-KEYWORD,webrtc,REJECT"));
-        assert!(rules.iter().any(|r| r == "GEOSITE,category-ads-all,REJECT"));
+    // 测试场景 2：Hysteria2 + GfwList + 客户端指纹
+    let hy2_node = node(
+        "hysteria2",
+        json!({"server": "hy2.example.com", "port": 443, "password": "pass", "sni": "hy2.example.com"}),
+    );
+    let options_gfw = MihomoConfigOptions {
+        routing_mode: RoutingMode::GfwList,
+        client_fingerprint: Some("chrome".into()),
+        block_webrtc: true,
+        ..MihomoConfigOptions::default()
+    };
+    let plan_gfw = lower_options_to_ir(&options_gfw, Some(&hy2_node));
 
-        // 2. Sing-box 验证
-        let sing_box_cfg = crate::proxy::sing_box::build_sing_box_config(&hy2_node, options.clone()).unwrap();
-        let sing_box_outbounds = sing_box_cfg["outbounds"].as_array().expect("outbounds");
-        assert_eq!(sing_box_outbounds[0]["tls"]["utls"]["fingerprint"], "chrome");
-        assert_eq!(sing_box_outbounds[0]["hop_interval"], "30s");
+    let sing_box_artifact = SingBoxCompiler::new().compile(&plan_gfw).unwrap();
+    assert!(KernelValidator::validate_artifact(KernelKind::SingBox, &sing_box_artifact).is_ok());
 
-        let sing_box_rules = sing_box_cfg["route"]["rules"].as_array().expect("route rules");
-        assert!(sing_box_rules.iter().any(|r| r.get("domain_keyword").is_some()));
-        assert!(sing_box_rules.iter().any(|r| r.get("port_range").is_some()));
+    let mihomo_hy2_artifact = MihomoCompiler::new().compile(&plan_gfw).unwrap();
+    assert!(KernelValidator::validate_artifact(KernelKind::Mihomo, &mihomo_hy2_artifact).is_ok());
 
-        // 3. Xray 验证
-        let xray_cfg = crate::proxy::xray::build_xray_config(&current, options).unwrap();
-        let xray_outbounds = xray_cfg["outbounds"].as_array().expect("outbounds");
-        assert_eq!(xray_outbounds[0]["streamSettings"]["tlsSettings"]["fingerprint"], "chrome");
-        let xray_rules = xray_cfg["routing"]["rules"].as_array().expect("xray routing rules");
-        assert!(xray_rules.iter().any(|r| r.get("port").and_then(|p| p.as_str()).map_or(false, |s| s.contains("19302-19309"))));
-    }
-
-    #[test]
-    fn compiler_capabilities_and_diagnostics_catch_incompatibilities() {
-        use crate::proxy::ir::*;
-        use crate::proxy::compiler::*;
-
-        let xray_compiler = XrayCompiler::new();
-        let sing_box_compiler = SingBoxCompiler::new();
-
-        let plan = lower_options_to_ir(
-            &MihomoConfigOptions {
-                mode: ProxyMode::Tun,
-                url_test: true,
-                rules: vec![TrafficRule {
-                    matcher: RuleMatcher::ProcessName("chrome.exe".into()),
-                    action: RuleAction::Direct,
-                }],
-                ..MihomoConfigOptions::default()
+    // 测试场景 3：Trojan + 端口映射 + 自定义用户规则
+    let trojan_node = node(
+        "trojan",
+        json!({"server": "trojan.example.com", "port": 443, "password": "pass", "sni": "trojan.example.com"}),
+    );
+    let options_trojan = MihomoConfigOptions {
+        port_mappings: vec![PortMapping {
+            id: "map-1".into(),
+            port: 19890,
+            node_id: "trojan-node".into(),
+            node_name: "Trojan Dedicated".into(),
+            enabled: true,
+        }],
+        rules: vec![
+            TrafficRule {
+                matcher: RuleMatcher::Domain("api.github.com".into()),
+                action: RuleAction::Proxy,
             },
-            None,
-        );
+            TrafficRule {
+                matcher: RuleMatcher::IpCidr("192.168.1.0/24".into()),
+                action: RuleAction::Direct,
+            },
+            TrafficRule {
+                matcher: RuleMatcher::DestinationPort("8080".into()),
+                action: RuleAction::Direct,
+            },
+        ],
+        ..MihomoConfigOptions::default()
+    };
+    let plan_trojan = lower_options_to_ir(&options_trojan, Some(&trojan_node));
 
-        // Xray 不支持 TUN 和 ProcessName
-        let xray_diagnostics = xray_compiler.validate(&plan);
-        assert!(xray_diagnostics.iter().any(|d| d.severity == DiagnosticSeverity::Error && d.message.contains("TUN")));
-        assert!(xray_diagnostics.iter().any(|d| d.severity == DiagnosticSeverity::Error && d.message.contains("进程名")));
+    let mihomo_trojan_artifact = MihomoCompiler::new().compile(&plan_trojan).unwrap();
+    KernelValidator::validate_artifact(KernelKind::Mihomo, &mihomo_trojan_artifact)
+        .expect("mihomo trojan validation failed");
 
-        // SingBox 不支持 url_test
-        let sing_box_diagnostics = sing_box_compiler.validate(&plan);
-        assert!(sing_box_diagnostics.iter().any(|d| d.severity == DiagnosticSeverity::Warning && d.message.contains("url-test")));
-    }
+    let xray_trojan_artifact = XrayCompiler::new().compile(&plan_trojan).unwrap();
+    assert!(KernelValidator::validate_artifact(KernelKind::Xray, &xray_trojan_artifact).is_ok());
 
-    #[test]
-    fn kernel_validator_validates_compiled_configs_with_real_binaries() {
-        use crate::proxy::ir::*;
-        use crate::proxy::compiler::*;
-        use crate::proxy::validator::KernelValidator;
+    let sing_box_trojan_artifact = SingBoxCompiler::new().compile(&plan_trojan);
+    // Sing-box 暂不支持从普通 trojan 配置直接转换（只支持 hy2/tuic/anytls/wireguard），测试编译诊断正确拦截
+    assert!(sing_box_trojan_artifact.is_err());
 
-        // 测试场景 1：Shadowsocks + ChinaDirect
-        let ss_node = node(
-            "ss",
-            json!({"server": "1.2.3.4", "port": 8388, "cipher": "aes-128-gcm", "password": "pass"}),
-        );
-        let options_china = MihomoConfigOptions {
-            routing_mode: RoutingMode::ChinaDirect,
-            block_webrtc: true,
-            block_trackers: true,
-            ..MihomoConfigOptions::default()
-        };
-        let plan_china = lower_options_to_ir(&options_china, Some(&ss_node));
+    // 测试场景 4：WireGuard + Sing-box
+    let wg_node = node(
+        "wireguard",
+        json!({
+            "server": "1.2.3.4", "port": 51820,
+            "ip": "172.16.0.2/32",
+            "private-key": "EFlemF/JAgdqTmKVb/1W/yv9WnwuzhdqLfDHUUNC11w=",
+            "public-key": "TepNujm+9RJYXvQTB3CGDCnSccm05k6p/NmaHhj1C2c=",
+            "reserved": [0, 0, 0]
+        }),
+    );
+    let plan_wg = lower_options_to_ir(&options_china, Some(&wg_node));
+    let sing_box_wg_artifact = SingBoxCompiler::new().compile(&plan_wg).unwrap();
+    assert!(KernelValidator::validate_artifact(KernelKind::SingBox, &sing_box_wg_artifact).is_ok());
 
-        let mihomo_artifact = MihomoCompiler::new().compile(&plan_china).unwrap();
-        assert!(KernelValidator::validate_artifact(KernelKind::Mihomo, &mihomo_artifact).is_ok());
+    // 测试场景 5：Shoes + Shadowsocks / Trojan / VMess / VLESS 编译与校验
+    let shoes_ss_artifact = ShoesCompiler::new().compile(&plan_china).unwrap();
+    KernelValidator::validate_artifact(KernelKind::Shoes, &shoes_ss_artifact)
+        .expect("shoes ss validation failed");
 
-        let xray_artifact = XrayCompiler::new().compile(&plan_china).unwrap();
-        KernelValidator::validate_artifact(KernelKind::Xray, &xray_artifact).expect("xray validation failed");
+    let shoes_trojan_artifact = ShoesCompiler::new().compile(&plan_trojan).unwrap();
+    assert!(KernelValidator::validate_artifact(KernelKind::Shoes, &shoes_trojan_artifact).is_ok());
 
-        // 测试场景 2：Hysteria2 + GfwList + 客户端指纹
-        let hy2_node = node(
-            "hysteria2",
-            json!({"server": "hy2.example.com", "port": 443, "password": "pass", "sni": "hy2.example.com"}),
-        );
-        let options_gfw = MihomoConfigOptions {
-            routing_mode: RoutingMode::GfwList,
-            client_fingerprint: Some("chrome".into()),
-            block_webrtc: true,
-            ..MihomoConfigOptions::default()
-        };
-        let plan_gfw = lower_options_to_ir(&options_gfw, Some(&hy2_node));
+    let vmess_node = node(
+        "vmess",
+        json!({
+            "server": "1.2.3.4",
+            "port": 443,
+            "uuid": "550e8400-e29b-41d4-a716-446655440000",
+            "alterId": 0,
+            "cipher": "auto",
+            "network": "ws",
+            "ws-path": "/ws",
+            "tls": true
+        }),
+    );
+    let plan_vmess = lower_options_to_ir(&options_china, Some(&vmess_node));
+    let shoes_vmess_artifact = ShoesCompiler::new().compile(&plan_vmess).unwrap();
+    assert!(KernelValidator::validate_artifact(KernelKind::Shoes, &shoes_vmess_artifact).is_ok());
 
-        let sing_box_artifact = SingBoxCompiler::new().compile(&plan_gfw).unwrap();
-        assert!(KernelValidator::validate_artifact(KernelKind::SingBox, &sing_box_artifact).is_ok());
+    let vless_node = node(
+        "vless",
+        json!({
+            "server": "1.2.3.4",
+            "port": 443,
+            "uuid": "550e8400-e29b-41d4-a716-446655440000",
+            "flow": "xtls-rprx-vision",
+            "tls": true,
+            "sni": "example.com"
+        }),
+    );
+    let plan_vless = lower_options_to_ir(&options_china, Some(&vless_node));
+    let shoes_vless_artifact = ShoesCompiler::new().compile(&plan_vless).unwrap();
+    assert!(KernelValidator::validate_artifact(KernelKind::Shoes, &shoes_vless_artifact).is_ok());
+}
 
-        let mihomo_hy2_artifact = MihomoCompiler::new().compile(&plan_gfw).unwrap();
-        assert!(KernelValidator::validate_artifact(KernelKind::Mihomo, &mihomo_hy2_artifact).is_ok());
-
-        // 测试场景 3：Trojan + 端口映射 + 自定义用户规则
-        let trojan_node = node(
-            "trojan",
-            json!({"server": "trojan.example.com", "port": 443, "password": "pass", "sni": "trojan.example.com"}),
-        );
-        let options_trojan = MihomoConfigOptions {
-            port_mappings: vec![PortMapping {
-                id: "map-1".into(),
-                port: 19890,
-                node_id: "trojan-node".into(),
-                node_name: "Trojan Dedicated".into(),
-                enabled: true,
-            }],
-            rules: vec![
-                TrafficRule {
-                    matcher: RuleMatcher::Domain("api.github.com".into()),
-                    action: RuleAction::Proxy,
-                },
-                TrafficRule {
-                    matcher: RuleMatcher::IpCidr("192.168.1.0/24".into()),
-                    action: RuleAction::Direct,
-                },
-                TrafficRule {
-                    matcher: RuleMatcher::DestinationPort("8080".into()),
-                    action: RuleAction::Direct,
-                },
-            ],
-            ..MihomoConfigOptions::default()
-        };
-        let plan_trojan = lower_options_to_ir(&options_trojan, Some(&trojan_node));
-
-        let mihomo_trojan_artifact = MihomoCompiler::new().compile(&plan_trojan).unwrap();
-        KernelValidator::validate_artifact(KernelKind::Mihomo, &mihomo_trojan_artifact).expect("mihomo trojan validation failed");
-
-        let xray_trojan_artifact = XrayCompiler::new().compile(&plan_trojan).unwrap();
-        assert!(KernelValidator::validate_artifact(KernelKind::Xray, &xray_trojan_artifact).is_ok());
-
-        let sing_box_trojan_artifact = SingBoxCompiler::new().compile(&plan_trojan);
-        // Sing-box 暂不支持从普通 trojan 配置直接转换（只支持 hy2/tuic/anytls/wireguard），测试编译诊断正确拦截
-        assert!(sing_box_trojan_artifact.is_err());
-
-        // 测试场景 4：WireGuard + Sing-box
-        let wg_node = node(
-            "wireguard",
-            json!({
-                "server": "1.2.3.4", "port": 51820,
-                "ip": "172.16.0.2/32",
-                "private-key": "EFlemF/JAgdqTmKVb/1W/yv9WnwuzhdqLfDHUUNC11w=",
-                "public-key": "TepNujm+9RJYXvQTB3CGDCnSccm05k6p/NmaHhj1C2c=",
-                "reserved": [0, 0, 0]
-            }),
-        );
-        let plan_wg = lower_options_to_ir(&options_china, Some(&wg_node));
-        let sing_box_wg_artifact = SingBoxCompiler::new().compile(&plan_wg).unwrap();
-        assert!(KernelValidator::validate_artifact(KernelKind::SingBox, &sing_box_wg_artifact).is_ok());
-
-        // 测试场景 5：Shoes + Shadowsocks / Trojan / VMess / VLESS 编译与校验
-        let shoes_ss_artifact = ShoesCompiler::new().compile(&plan_china).unwrap();
-        KernelValidator::validate_artifact(KernelKind::Shoes, &shoes_ss_artifact)
-            .expect("shoes ss validation failed");
-
-        let shoes_trojan_artifact = ShoesCompiler::new().compile(&plan_trojan).unwrap();
-        assert!(KernelValidator::validate_artifact(KernelKind::Shoes, &shoes_trojan_artifact).is_ok());
-
-        let vmess_node = node(
-            "vmess",
-            json!({
-                "server": "1.2.3.4",
-                "port": 443,
-                "uuid": "550e8400-e29b-41d4-a716-446655440000",
-                "alterId": 0,
-                "cipher": "auto",
-                "network": "ws",
-                "ws-path": "/ws",
-                "tls": true
-            }),
-        );
-        let plan_vmess = lower_options_to_ir(&options_china, Some(&vmess_node));
-        let shoes_vmess_artifact = ShoesCompiler::new().compile(&plan_vmess).unwrap();
-        assert!(KernelValidator::validate_artifact(KernelKind::Shoes, &shoes_vmess_artifact).is_ok());
-
-        let vless_node = node(
-            "vless",
-            json!({
-                "server": "1.2.3.4",
-                "port": 443,
-                "uuid": "550e8400-e29b-41d4-a716-446655440000",
-                "flow": "xtls-rprx-vision",
-                "tls": true,
-                "sni": "example.com"
-            }),
-        );
-        let plan_vless = lower_options_to_ir(&options_china, Some(&vless_node));
-        let shoes_vless_artifact = ShoesCompiler::new().compile(&plan_vless).unwrap();
-        assert!(KernelValidator::validate_artifact(KernelKind::Shoes, &shoes_vless_artifact).is_ok());
-    }
-
-    #[test]
-    fn override_yaml_rules_are_translated_across_all_kernels() {
-        let sample_node = node(
-            "ss",
-            json!({
-                "server": "1.2.3.4",
-                "port": 8388,
-                "cipher": "aes-128-gcm",
-                "password": "pass"
-            }),
-        );
-        let wg_node = node(
-            "wireguard",
-            json!({
-                "server": "1.2.3.4",
-                "port": 51820,
-                "ip": "172.16.0.2/32",
-                "private-key": "EFlemF/JAgdqTmKVb/1W/yv9WnwuzhdqLfDHUUNC11w=",
-                "public-key": "TepNujm+9RJYXvQTB3CGDCnSccm05k6p/NmaHhj1C2c=",
-                "reserved": [0, 0, 0]
-            }),
-        );
-        let mut options = MihomoConfigOptions::default();
-        options.override_yaml = Some(r#"
+#[test]
+fn override_yaml_rules_are_translated_across_all_kernels() {
+    let sample_node = node(
+        "ss",
+        json!({
+            "server": "1.2.3.4",
+            "port": 8388,
+            "cipher": "aes-128-gcm",
+            "password": "pass"
+        }),
+    );
+    let wg_node = node(
+        "wireguard",
+        json!({
+            "server": "1.2.3.4",
+            "port": 51820,
+            "ip": "172.16.0.2/32",
+            "private-key": "EFlemF/JAgdqTmKVb/1W/yv9WnwuzhdqLfDHUUNC11w=",
+            "public-key": "TepNujm+9RJYXvQTB3CGDCnSccm05k6p/NmaHhj1C2c=",
+            "reserved": [0, 0, 0]
+        }),
+    );
+    let mut options = MihomoConfigOptions::default();
+    options.override_yaml = Some(
+        r#"
 rules:
   - DOMAIN-SUFFIX,custom-direct.com,DIRECT
   - DOMAIN-KEYWORD,custom-proxy,PROXY
   - IP-CIDR,192.168.99.0/24,DIRECT
   - PROCESS-NAME,curl.exe,REJECT
-"#.to_string());
+"#
+        .to_string(),
+    );
 
-        let plan = lower_options_to_ir(&options, Some(&sample_node));
-        let plan_wg = lower_options_to_ir(&options, Some(&wg_node));
+    let plan = lower_options_to_ir(&options, Some(&sample_node));
+    let plan_wg = lower_options_to_ir(&options, Some(&wg_node));
 
-        // 1. 验证 IR 规则层正确降阶与生成
-        let has_direct_suffix = plan.rules.iter().any(|r| {
-            r.action == IRAction::Direct && r.matchers.contains(&IRMatcher::DomainSuffix("custom-direct.com".into()))
-        });
-        let has_proxy_keyword = plan.rules.iter().any(|r| {
-            matches!(r.action, IRAction::Proxy(_)) && r.matchers.contains(&IRMatcher::DomainKeyword("custom-proxy".into()))
-        });
-        let has_direct_cidr = plan.rules.iter().any(|r| {
-            r.action == IRAction::Direct && r.matchers.contains(&IRMatcher::IpCidr("192.168.99.0/24".into()))
-        });
-        let has_reject_proc = plan.rules.iter().any(|r| {
-            r.action == IRAction::Reject && r.matchers.contains(&IRMatcher::ProcessName("curl.exe".into()))
-        });
-        assert!(has_direct_suffix, "IR 应包含 custom-direct.com 直连规则");
-        assert!(has_proxy_keyword, "IR 应包含 custom-proxy 代理规则");
-        assert!(has_direct_cidr, "IR 应包含 192.168.99.0/24 直连规则");
-        assert!(has_reject_proc, "IR 应包含 curl.exe 拦截规则");
+    // 1. 验证 IR 规则层正确降阶与生成
+    let has_direct_suffix = plan.rules.iter().any(|r| {
+        r.action == IRAction::Direct
+            && r.matchers
+                .contains(&IRMatcher::DomainSuffix("custom-direct.com".into()))
+    });
+    let has_proxy_keyword = plan.rules.iter().any(|r| {
+        matches!(r.action, IRAction::Proxy(_))
+            && r.matchers
+                .contains(&IRMatcher::DomainKeyword("custom-proxy".into()))
+    });
+    let has_direct_cidr = plan.rules.iter().any(|r| {
+        r.action == IRAction::Direct
+            && r.matchers
+                .contains(&IRMatcher::IpCidr("192.168.99.0/24".into()))
+    });
+    let has_reject_proc = plan.rules.iter().any(|r| {
+        r.action == IRAction::Reject
+            && r.matchers
+                .contains(&IRMatcher::ProcessName("curl.exe".into()))
+    });
+    assert!(has_direct_suffix, "IR 应包含 custom-direct.com 直连规则");
+    assert!(has_proxy_keyword, "IR 应包含 custom-proxy 代理规则");
+    assert!(has_direct_cidr, "IR 应包含 192.168.99.0/24 直连规则");
+    assert!(has_reject_proc, "IR 应包含 curl.exe 拦截规则");
 
-        // 2. 验证 Sing-box 编译支持
-        let sing_box_art = SingBoxCompiler::new().compile(&plan_wg).expect("Sing-box 编译应成功");
-        let sing_box_json = sing_box_art.as_json_value().expect("json");
-        let sing_rules = sing_box_json["route"]["rules"].as_array().expect("rules array");
-        assert!(
-            sing_rules.iter().any(|r| {
-                r.get("domain_suffix").and_then(|d| d.as_array()).map(|arr| arr.iter().any(|v| v == "custom-direct.com")).unwrap_or(false)
-                    && r.get("outbound") == Some(&json!("direct"))
-            }),
-            "Sing-box 应成功转译 custom-direct.com 直连规则"
-        );
-        assert!(
-            sing_rules.iter().any(|r| {
-                r.get("domain_keyword").and_then(|d| d.as_array()).map(|arr| arr.iter().any(|v| v == "custom-proxy")).unwrap_or(false)
-                    && r.get("outbound") == Some(&json!("proxy"))
-            }),
-            "Sing-box 应成功转译 custom-proxy 代理规则"
-        );
-        assert!(
-            sing_rules.iter().any(|r| {
-                r.get("process_name").and_then(|d| d.as_array()).map(|arr| arr.iter().any(|v| v == "curl.exe")).unwrap_or(false)
-            }),
-            "Sing-box 应成功转译 curl.exe 拦截规则"
-        );
+    // 2. 验证 Sing-box 编译支持
+    let sing_box_art = SingBoxCompiler::new()
+        .compile(&plan_wg)
+        .expect("Sing-box 编译应成功");
+    let sing_box_json = sing_box_art.as_json_value().expect("json");
+    let sing_rules = sing_box_json["route"]["rules"]
+        .as_array()
+        .expect("rules array");
+    assert!(
+        sing_rules.iter().any(|r| {
+            r.get("domain_suffix")
+                .and_then(|d| d.as_array())
+                .map(|arr| arr.iter().any(|v| v == "custom-direct.com"))
+                .unwrap_or(false)
+                && r.get("outbound") == Some(&json!("direct"))
+        }),
+        "Sing-box 应成功转译 custom-direct.com 直连规则"
+    );
+    assert!(
+        sing_rules.iter().any(|r| {
+            r.get("domain_keyword")
+                .and_then(|d| d.as_array())
+                .map(|arr| arr.iter().any(|v| v == "custom-proxy"))
+                .unwrap_or(false)
+                && r.get("outbound") == Some(&json!("proxy"))
+        }),
+        "Sing-box 应成功转译 custom-proxy 代理规则"
+    );
+    assert!(
+        sing_rules.iter().any(|r| {
+            r.get("process_name")
+                .and_then(|d| d.as_array())
+                .map(|arr| arr.iter().any(|v| v == "curl.exe"))
+                .unwrap_or(false)
+        }),
+        "Sing-box 应成功转译 curl.exe 拦截规则"
+    );
 
-        // 3. 验证 Shoes 编译支持
-        let shoes_art = ShoesCompiler::new().compile(&plan).expect("Shoes 编译应成功");
-        let shoes_yaml = match shoes_art {
-            CompiledArtifact::Yaml(y) => y,
-            _ => panic!("Shoes 应生成 YAML"),
-        };
-        assert!(shoes_yaml.contains("custom-direct.com"), "Shoes 应包含 custom-direct.com");
-        assert!(shoes_yaml.contains("custom-proxy"), "Shoes 应包含 custom-proxy");
-        assert!(shoes_yaml.contains("192.168.99.0/24"), "Shoes 应包含 192.168.99.0/24");
+    // 3. 验证 Shoes 编译支持
+    let shoes_art = ShoesCompiler::new()
+        .compile(&plan)
+        .expect("Shoes 编译应成功");
+    let shoes_yaml = match shoes_art {
+        CompiledArtifact::Yaml(y) => y,
+        _ => panic!("Shoes 应生成 YAML"),
+    };
+    assert!(
+        shoes_yaml.contains("custom-direct.com"),
+        "Shoes 应包含 custom-direct.com"
+    );
+    assert!(
+        shoes_yaml.contains("custom-proxy"),
+        "Shoes 应包含 custom-proxy"
+    );
+    assert!(
+        shoes_yaml.contains("192.168.99.0/24"),
+        "Shoes 应包含 192.168.99.0/24"
+    );
 
-        // 4. 验证 Xray 编译支持
-        let xray_art = XrayCompiler::new().compile(&plan).expect("Xray 编译应成功");
-        let xray_json = xray_art.as_json_value().expect("json");
-        let xray_rules = xray_json["routing"]["rules"].as_array().expect("xray rules");
-        assert!(
-            xray_rules.iter().any(|r| {
-                r.get("domain").and_then(|d| d.as_array()).map(|arr| arr.iter().any(|v| v == "domain:custom-direct.com")).unwrap_or(false)
-                    && r.get("outboundTag") == Some(&json!("direct"))
-            }),
-            "Xray 应成功转译 domain:custom-direct.com 直连规则"
-        );
-        assert!(
-            xray_rules.iter().any(|r| {
-                r.get("domain").and_then(|d| d.as_array()).map(|arr| arr.iter().any(|v| v == "keyword:custom-proxy")).unwrap_or(false)
-                    && r.get("outboundTag") == Some(&json!("proxy"))
-            }),
-            "Xray 应成功转译 keyword:custom-proxy 代理规则"
-        );
-    }
+    // 4. 验证 Xray 编译支持
+    let xray_art = XrayCompiler::new().compile(&plan).expect("Xray 编译应成功");
+    let xray_json = xray_art.as_json_value().expect("json");
+    let xray_rules = xray_json["routing"]["rules"]
+        .as_array()
+        .expect("xray rules");
+    assert!(
+        xray_rules.iter().any(|r| {
+            r.get("domain")
+                .and_then(|d| d.as_array())
+                .map(|arr| arr.iter().any(|v| v == "domain:custom-direct.com"))
+                .unwrap_or(false)
+                && r.get("outboundTag") == Some(&json!("direct"))
+        }),
+        "Xray 应成功转译 domain:custom-direct.com 直连规则"
+    );
+    assert!(
+        xray_rules.iter().any(|r| {
+            r.get("domain")
+                .and_then(|d| d.as_array())
+                .map(|arr| arr.iter().any(|v| v == "keyword:custom-proxy"))
+                .unwrap_or(false)
+                && r.get("outboundTag") == Some(&json!("proxy"))
+        }),
+        "Xray 应成功转译 keyword:custom-proxy 代理规则"
+    );
+}
 
-    #[test]
-    fn test_subscription_routing_mode_lowers_rules_and_default_action() {
-        let n = node(
-            "ss",
-            json!({
-                "server": "1.2.3.4",
-                "port": 8388,
-                "cipher": "aes-128-gcm",
-                "password": "pass"
-            }),
-        );
-        let mut options = MihomoConfigOptions::default();
-        options.routing_mode = RoutingMode::Subscription;
-        options.rules = vec![TrafficRule {
-            matcher: RuleMatcher::Domain("custom-user-override.com".into()),
-            action: RuleAction::Direct,
-        }];
-        options.subscription_rules_yaml = Some(r#"
+#[test]
+fn test_subscription_routing_mode_lowers_rules_and_default_action() {
+    let n = node(
+        "ss",
+        json!({
+            "server": "1.2.3.4",
+            "port": 8388,
+            "cipher": "aes-128-gcm",
+            "password": "pass"
+        }),
+    );
+    let mut options = MihomoConfigOptions::default();
+    options.routing_mode = RoutingMode::Subscription;
+    options.rules = vec![TrafficRule {
+        matcher: RuleMatcher::Domain("custom-user-override.com".into()),
+        action: RuleAction::Direct,
+    }];
+    options.subscription_rules_yaml = Some(
+        r#"
 rules:
   - "DOMAIN-SUFFIX,sub-openai.com,AI分组"
   - "GEOSITE,youtube,国际流媒体"
   - "GEOIP,CN,DIRECT"
   - "MATCH,漏网之鱼"
-"#.into());
+"#
+        .into(),
+    );
 
-        let plan = lower_options_to_ir(&options, Some(&n));
+    let plan = lower_options_to_ir(&options, Some(&n));
 
-        // 1. 验证用户自定义规则置顶
-        assert_eq!(
-            plan.rules[0].matchers,
-            vec![IRMatcher::Domain("custom-user-override.com".into())]
-        );
-        assert_eq!(plan.rules[0].action, IRAction::Direct);
-        assert_eq!(plan.rules[0].source, RuleSource::User);
+    // 1. 验证用户自定义规则置顶
+    assert_eq!(
+        plan.rules[0].matchers,
+        vec![IRMatcher::Domain("custom-user-override.com".into())]
+    );
+    assert_eq!(plan.rules[0].action, IRAction::Direct);
+    assert_eq!(plan.rules[0].source, RuleSource::User);
 
-        // 2. 验证订阅自带规则成功下调，且目标策略组保留
-        assert!(plan.rules.iter().any(|r| {
-            r.matchers == vec![IRMatcher::DomainSuffix("sub-openai.com".into())]
-                && r.action == IRAction::Proxy(Some("AI分组".into()))
-        }));
-        assert!(plan.rules.iter().any(|r| {
-            r.matchers == vec![IRMatcher::GeoSite("youtube".into())]
-                && r.action == IRAction::Proxy(Some("国际流媒体".into()))
-        }));
+    // 2. 验证订阅自带规则成功下调，且目标策略组保留
+    assert!(plan.rules.iter().any(|r| {
+        r.matchers == vec![IRMatcher::DomainSuffix("sub-openai.com".into())]
+            && r.action == IRAction::Proxy(Some("AI分组".into()))
+    }));
+    assert!(plan.rules.iter().any(|r| {
+        r.matchers == vec![IRMatcher::GeoSite("youtube".into())]
+            && r.action == IRAction::Proxy(Some("国际流媒体".into()))
+    }));
 
-        // 3. 验证 MATCH,漏网之鱼 被解析为兜底动作
-        assert_eq!(plan.default_action, IRAction::Proxy(Some("漏网之鱼".into())));
-    }
+    // 3. 验证 MATCH,漏网之鱼 被解析为兜底动作
+    assert_eq!(
+        plan.default_action,
+        IRAction::Proxy(Some("漏网之鱼".into()))
+    );
+}
 
-    #[test]
-    fn test_subscription_routing_mode_mihomo_compiler_groups_and_rules() {
-        let n = node(
-            "ss",
-            json!({
-                "server": "1.2.3.4",
-                "port": 8388,
-                "cipher": "aes-128-gcm",
-                "password": "pass"
-            }),
-        );
-        let mut options = MihomoConfigOptions::default();
-        options.routing_mode = RoutingMode::Subscription;
-        options.subscription_rules_yaml = Some(r#"
+#[test]
+fn test_subscription_routing_mode_mihomo_compiler_groups_and_rules() {
+    let n = node(
+        "ss",
+        json!({
+            "server": "1.2.3.4",
+            "port": 8388,
+            "cipher": "aes-128-gcm",
+            "password": "pass"
+        }),
+    );
+    let mut options = MihomoConfigOptions::default();
+    options.routing_mode = RoutingMode::Subscription;
+    options.subscription_rules_yaml = Some(
+        r#"
 rules:
   - "DOMAIN-SUFFIX,netflix.com,国际流媒体"
   - "MATCH,漏网之鱼"
-"#.into());
-        options.subscription_groups_yaml = Some(r#"
+"#
+        .into(),
+    );
+    options.subscription_groups_yaml = Some(
+        r#"
 proxy-groups:
   - name: "国际流媒体"
     type: select
@@ -1780,151 +1939,190 @@ proxy-groups:
   - name: "漏网之鱼"
     type: select
     proxies: ["PROXY", "DIRECT"]
-"#.into());
+"#
+        .into(),
+    );
 
-        let plan = lower_options_to_ir(&options, Some(&n));
-        let artifact = MihomoCompiler::new().compile(&plan).expect("Mihomo 编译应成功");
-        let json = artifact.as_json_value().expect("Mihomo artifact as json");
+    let plan = lower_options_to_ir(&options, Some(&n));
+    let artifact = MihomoCompiler::new()
+        .compile(&plan)
+        .expect("Mihomo 编译应成功");
+    let json = artifact.as_json_value().expect("Mihomo artifact as json");
 
-        let groups = json["proxy-groups"].as_array().expect("proxy-groups");
-        let group_names: Vec<&str> = groups
+    let groups = json["proxy-groups"].as_array().expect("proxy-groups");
+    let group_names: Vec<&str> = groups
+        .iter()
+        .filter_map(|g| g.get("name").and_then(|v| v.as_str()))
+        .collect();
+
+    // 验证生成的配置包含订阅策略组与正确的分流目标
+    assert!(
+        group_names.contains(&"国际流媒体"),
+        "生成的配置必须包含国际流媒体组"
+    );
+    assert!(
+        group_names.contains(&"漏网之鱼"),
+        "生成的配置必须包含漏网之鱼组"
+    );
+
+    let rules = json["rules"].as_array().expect("rules");
+    assert!(
+        rules
             .iter()
-            .filter_map(|g| g.get("name").and_then(|v| v.as_str()))
-            .collect();
+            .any(|r| r.as_str() == Some("DOMAIN-SUFFIX,netflix.com,国际流媒体")),
+        "分流规则应准确命中订阅策略组"
+    );
+    assert!(
+        rules.iter().any(|r| r.as_str() == Some("MATCH,漏网之鱼")),
+        "MATCH 规则应正确命中漏网之鱼组"
+    );
+}
 
-        // 验证生成的配置包含订阅策略组与正确的分流目标
-        assert!(group_names.contains(&"国际流媒体"), "生成的配置必须包含国际流媒体组");
-        assert!(group_names.contains(&"漏网之鱼"), "生成的配置必须包含漏网之鱼组");
+#[test]
+fn test_skip_cert_verify_propagates_to_sing_box_and_xray() {
+    let hy2_node = node(
+        "hysteria2",
+        json!({
+            "server": "example.com",
+            "port": 20000,
+            "password": "secret_password",
+            "sni": "www.bing.com",
+            "skip-cert-verify": true
+        }),
+    );
+    let options = MihomoConfigOptions::default();
+    let plan = lower_options_to_ir(&options, Some(&hy2_node));
 
-        let rules = json["rules"].as_array().expect("rules");
-        assert!(
-            rules.iter().any(|r| r.as_str() == Some("DOMAIN-SUFFIX,netflix.com,国际流媒体")),
-            "分流规则应准确命中订阅策略组"
-        );
-        assert!(
-            rules.iter().any(|r| r.as_str() == Some("MATCH,漏网之鱼")),
-            "MATCH 规则应正确命中漏网之鱼组"
-        );
-    }
+    // 1. Sing-box 编译应包含 "insecure": true
+    let sing_box_art = SingBoxCompiler::new()
+        .compile(&plan)
+        .expect("Sing-box 编译应成功");
+    let sing_box_json = sing_box_art.as_json_value().expect("sing-box json");
+    let outbounds = sing_box_json["outbounds"]
+        .as_array()
+        .expect("outbounds array");
+    let proxy_ob = outbounds
+        .iter()
+        .find(|o| o.get("tag") == Some(&json!("proxy")))
+        .expect("proxy outbound");
+    assert_eq!(
+        proxy_ob["tls"]["insecure"],
+        json!(true),
+        "Sing-box 必须正确识别 skip-cert-verify: true"
+    );
 
-    #[test]
-    fn test_skip_cert_verify_propagates_to_sing_box_and_xray() {
-        let hy2_node = node(
-            "hysteria2",
-            json!({
-                "server": "example.com",
-                "port": 20000,
-                "password": "secret_password",
-                "sni": "www.bing.com",
-                "skip-cert-verify": true
-            }),
-        );
-        let options = MihomoConfigOptions::default();
-        let plan = lower_options_to_ir(&options, Some(&hy2_node));
+    // 2. Xray 编译应包含 "allowInsecure": true
+    let vless_node = node(
+        "vless",
+        json!({
+            "server": "example.com",
+            "port": 443,
+            "uuid": "00000000-0000-0000-0000-000000000000",
+            "tls": true,
+            "sni": "example.com",
+            "skip-cert-verify": true
+        }),
+    );
+    let plan_vless = lower_options_to_ir(&options, Some(&vless_node));
+    let xray_art = XrayCompiler::new()
+        .compile(&plan_vless)
+        .expect("Xray 编译应成功");
+    let xray_json = xray_art.as_json_value().expect("xray json");
+    let xray_outbounds = xray_json["outbounds"].as_array().expect("xray outbounds");
+    let xray_proxy = xray_outbounds
+        .iter()
+        .find(|o| o.get("tag") == Some(&json!("proxy")))
+        .expect("proxy outbound");
+    assert_eq!(
+        xray_proxy["streamSettings"]["tlsSettings"]["allowInsecure"],
+        json!(true),
+        "Xray 必须正确识别 skip-cert-verify: true"
+    );
+}
 
-        // 1. Sing-box 编译应包含 "insecure": true
-        let sing_box_art = SingBoxCompiler::new().compile(&plan).expect("Sing-box 编译应成功");
-        let sing_box_json = sing_box_art.as_json_value().expect("sing-box json");
-        let outbounds = sing_box_json["outbounds"].as_array().expect("outbounds array");
-        let proxy_ob = outbounds.iter().find(|o| o.get("tag") == Some(&json!("proxy"))).expect("proxy outbound");
-        assert_eq!(proxy_ob["tls"]["insecure"], json!(true), "Sing-box 必须正确识别 skip-cert-verify: true");
+#[test]
+fn test_compiler_emits_correct_mode_for_mihomo_and_vpcore() {
+    let test_node = node(
+        "ss",
+        json!({
+            "server": "1.2.3.4",
+            "port": 8388,
+            "password": "pass",
+            "cipher": "aes-128-gcm",
+        }),
+    );
 
-        // 2. Xray 编译应包含 "allowInsecure": true
-        let vless_node = node(
-            "vless",
-            json!({
-                "server": "example.com",
-                "port": 443,
-                "uuid": "00000000-0000-0000-0000-000000000000",
-                "tls": true,
-                "sni": "example.com",
-                "skip-cert-verify": true
-            }),
-        );
-        let plan_vless = lower_options_to_ir(&options, Some(&vless_node));
-        let xray_art = XrayCompiler::new().compile(&plan_vless).expect("Xray 编译应成功");
-        let xray_json = xray_art.as_json_value().expect("xray json");
-        let xray_outbounds = xray_json["outbounds"].as_array().expect("xray outbounds");
-        let xray_proxy = xray_outbounds.iter().find(|o| o.get("tag") == Some(&json!("proxy"))).expect("proxy outbound");
-        assert_eq!(xray_proxy["streamSettings"]["tlsSettings"]["allowInsecure"], json!(true), "Xray 必须正确识别 skip-cert-verify: true");
-    }
+    let cases = [
+        (RoutingMode::Rule, "rule"),
+        (RoutingMode::Global, "global"),
+        (RoutingMode::Direct, "direct"),
+        (RoutingMode::ChinaDirect, "rule"),
+        (RoutingMode::GfwList, "rule"),
+        (RoutingMode::Subscription, "rule"),
+    ];
 
-    #[test]
-    fn test_compiler_emits_correct_mode_for_mihomo_and_vpcore() {
-        let test_node = node(
-            "ss",
-            json!({
-                "server": "1.2.3.4",
-                "port": 8388,
-                "password": "pass",
-                "cipher": "aes-128-gcm",
-            }),
-        );
-
-        let cases = [
-            (RoutingMode::Rule, "rule"),
-            (RoutingMode::Global, "global"),
-            (RoutingMode::Direct, "direct"),
-            (RoutingMode::ChinaDirect, "rule"),
-            (RoutingMode::GfwList, "rule"),
-            (RoutingMode::Subscription, "rule"),
-        ];
-
-        for (mode, expected_str) in cases {
-            let mut options = MihomoConfigOptions::default();
-            options.routing_mode = mode;
-            let plan = lower_options_to_ir(&options, Some(&test_node));
-
-            // MihomoCompiler
-            let mihomo_art = MihomoCompiler::new().compile(&plan).expect("Mihomo compile");
-            let mihomo_json = mihomo_art.as_json_value().expect("Mihomo json");
-            assert_eq!(
-                mihomo_json["mode"], expected_str,
-                "Mihomo 在 {:?} 模式下输出 mode 必须为 {}",
-                mode, expected_str
-            );
-
-            // VpCoreCompiler
-            let vp_art = VpCoreCompiler::new().compile(&plan).expect("VP-Core compile");
-            let vp_json = vp_art.as_json_value().expect("VP-Core json");
-            assert_eq!(
-                vp_json["mode"], expected_str,
-                "VP-Core 在 {:?} 模式下输出 mode 必须为 {}",
-                mode, expected_str
-            );
-        }
-    }
-
-    #[tokio::test]
-    async fn test_proxy_manager_hot_switch_routing_mode_when_stopped() {
-        let options = MihomoConfigOptions::default();
-        let manager = ProxyManager::new(options);
-
-        // 未运行时热切换，直接更新内存中的 routing_mode 且返回 Ok(true)
-        let result = manager.try_hot_switch_routing_mode(RoutingMode::Global).await;
-        assert!(result.is_ok());
-        assert!(result.unwrap());
-
-        let status = manager.status().await;
-        assert_eq!(status.routing_mode, RoutingMode::Global);
-
-        let config = manager.config().await;
-        assert_eq!(config.routing_mode, RoutingMode::Global);
-    }
-
-    #[test]
-    fn test_clash_party_yaml_override_in_mihomo_compiler() {
-        let n = node(
-            "ss",
-            json!({
-                "server": "1.2.3.4",
-                "port": 8388,
-                "cipher": "aes-128-gcm",
-                "password": "pass"
-            }),
-        );
+    for (mode, expected_str) in cases {
         let mut options = MihomoConfigOptions::default();
-        options.override_yaml = Some(r#"
+        options.routing_mode = mode;
+        let plan = lower_options_to_ir(&options, Some(&test_node));
+
+        // MihomoCompiler
+        let mihomo_art = MihomoCompiler::new()
+            .compile(&plan)
+            .expect("Mihomo compile");
+        let mihomo_json = mihomo_art.as_json_value().expect("Mihomo json");
+        assert_eq!(
+            mihomo_json["mode"], expected_str,
+            "Mihomo 在 {:?} 模式下输出 mode 必须为 {}",
+            mode, expected_str
+        );
+
+        // VpCoreCompiler
+        let vp_art = VpCoreCompiler::new()
+            .compile(&plan)
+            .expect("VP-Core compile");
+        let vp_json = vp_art.as_json_value().expect("VP-Core json");
+        assert_eq!(
+            vp_json["mode"], expected_str,
+            "VP-Core 在 {:?} 模式下输出 mode 必须为 {}",
+            mode, expected_str
+        );
+    }
+}
+
+#[tokio::test]
+async fn test_proxy_manager_hot_switch_routing_mode_when_stopped() {
+    let options = MihomoConfigOptions::default();
+    let manager = ProxyManager::new(options);
+
+    // 未运行时热切换，直接更新内存中的 routing_mode 且返回 Ok(true)
+    let result = manager
+        .try_hot_switch_routing_mode(RoutingMode::Global)
+        .await;
+    assert!(result.is_ok());
+    assert!(result.unwrap());
+
+    let status = manager.status().await;
+    assert_eq!(status.routing_mode, RoutingMode::Global);
+
+    let config = manager.config().await;
+    assert_eq!(config.routing_mode, RoutingMode::Global);
+}
+
+#[test]
+fn test_clash_party_yaml_override_in_mihomo_compiler() {
+    let n = node(
+        "ss",
+        json!({
+            "server": "1.2.3.4",
+            "port": 8388,
+            "cipher": "aes-128-gcm",
+            "password": "pass"
+        }),
+    );
+    let mut options = MihomoConfigOptions::default();
+    options.override_yaml = Some(
+        r#"
 mixed-port: 9999
 dns:
   +nameserver:
@@ -1939,65 +2137,74 @@ rules+:
   - name: 自定义分组
     type: select
     proxies: ["DIRECT"]
-"#.into());
+"#
+        .into(),
+    );
 
-        let plan = lower_options_to_ir(&options, Some(&n));
-        let artifact = MihomoCompiler::new().compile(&plan).expect("Mihomo 编译应成功");
-        let json = artifact.as_json_value().expect("Mihomo json");
+    let plan = lower_options_to_ir(&options, Some(&n));
+    let artifact = MihomoCompiler::new()
+        .compile(&plan)
+        .expect("Mihomo 编译应成功");
+    let json = artifact.as_json_value().expect("Mihomo json");
 
-        // 1. 验证简单值覆盖
-        assert_eq!(json["mixed-port"], 9999);
+    // 1. 验证简单值覆盖
+    assert_eq!(json["mixed-port"], 9999);
 
-        // 2. 验证对象递归合并及数组前插
-        assert_eq!(json["dns"]["enable"], true);
-        let ns = json["dns"]["nameserver"].as_array().expect("nameserver array");
-        assert_eq!(ns[0], "1.1.1.1", "1.1.1.1 应被前插到 nameserver 首位");
+    // 2. 验证对象递归合并及数组前插
+    assert_eq!(json["dns"]["enable"], true);
+    let ns = json["dns"]["nameserver"]
+        .as_array()
+        .expect("nameserver array");
+    assert_eq!(ns[0], "1.1.1.1", "1.1.1.1 应被前插到 nameserver 首位");
 
-        // 3. 验证 tun 递归合并
-        assert_eq!(json["tun"]["stack"], "gvisor");
+    // 3. 验证 tun 递归合并
+    assert_eq!(json["tun"]["stack"], "gvisor");
 
-        // 4. 验证 rules 前插与追加
-        let rules = json["rules"].as_array().expect("rules");
-        assert_eq!(
-            rules.first().and_then(|r| r.as_str()),
-            Some("DOMAIN-SUFFIX,party-first.com,DIRECT")
-        );
-        assert_eq!(
-            rules.last().and_then(|r| r.as_str()),
-            Some("DOMAIN-KEYWORD,party-last,DIRECT")
-        );
+    // 4. 验证 rules 前插与追加
+    let rules = json["rules"].as_array().expect("rules");
+    assert_eq!(
+        rules.first().and_then(|r| r.as_str()),
+        Some("DOMAIN-SUFFIX,party-first.com,DIRECT")
+    );
+    assert_eq!(
+        rules.last().and_then(|r| r.as_str()),
+        Some("DOMAIN-KEYWORD,party-last,DIRECT")
+    );
 
-        // 5. 验证 proxy-groups 前插
-        let groups = json["proxy-groups"].as_array().expect("proxy-groups");
-        assert_eq!(
-            groups[0]["name"],
-            "自定义分组",
-            "+proxy-groups 应插在策略组首位"
-        );
-    }
+    // 5. 验证 proxy-groups 前插
+    let groups = json["proxy-groups"].as_array().expect("proxy-groups");
+    assert_eq!(
+        groups[0]["name"], "自定义分组",
+        "+proxy-groups 应插在策略组首位"
+    );
+}
 
-    #[test]
-    fn test_mihomo_yaml_and_rhai_script_stacked_override() {
-        let n = node(
-            "ss",
-            json!({
-                "server": "1.2.3.4",
-                "port": 8388,
-                "cipher": "aes-128-gcm",
-                "password": "pass"
-            }),
-        );
-        let mut options = MihomoConfigOptions::default();
-        options.override_yaml = Some(r#"
+#[test]
+fn test_mihomo_yaml_and_rhai_script_stacked_override() {
+    let n = node(
+        "ss",
+        json!({
+            "server": "1.2.3.4",
+            "port": 8388,
+            "cipher": "aes-128-gcm",
+            "password": "pass"
+        }),
+    );
+    let mut options = MihomoConfigOptions::default();
+    options.override_yaml = Some(
+        r#"
 mixed-port: 9999
 dns:
   nameserver:
     - 1.1.1.1
 +rules:
   - DOMAIN-SUFFIX,yaml-rule.com,DIRECT
-"#.into());
+"#
+        .into(),
+    );
 
-        options.override_script = Some(r#"
+    options.override_script = Some(
+        r#"
 fn main(config) {
     // 验证脚本作为最终裁决者：覆盖 YAML 设定的 9999
     config["mixed-port"] = 8888;
@@ -2005,223 +2212,279 @@ fn main(config) {
     config.rules.insert(0, "DOMAIN-SUFFIX,script-first.com,PROXY");
     return config;
 }
-"#.into());
+"#
+        .into(),
+    );
 
-        let plan = lower_options_to_ir(&options, Some(&n));
-        let artifact = MihomoCompiler::new().compile(&plan).expect("Mihomo 编译应成功");
-        let json = artifact.as_json_value().expect("Mihomo json");
+    let plan = lower_options_to_ir(&options, Some(&n));
+    let artifact = MihomoCompiler::new()
+        .compile(&plan)
+        .expect("Mihomo 编译应成功");
+    let json = artifact.as_json_value().expect("Mihomo json");
 
-        // 1. 验证脚本覆盖了 YAML 的 mixed-port
-        assert_eq!(json["mixed-port"], 8888, "脚本应能覆写 YAML 的设置");
+    // 1. 验证脚本覆盖了 YAML 的 mixed-port
+    assert_eq!(json["mixed-port"], 8888, "脚本应能覆写 YAML 的设置");
 
-        // 2. 验证规则执行顺序：脚本规则在最前，YAML 规则紧随其后
-        let rules = json["rules"].as_array().expect("rules");
-        assert_eq!(
-            rules[0].as_str(),
-            Some("DOMAIN-SUFFIX,script-first.com,PROXY")
-        );
-        assert_eq!(
-            rules[1].as_str(),
-            Some("DOMAIN-SUFFIX,yaml-rule.com,DIRECT")
-        );
+    // 2. 验证规则执行顺序：脚本规则在最前，YAML 规则紧随其后
+    let rules = json["rules"].as_array().expect("rules");
+    assert_eq!(
+        rules[0].as_str(),
+        Some("DOMAIN-SUFFIX,script-first.com,PROXY")
+    );
+    assert_eq!(
+        rules[1].as_str(),
+        Some("DOMAIN-SUFFIX,yaml-rule.com,DIRECT")
+    );
 
-        // 3. 同时验证 build_mihomo_config 具有一致的表现
-        let direct_config = build_mihomo_config(&n, options).expect("build_mihomo_config 应成功");
-        assert_eq!(direct_config["mixed-port"], 8888);
-        assert_eq!(
-            direct_config["rules"][0].as_str(),
-            Some("DOMAIN-SUFFIX,script-first.com,PROXY")
-        );
-    }
+    // 3. 同时验证 build_mihomo_config 具有一致的表现
+    let direct_config = build_mihomo_config(&n, options).expect("build_mihomo_config 应成功");
+    assert_eq!(direct_config["mixed-port"], 8888);
+    assert_eq!(
+        direct_config["rules"][0].as_str(),
+        Some("DOMAIN-SUFFIX,script-first.com,PROXY")
+    );
+}
 
-    #[test]
-    fn test_ipv6_configuration_across_all_compilers() {
-        let n = node(
-            "ss",
-            json!({
-                "server": "1.2.3.4",
-                "port": 8388,
-                "cipher": "aes-128-gcm",
-                "password": "pass"
-            }),
-        );
+#[test]
+fn test_ipv6_configuration_across_all_compilers() {
+    let n = node(
+        "ss",
+        json!({
+            "server": "1.2.3.4",
+            "port": 8388,
+            "cipher": "aes-128-gcm",
+            "password": "pass"
+        }),
+    );
 
-        // 1. 测试启用 IPv6
-        let mut options_ipv6 = MihomoConfigOptions::default();
-        options_ipv6.dns.ipv6 = true;
-        options_ipv6.mode = ProxyMode::Tun;
+    // 1. 测试启用 IPv6
+    let mut options_ipv6 = MihomoConfigOptions::default();
+    options_ipv6.dns.ipv6 = true;
+    options_ipv6.mode = ProxyMode::Tun;
 
-        let plan_ipv6 = lower_options_to_ir(&options_ipv6, Some(&n));
-        assert!(plan_ipv6.dns.ipv6, "DnsPlan 必须透传 ipv6: true");
+    let plan_ipv6 = lower_options_to_ir(&options_ipv6, Some(&n));
+    assert!(plan_ipv6.dns.ipv6, "DnsPlan 必须透传 ipv6: true");
 
-        // Mihomo 编译器生成验证
-        let mihomo_art = MihomoCompiler::new().compile(&plan_ipv6).unwrap();
-        let mihomo_json = mihomo_art.as_json_value().unwrap();
-        assert_eq!(mihomo_json["ipv6"], true, "根层级必须包含 ipv6: true");
-        assert_eq!(mihomo_json["dns"]["ipv6"], true, "dns 层级必须包含 ipv6: true");
-        assert_eq!(mihomo_json["dns"]["fake-ip-range6"], "fc00::/18", "必须生成 IPv6 Fake-IP 范围");
-        let hijacks = mihomo_json["tun"]["dns-hijack"].as_array().unwrap();
-        assert!(hijacks.iter().any(|h| h == "tcp://[::]:53"), "TUN 模式应劫持 IPv6 TCP DNS");
-        assert!(hijacks.iter().any(|h| h == "udp://[::]:53"), "TUN 模式应劫持 IPv6 UDP DNS");
+    // Mihomo 编译器生成验证
+    let mihomo_art = MihomoCompiler::new().compile(&plan_ipv6).unwrap();
+    let mihomo_json = mihomo_art.as_json_value().unwrap();
+    assert_eq!(mihomo_json["ipv6"], true, "根层级必须包含 ipv6: true");
+    assert_eq!(
+        mihomo_json["dns"]["ipv6"], true,
+        "dns 层级必须包含 ipv6: true"
+    );
+    assert_eq!(
+        mihomo_json["dns"]["fake-ip-range6"], "fc00::/18",
+        "必须生成 IPv6 Fake-IP 范围"
+    );
+    let hijacks = mihomo_json["tun"]["dns-hijack"].as_array().unwrap();
+    assert!(
+        hijacks.iter().any(|h| h == "tcp://[::]:53"),
+        "TUN 模式应劫持 IPv6 TCP DNS"
+    );
+    assert!(
+        hijacks.iter().any(|h| h == "udp://[::]:53"),
+        "TUN 模式应劫持 IPv6 UDP DNS"
+    );
 
-        // Sing-box 编译器生成验证 (Sing-box 选用原生支持的 hysteria2 协议)
-        let sing_node = node(
-            "hysteria2",
-            json!({
-                "server": "1.2.3.4",
-                "port": 443,
-                "password": "pass"
-            }),
-        );
-        let sing_plan_ipv6 = lower_options_to_ir(&options_ipv6, Some(&sing_node));
-        let sing_box_art = SingBoxCompiler::new().compile(&sing_plan_ipv6).unwrap();
-        let sing_box_json = sing_box_art.as_json_value().unwrap();
-        assert_eq!(sing_box_json["dns"]["strategy"], "prefer_ipv4", "Sing-box DNS 策略应切换为 prefer_ipv4");
+    // Sing-box 编译器生成验证 (Sing-box 选用原生支持的 hysteria2 协议)
+    let sing_node = node(
+        "hysteria2",
+        json!({
+            "server": "1.2.3.4",
+            "port": 443,
+            "password": "pass"
+        }),
+    );
+    let sing_plan_ipv6 = lower_options_to_ir(&options_ipv6, Some(&sing_node));
+    let sing_box_art = SingBoxCompiler::new().compile(&sing_plan_ipv6).unwrap();
+    let sing_box_json = sing_box_art.as_json_value().unwrap();
+    assert_eq!(
+        sing_box_json["dns"]["strategy"], "prefer_ipv4",
+        "Sing-box DNS 策略应切换为 prefer_ipv4"
+    );
 
-        // Xray 编译器生成验证 (Xray 为系统代理模式)
-        let mut xray_options = options_ipv6.clone();
-        xray_options.mode = ProxyMode::System;
-        let xray_plan_ipv6 = lower_options_to_ir(&xray_options, Some(&n));
-        let xray_art = XrayCompiler::new().compile(&xray_plan_ipv6).unwrap();
-        let xray_json = xray_art.as_json_value().unwrap();
-        assert_eq!(xray_json["dns"]["queryStrategy"], "UseIP", "Xray 查询策略应切换为 UseIP");
+    // Xray 编译器生成验证 (Xray 为系统代理模式)
+    let mut xray_options = options_ipv6.clone();
+    xray_options.mode = ProxyMode::System;
+    let xray_plan_ipv6 = lower_options_to_ir(&xray_options, Some(&n));
+    let xray_art = XrayCompiler::new().compile(&xray_plan_ipv6).unwrap();
+    let xray_json = xray_art.as_json_value().unwrap();
+    assert_eq!(
+        xray_json["dns"]["queryStrategy"], "UseIP",
+        "Xray 查询策略应切换为 UseIP"
+    );
 
-        // 2. 测试禁用 IPv6
-        let mut options_no_ipv6 = MihomoConfigOptions::default();
-        options_no_ipv6.dns.ipv6 = false;
-        let plan_no_ipv6 = lower_options_to_ir(&options_no_ipv6, Some(&n));
-        assert!(!plan_no_ipv6.dns.ipv6);
+    // 2. 测试禁用 IPv6
+    let mut options_no_ipv6 = MihomoConfigOptions::default();
+    options_no_ipv6.dns.ipv6 = false;
+    let plan_no_ipv6 = lower_options_to_ir(&options_no_ipv6, Some(&n));
+    assert!(!plan_no_ipv6.dns.ipv6);
 
-        let mihomo_art_no = MihomoCompiler::new().compile(&plan_no_ipv6).unwrap();
-        let mihomo_json_no = mihomo_art_no.as_json_value().unwrap();
-        assert_eq!(mihomo_json_no["ipv6"], false);
-        assert_eq!(mihomo_json_no["dns"]["ipv6"], false);
+    let mihomo_art_no = MihomoCompiler::new().compile(&plan_no_ipv6).unwrap();
+    let mihomo_json_no = mihomo_art_no.as_json_value().unwrap();
+    assert_eq!(mihomo_json_no["ipv6"], false);
+    assert_eq!(mihomo_json_no["dns"]["ipv6"], false);
 
-        let sing_plan_no_ipv6 = lower_options_to_ir(&options_no_ipv6, Some(&sing_node));
-        let sing_box_art_no = SingBoxCompiler::new().compile(&sing_plan_no_ipv6).unwrap();
-        let sing_box_json_no = sing_box_art_no.as_json_value().unwrap();
-        assert_eq!(sing_box_json_no["dns"]["strategy"], "ipv4_only");
+    let sing_plan_no_ipv6 = lower_options_to_ir(&options_no_ipv6, Some(&sing_node));
+    let sing_box_art_no = SingBoxCompiler::new().compile(&sing_plan_no_ipv6).unwrap();
+    let sing_box_json_no = sing_box_art_no.as_json_value().unwrap();
+    assert_eq!(sing_box_json_no["dns"]["strategy"], "ipv4_only");
 
-        let xray_art_no = XrayCompiler::new().compile(&plan_no_ipv6).unwrap();
-        let xray_json_no = xray_art_no.as_json_value().unwrap();
-        assert_eq!(xray_json_no["dns"]["queryStrategy"], "UseIPv4");
-    }
+    let xray_art_no = XrayCompiler::new().compile(&plan_no_ipv6).unwrap();
+    let xray_json_no = xray_art_no.as_json_value().unwrap();
+    assert_eq!(xray_json_no["dns"]["queryStrategy"], "UseIPv4");
+}
 
-    #[test]
-    fn test_mihomo_chain_proxy_lifecycle_and_cleared_fallback() {
-        let mut node_a = node("ss", json!({ "server": "1.1.1.1", "port": 8388, "password": "p", "cipher": "aes-128-gcm" }));
-        node_a.id = "node-a-uuid".into();
-        node_a.name = "Node A".into();
-        let mut node_b = node("ss", json!({ "server": "2.2.2.2", "port": 8388, "password": "p", "cipher": "aes-128-gcm" }));
-        node_b.id = "node-b-uuid".into();
-        node_b.name = "Node B".into();
+#[test]
+fn test_mihomo_chain_proxy_lifecycle_and_cleared_fallback() {
+    let mut node_a = node(
+        "ss",
+        json!({ "server": "1.1.1.1", "port": 8388, "password": "p", "cipher": "aes-128-gcm" }),
+    );
+    node_a.id = "node-a-uuid".into();
+    node_a.name = "Node A".into();
+    let mut node_b = node(
+        "ss",
+        json!({ "server": "2.2.2.2", "port": 8388, "password": "p", "cipher": "aes-128-gcm" }),
+    );
+    node_b.id = "node-b-uuid".into();
+    node_b.name = "Node B".into();
 
-        // 1. 双节点就绪：成功编译出 dialer-proxy 代理实体并置入 PROXY 组首位 (对齐 Mihomo 1.19+ 规范)
-        let mut opts = MihomoConfigOptions::default();
-        opts.chain_proxy_enabled = true;
-        opts.chain_entry_node_name = Some("Node A".into());
-        opts.chain_exit_node_name = Some("Node B".into());
-        opts.url_test_nodes = vec![
-            json!({ "name": "Node A", "type": "ss", "server": "1.1.1.1", "port": 8388, "password": "p", "cipher": "aes-128-gcm" }),
-            json!({ "name": "Node B", "type": "ss", "server": "2.2.2.2", "port": 8388, "password": "p", "cipher": "aes-128-gcm" }),
-        ];
+    // 1. 双节点就绪：成功编译出 dialer-proxy 代理实体并置入 PROXY 组首位 (对齐 Mihomo 1.19+ 规范)
+    let mut opts = MihomoConfigOptions::default();
+    opts.chain_proxy_enabled = true;
+    opts.chain_entry_node_name = Some("Node A".into());
+    opts.chain_exit_node_name = Some("Node B".into());
+    opts.url_test_nodes = vec![
+        json!({ "name": "Node A", "type": "ss", "server": "1.1.1.1", "port": 8388, "password": "p", "cipher": "aes-128-gcm" }),
+        json!({ "name": "Node B", "type": "ss", "server": "2.2.2.2", "port": 8388, "password": "p", "cipher": "aes-128-gcm" }),
+    ];
 
-        let plan = lower_options_to_ir(&opts, Some(&node_a));
-        let art = MihomoCompiler::new().compile(&plan).expect("compile success");
-        let json = art.as_json_value().expect("json");
-        let proxies = json["proxies"].as_array().expect("proxies");
-        let chain_proxy = proxies.iter().find(|p| p["name"] == "链式代理");
-        assert!(chain_proxy.is_some(), "双节点就绪时必须生成「链式代理」dialer-proxy 代理");
-        let cp = chain_proxy.unwrap();
-        assert_eq!(cp["dialer-proxy"], "Node A");
-        assert_eq!(cp["server"], "2.2.2.2");
+    let plan = lower_options_to_ir(&opts, Some(&node_a));
+    let art = MihomoCompiler::new()
+        .compile(&plan)
+        .expect("compile success");
+    let json = art.as_json_value().expect("json");
+    let proxies = json["proxies"].as_array().expect("proxies");
+    let chain_proxy = proxies.iter().find(|p| p["name"] == "链式代理");
+    assert!(
+        chain_proxy.is_some(),
+        "双节点就绪时必须生成「链式代理」dialer-proxy 代理"
+    );
+    let cp = chain_proxy.unwrap();
+    assert_eq!(cp["dialer-proxy"], "Node A");
+    assert_eq!(cp["server"], "2.2.2.2");
 
-        let groups = json["proxy-groups"].as_array().expect("groups");
-        // Mihomo 1.19+ 彻底移除了 type: relay 组，使用 dialer-proxy
-        assert!(groups.iter().all(|g| g["name"] != "链式代理"), "Mihomo 1.19+ 严禁生成已废弃的 type: relay 策略组");
+    let groups = json["proxy-groups"].as_array().expect("groups");
+    // Mihomo 1.19+ 彻底移除了 type: relay 组，使用 dialer-proxy
+    assert!(
+        groups.iter().all(|g| g["name"] != "链式代理"),
+        "Mihomo 1.19+ 严禁生成已废弃的 type: relay 策略组"
+    );
 
-        let proxy_group = groups.iter().find(|g| g["name"] == "PROXY").expect("PROXY group");
-        assert_eq!(proxy_group["proxies"][0], "链式代理");
+    let proxy_group = groups
+        .iter()
+        .find(|g| g["name"] == "PROXY")
+        .expect("PROXY group");
+    assert_eq!(proxy_group["proxies"][0], "链式代理");
 
-        // 2. 清空前置节点：安全回退，不生成残缺链式代理
-        let mut opts_cleared_entry = opts.clone();
-        opts_cleared_entry.chain_entry_node_name = None;
-        let plan_cleared = lower_options_to_ir(&opts_cleared_entry, Some(&node_a));
-        let art_cleared = MihomoCompiler::new().compile(&plan_cleared).expect("compile success");
-        let json_cleared = art_cleared.as_json_value().expect("json");
-        let groups_cleared = json_cleared["proxy-groups"].as_array().expect("groups");
-        assert!(
-            groups_cleared.iter().all(|g| g["name"] != "链式代理"),
-            "清空前置节点后必须安全降级，不得生成残缺的链式代理策略组"
-        );
-        let proxies_cleared = json_cleared["proxies"].as_array().expect("proxies");
-        assert!(proxies_cleared.iter().all(|p| p["name"] != "链式代理"));
+    // 2. 清空前置节点：安全回退，不生成残缺链式代理
+    let mut opts_cleared_entry = opts.clone();
+    opts_cleared_entry.chain_entry_node_name = None;
+    let plan_cleared = lower_options_to_ir(&opts_cleared_entry, Some(&node_a));
+    let art_cleared = MihomoCompiler::new()
+        .compile(&plan_cleared)
+        .expect("compile success");
+    let json_cleared = art_cleared.as_json_value().expect("json");
+    let groups_cleared = json_cleared["proxy-groups"].as_array().expect("groups");
+    assert!(
+        groups_cleared.iter().all(|g| g["name"] != "链式代理"),
+        "清空前置节点后必须安全降级，不得生成残缺的链式代理策略组"
+    );
+    let proxies_cleared = json_cleared["proxies"].as_array().expect("proxies");
+    assert!(proxies_cleared.iter().all(|p| p["name"] != "链式代理"));
 
-        // 3. 清空后置节点：同样安全回退
-        let mut opts_cleared_exit = opts.clone();
-        opts_cleared_exit.chain_exit_node_name = None;
-        let plan_cleared_exit = lower_options_to_ir(&opts_cleared_exit, Some(&node_a));
-        let art_cleared_exit = MihomoCompiler::new().compile(&plan_cleared_exit).expect("compile success");
-        let json_cleared_exit = art_cleared_exit.as_json_value().expect("json");
-        let groups_cleared_exit = json_cleared_exit["proxy-groups"].as_array().expect("groups");
-        assert!(
-            groups_cleared_exit.iter().all(|g| g["name"] != "链式代理"),
-            "清空后置节点后必须安全降级，不得生成残缺的链式代理策略组"
-        );
-        let proxies_cleared_exit = json_cleared_exit["proxies"].as_array().expect("proxies");
-        assert!(proxies_cleared_exit.iter().all(|p| p["name"] != "链式代理"));
+    // 3. 清空后置节点：同样安全回退
+    let mut opts_cleared_exit = opts.clone();
+    opts_cleared_exit.chain_exit_node_name = None;
+    let plan_cleared_exit = lower_options_to_ir(&opts_cleared_exit, Some(&node_a));
+    let art_cleared_exit = MihomoCompiler::new()
+        .compile(&plan_cleared_exit)
+        .expect("compile success");
+    let json_cleared_exit = art_cleared_exit.as_json_value().expect("json");
+    let groups_cleared_exit = json_cleared_exit["proxy-groups"]
+        .as_array()
+        .expect("groups");
+    assert!(
+        groups_cleared_exit.iter().all(|g| g["name"] != "链式代理"),
+        "清空后置节点后必须安全降级，不得生成残缺的链式代理策略组"
+    );
+    let proxies_cleared_exit = json_cleared_exit["proxies"].as_array().expect("proxies");
+    assert!(proxies_cleared_exit.iter().all(|p| p["name"] != "链式代理"));
 
-        // 4. 前置与后置选了同一节点：杜绝自身回环死锁
-        let mut opts_same = opts.clone();
-        opts_same.chain_entry_node_name = Some("Node A".into());
-        opts_same.chain_exit_node_name = Some("Node A".into());
-        let plan_same = lower_options_to_ir(&opts_same, Some(&node_a));
-        let art_same = MihomoCompiler::new().compile(&plan_same).expect("compile success");
-        let json_same = art_same.as_json_value().expect("json");
-        let groups_same = json_same["proxy-groups"].as_array().expect("groups");
-        assert!(
-            groups_same.iter().all(|g| g["name"] != "链式代理"),
-            "前置后置相同时不得生成自身回环中继"
-        );
-        let proxies_same = json_same["proxies"].as_array().expect("proxies");
-        assert!(proxies_same.iter().all(|p| p["name"] != "链式代理"));
+    // 4. 前置与后置选了同一节点：杜绝自身回环死锁
+    let mut opts_same = opts.clone();
+    opts_same.chain_entry_node_name = Some("Node A".into());
+    opts_same.chain_exit_node_name = Some("Node A".into());
+    let plan_same = lower_options_to_ir(&opts_same, Some(&node_a));
+    let art_same = MihomoCompiler::new()
+        .compile(&plan_same)
+        .expect("compile success");
+    let json_same = art_same.as_json_value().expect("json");
+    let groups_same = json_same["proxy-groups"].as_array().expect("groups");
+    assert!(
+        groups_same.iter().all(|g| g["name"] != "链式代理"),
+        "前置后置相同时不得生成自身回环中继"
+    );
+    let proxies_same = json_same["proxies"].as_array().expect("proxies");
+    assert!(proxies_same.iter().all(|p| p["name"] != "链式代理"));
 
-        // 5. 跨订阅源直查预热注入 (chain_nodes 实体测试)
-        let mut opts_entity = MihomoConfigOptions::default();
-        opts_entity.chain_proxy_enabled = true;
-        opts_entity.chain_nodes = Some(Box::new((node_a.clone(), node_b.clone())));
-        let plan_entity = lower_options_to_ir(&opts_entity, Some(&node_a));
-        let art_entity = MihomoCompiler::new().compile(&plan_entity).expect("compile success");
-        let json_entity = art_entity.as_json_value().expect("json");
-        let proxies_entity = json_entity["proxies"].as_array().expect("proxies");
-        let chain_entity = proxies_entity.iter().find(|p| p["name"] == "链式代理").expect("链式代理");
-        assert_eq!(chain_entity["dialer-proxy"], "Node A");
-        assert_eq!(chain_entity["server"], "2.2.2.2");
-        let proxy_grp_entity = json_entity["proxy-groups"].as_array().expect("groups")
-            .iter().find(|g| g["name"] == "PROXY").expect("PROXY group");
-        assert_eq!(proxy_grp_entity["proxies"][0], "链式代理");
-    }
+    // 5. 跨订阅源直查预热注入 (chain_nodes 实体测试)
+    let mut opts_entity = MihomoConfigOptions::default();
+    opts_entity.chain_proxy_enabled = true;
+    opts_entity.chain_nodes = Some(Box::new((node_a.clone(), node_b.clone())));
+    let plan_entity = lower_options_to_ir(&opts_entity, Some(&node_a));
+    let art_entity = MihomoCompiler::new()
+        .compile(&plan_entity)
+        .expect("compile success");
+    let json_entity = art_entity.as_json_value().expect("json");
+    let proxies_entity = json_entity["proxies"].as_array().expect("proxies");
+    let chain_entity = proxies_entity
+        .iter()
+        .find(|p| p["name"] == "链式代理")
+        .expect("链式代理");
+    assert_eq!(chain_entity["dialer-proxy"], "Node A");
+    assert_eq!(chain_entity["server"], "2.2.2.2");
+    let proxy_grp_entity = json_entity["proxy-groups"]
+        .as_array()
+        .expect("groups")
+        .iter()
+        .find(|g| g["name"] == "PROXY")
+        .expect("PROXY group");
+    assert_eq!(proxy_grp_entity["proxies"][0], "链式代理");
+}
 
-    #[test]
-    fn test_kernel_chain_proxy_support_matrix() {
-        use crate::kernel::{KernelKind, KernelPreference};
+#[test]
+fn test_kernel_chain_proxy_support_matrix() {
+    use crate::kernel::{KernelKind, KernelPreference};
 
-        // Mihomo / Meow / VP-Core 完整支持链式代理
-        assert!(KernelKind::Mihomo.supports_chain_proxy());
-        assert!(KernelKind::Meow.supports_chain_proxy());
-        assert!(KernelKind::VpCore.supports_chain_proxy());
+    // Mihomo / Meow / VP-Core 完整支持链式代理
+    assert!(KernelKind::Mihomo.supports_chain_proxy());
+    assert!(KernelKind::Meow.supports_chain_proxy());
+    assert!(KernelKind::VpCore.supports_chain_proxy());
 
-        // Sing-box / Xray / Shoes 暂不支持链式代理，必须被禁用
-        assert!(!KernelKind::SingBox.supports_chain_proxy());
-        assert!(!KernelKind::Xray.supports_chain_proxy());
-        assert!(!KernelKind::Shoes.supports_chain_proxy());
+    // Sing-box / Xray / Shoes 暂不支持链式代理，必须被禁用
+    assert!(!KernelKind::SingBox.supports_chain_proxy());
+    assert!(!KernelKind::Xray.supports_chain_proxy());
+    assert!(!KernelKind::Shoes.supports_chain_proxy());
 
-        // 内核偏好对应矩阵
-        assert!(KernelPreference::Auto.supports_chain_proxy());
-        assert!(KernelPreference::Mihomo.supports_chain_proxy());
-        assert!(KernelPreference::Meow.supports_chain_proxy());
-        assert!(KernelPreference::VpCore.supports_chain_proxy());
-        assert!(!KernelPreference::SingBox.supports_chain_proxy());
-        assert!(!KernelPreference::Xray.supports_chain_proxy());
-        assert!(!KernelPreference::Shoes.supports_chain_proxy());
-    }
+    // 内核偏好对应矩阵
+    assert!(KernelPreference::Auto.supports_chain_proxy());
+    assert!(KernelPreference::Mihomo.supports_chain_proxy());
+    assert!(KernelPreference::Meow.supports_chain_proxy());
+    assert!(KernelPreference::VpCore.supports_chain_proxy());
+    assert!(!KernelPreference::SingBox.supports_chain_proxy());
+    assert!(!KernelPreference::Xray.supports_chain_proxy());
+    assert!(!KernelPreference::Shoes.supports_chain_proxy());
+}

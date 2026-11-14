@@ -42,7 +42,8 @@ impl KernelInstallTransaction {
         if had_previous {
             #[cfg(unix)]
             {
-                let pending = backup.with_extension(format!("backup-staging-{}", uuid::Uuid::new_v4()));
+                let pending =
+                    backup.with_extension(format!("backup-staging-{}", uuid::Uuid::new_v4()));
                 let result = (|| -> Result<()> {
                     std::fs::copy(target, &pending).context("备份旧内核失败")?;
                     std::fs::File::open(&pending)?.sync_all()?;
@@ -279,20 +280,39 @@ pub const ASSET_MIRROR_PREFIXES: [(&str, &str); 2] = [
 pub fn candidate_urls_for(source: KernelSource, direct_url: &str) -> Vec<(String, String)> {
     match source {
         KernelSource::GhProxy => vec![
-            (asset_url_for(KernelSource::GhProxy, direct_url), "gh-proxy 镜像".to_string()),
-            (asset_url_for(KernelSource::GhFast, direct_url), "ghfast 镜像 (备用)".to_string()),
+            (
+                asset_url_for(KernelSource::GhProxy, direct_url),
+                "gh-proxy 镜像".to_string(),
+            ),
+            (
+                asset_url_for(KernelSource::GhFast, direct_url),
+                "ghfast 镜像 (备用)".to_string(),
+            ),
         ],
         KernelSource::GhFast => vec![
-            (asset_url_for(KernelSource::GhFast, direct_url), "ghfast 镜像".to_string()),
-            (asset_url_for(KernelSource::GhProxy, direct_url), "gh-proxy 镜像 (备用)".to_string()),
+            (
+                asset_url_for(KernelSource::GhFast, direct_url),
+                "ghfast 镜像".to_string(),
+            ),
+            (
+                asset_url_for(KernelSource::GhProxy, direct_url),
+                "gh-proxy 镜像 (备用)".to_string(),
+            ),
         ],
         KernelSource::Official => vec![
-            (asset_url_for(KernelSource::Official, direct_url), "官方直连".to_string()),
-            (asset_url_for(KernelSource::GhFast, direct_url), "ghfast 镜像 (备用)".to_string()),
+            (
+                asset_url_for(KernelSource::Official, direct_url),
+                "官方直连".to_string(),
+            ),
+            (
+                asset_url_for(KernelSource::GhFast, direct_url),
+                "ghfast 镜像 (备用)".to_string(),
+            ),
         ],
-        KernelSource::Proxy => vec![
-            (asset_url_for(KernelSource::Proxy, direct_url), "走代理".to_string()),
-        ],
+        KernelSource::Proxy => vec![(
+            asset_url_for(KernelSource::Proxy, direct_url),
+            "走代理".to_string(),
+        )],
         KernelSource::Local => vec![],
     }
 }
@@ -729,7 +749,10 @@ impl KernelUpdater {
 
             if bytes.len() as u64 != asset.size {
                 let msg = format!("下载大小不一致: 期望 {}，实际 {}", asset.size, bytes.len());
-                crate::startup_log(&format!("[内核] {} {candidate_name} {msg}", kind.display_name()));
+                crate::startup_log(&format!(
+                    "[内核] {} {candidate_name} {msg}",
+                    kind.display_name()
+                ));
                 install_failures.push(format!("{candidate_name}: {msg}"));
                 continue;
             }
@@ -749,11 +772,17 @@ impl KernelUpdater {
             });
             ensure_not_cancelled(cancelled)?;
             if let Err(error) = verify_sha256(&bytes, &expected_hash) {
-                crate::startup_log(&format!("[内核] {} {candidate_name} {error}", kind.display_name()));
+                crate::startup_log(&format!(
+                    "[内核] {} {candidate_name} {error}",
+                    kind.display_name()
+                ));
                 install_failures.push(format!("{candidate_name}: {error}"));
                 continue;
             }
-            crate::startup_log(&format!("[内核] {} {candidate_name} SHA-256 校验通过", kind.display_name()));
+            crate::startup_log(&format!(
+                "[内核] {} {candidate_name} SHA-256 校验通过",
+                kind.display_name()
+            ));
 
             let archive_format = match KernelArchive::from_asset_name(&asset.name) {
                 Some(f) => f,
@@ -794,7 +823,11 @@ impl KernelUpdater {
             }
         }
 
-        bail!("安装 {} 失败：{}", kind.display_name(), install_failures.join("；"))
+        bail!(
+            "安装 {} 失败：{}",
+            kind.display_name(),
+            install_failures.join("；")
+        )
     }
 
     /// 校验过字节之后的统一落地：解压到暂存 → 跑一次拿版本 → 备份旧内核 → 替换 → 失败回滚。
@@ -952,7 +985,9 @@ impl KernelUpdater {
         if let Err(error) = install_result {
             return match transaction.rollback() {
                 Ok(()) => Err(error).context("内核安装未完成，已回滚"),
-                Err(rollback_error) => Err(error).context(format!("内核安装未完成；{rollback_error:#}")),
+                Err(rollback_error) => {
+                    Err(error).context(format!("内核安装未完成；{rollback_error:#}"))
+                }
             };
         }
         transaction.commit();
@@ -1021,7 +1056,9 @@ impl KernelUpdater {
                     Ok(bytes) => return Ok(bytes),
                     Err(error) => {
                         failures.push(format!("{label}: {error}"));
-                        crate::startup_log(&format!("[内核下载] {label} 失败: {error}，尝试备用通道..."));
+                        crate::startup_log(&format!(
+                            "[内核下载] {label} 失败: {error}，尝试备用通道..."
+                        ));
                         progress(KernelUpdateProgress {
                             kind,
                             stage: KernelUpdateStage::Downloading,
@@ -1052,19 +1089,15 @@ impl KernelUpdater {
         const CONNECT_AND_HEADER_TIMEOUT: Duration = Duration::from_secs(12);
         const CHUNK_IDLE_TIMEOUT: Duration = Duration::from_secs(12);
 
-        let response = match tokio::time::timeout(
-            CONNECT_AND_HEADER_TIMEOUT,
-            client.get(&url).send()
-        )
-        .await
-        {
-            Ok(Ok(response)) => match response.error_for_status() {
-                Ok(response) => response,
-                Err(error) => bail!("HTTP 失败: {error}"),
-            },
-            Ok(Err(error)) => bail!("{error:#}"),
-            Err(_) => bail!("连接或响应头超时 (12s)"),
-        };
+        let response =
+            match tokio::time::timeout(CONNECT_AND_HEADER_TIMEOUT, client.get(&url).send()).await {
+                Ok(Ok(response)) => match response.error_for_status() {
+                    Ok(response) => response,
+                    Err(error) => bail!("HTTP 失败: {error}"),
+                },
+                Ok(Err(error)) => bail!("{error:#}"),
+                Err(_) => bail!("连接或响应头超时 (12s)"),
+            };
 
         let mut response = response;
         let started = std::time::Instant::now();
@@ -1408,8 +1441,7 @@ fn staging_name(kind: KernelKind) -> String {
 /// 改名被拒时日志里必须带上系统错误码：2026-10-23 那台装在 `C:\Apps\VPN Parser` 的机器三次自动
 /// 下载全卡在改名这一步，而 startup.log 只剩最外层那句 context，os code 整条丢了。
 fn rename_failure_detail(error: &std::io::Error) -> String {
-    match error.raw_os_error()
-    {
+    match error.raw_os_error() {
         Some(code) => format!("{error}（os code {code}）"),
         None => error.to_string(),
     }
@@ -1572,7 +1604,10 @@ mod tests {
     use std::io::Write;
 
     fn install_test_directory() -> PathBuf {
-        let root = std::env::temp_dir().join(format!("vproxy-kernel-transaction-{}", uuid::Uuid::new_v4()));
+        let root = std::env::temp_dir().join(format!(
+            "vproxy-kernel-transaction-{}",
+            uuid::Uuid::new_v4()
+        ));
         std::fs::create_dir(&root).unwrap();
         root
     }
@@ -1602,7 +1637,8 @@ mod tests {
         std::fs::write(&staging, b"new kernel").unwrap();
         let mut transaction = KernelInstallTransaction::begin(&target, &backup).unwrap();
         let error = replace_staged_kernel(&mut transaction, &staging, &AtomicBool::new(true))
-            .await.unwrap_err();
+            .await
+            .unwrap_err();
         assert!(error.to_string().contains("已取消"));
         drop(transaction);
         assert_eq!(std::fs::read(&target).unwrap(), b"old kernel");
@@ -1619,7 +1655,8 @@ mod tests {
         std::fs::write(&staging, b"new kernel").unwrap();
         let mut transaction = KernelInstallTransaction::begin(&target, &backup).unwrap();
         replace_staged_kernel(&mut transaction, &staging, &AtomicBool::new(false))
-            .await.unwrap();
+            .await
+            .unwrap();
         assert_eq!(std::fs::read(&target).unwrap(), b"new kernel");
         // Equivalent to dropping the update future during version validation.
         drop(transaction);
@@ -1634,7 +1671,13 @@ mod tests {
         let backup = root.join("mihomo.backup");
         std::fs::write(&target, b"old kernel").unwrap();
         let mut transaction = KernelInstallTransaction::begin(&target, &backup).unwrap();
-        assert!(replace_staged_kernel(&mut transaction, &root.join("missing"), &AtomicBool::new(false)).await.is_err());
+        assert!(replace_staged_kernel(
+            &mut transaction,
+            &root.join("missing"),
+            &AtomicBool::new(false)
+        )
+        .await
+        .is_err());
         transaction.rollback().unwrap();
         assert_eq!(std::fs::read(&target).unwrap(), b"old kernel");
         std::fs::remove_dir_all(root).unwrap();
@@ -1643,7 +1686,9 @@ mod tests {
     #[cfg(unix)]
     fn test_kernel_archive(script: &[u8]) -> Vec<u8> {
         let mut archive = zip::ZipWriter::new(Cursor::new(Vec::new()));
-        archive.start_file("mihomo", zip::write::SimpleFileOptions::default()).unwrap();
+        archive
+            .start_file("mihomo", zip::write::SimpleFileOptions::default())
+            .unwrap();
         archive.write_all(script).unwrap();
         archive.finish().unwrap().into_inner()
     }
@@ -1659,12 +1704,26 @@ mod tests {
         std::fs::write(&target, old).unwrap();
         mark_executable(&target).unwrap();
         // It passes staging validation but fails at the installed path.
-        let new = b"#!/bin/sh\ncase \"$0\" in *staging*) echo 'Mihomo Meta v2.0.0';; *) exit 1;; esac\n";
+        let new =
+            b"#!/bin/sh\ncase \"$0\" in *staging*) echo 'Mihomo Meta v2.0.0';; *) exit 1;; esac\n";
         let updater = KernelUpdater::new(root.clone(), None).unwrap();
-        let result = updater.install_bytes(KernelKind::Mihomo, test_kernel_archive(new), Some("v2.0.0"), KernelArchive::Zip, &AtomicBool::new(false), &|_| {}).await;
+        let result = updater
+            .install_bytes(
+                KernelKind::Mihomo,
+                test_kernel_archive(new),
+                Some("v2.0.0"),
+                KernelArchive::Zip,
+                &AtomicBool::new(false),
+                &|_| {},
+            )
+            .await;
         assert!(result.unwrap_err().to_string().contains("已回滚"));
         assert_eq!(std::fs::read(&target).unwrap(), old);
-        assert!(read_kernel_version(KernelKind::Mihomo, &target).await.unwrap().unwrap().contains("v1.0.0"));
+        assert!(read_kernel_version(KernelKind::Mihomo, &target)
+            .await
+            .unwrap()
+            .unwrap()
+            .contains("v1.0.0"));
         std::fs::remove_dir_all(root).unwrap();
     }
 
@@ -1680,7 +1739,17 @@ mod tests {
         mark_executable(&target).unwrap();
         let new = b"#!/bin/sh\necho 'Mihomo Meta v2.0.0'\n";
         let updater = KernelUpdater::new(root.clone(), None).unwrap();
-        let result = updater.install_bytes(KernelKind::Mihomo, test_kernel_archive(new), Some("v2.0.0"), KernelArchive::Zip, &AtomicBool::new(false), &|_| {}).await.unwrap();
+        let result = updater
+            .install_bytes(
+                KernelKind::Mihomo,
+                test_kernel_archive(new),
+                Some("v2.0.0"),
+                KernelArchive::Zip,
+                &AtomicBool::new(false),
+                &|_| {},
+            )
+            .await
+            .unwrap();
         assert_eq!(std::fs::read(&target).unwrap(), new);
         assert_eq!(std::fs::read(result.backup_path.unwrap()).unwrap(), old);
         std::fs::remove_dir_all(root).unwrap();
@@ -1833,7 +1902,12 @@ mod tests {
     /// 暂存名的形状是这次排障的关键，钉住它：以 .exe 结尾、不前导点、不撞正式名。
     #[test]
     fn staging_files_keep_an_executable_name() {
-        for kind in [KernelKind::Mihomo, KernelKind::Xray, KernelKind::SingBox, KernelKind::Shoes] {
+        for kind in [
+            KernelKind::Mihomo,
+            KernelKind::Xray,
+            KernelKind::SingBox,
+            KernelKind::Shoes,
+        ] {
             let name = staging_name(kind);
             assert_ne!(name, staging_name(kind), "不同更新尝试不能复用暂存路径");
             // `.exe` 结尾是 Windows 那侧针对杀软的取证结论，Linux 上反过来是负担
@@ -1917,8 +1991,7 @@ mod tests {
         archive.write_all(b"not a windows executable").unwrap();
         let bytes = archive.finish().unwrap().into_inner();
 
-        let root =
-            std::env::temp_dir().join(format!("vproxy-prepare-fail-{}", std::process::id()));
+        let root = std::env::temp_dir().join(format!("vproxy-prepare-fail-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).unwrap();
         let updater = KernelUpdater::new(root.clone(), None).unwrap();

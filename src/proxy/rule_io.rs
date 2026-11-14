@@ -408,9 +408,7 @@ fn parse_rule_line(line: &str) -> Parsed {
     let matcher = match kind.as_str() {
         "DOMAIN" if !payload.is_empty() => RuleMatcher::Domain(payload.to_string()),
         "DOMAIN-SUFFIX" if !payload.is_empty() => RuleMatcher::DomainSuffix(payload.to_string()),
-        "DOMAIN-KEYWORD" if !payload.is_empty() => {
-            RuleMatcher::DomainKeyword(payload.to_string())
-        }
+        "DOMAIN-KEYWORD" if !payload.is_empty() => RuleMatcher::DomainKeyword(payload.to_string()),
         "GEOSITE" if !payload.is_empty() => {
             let code = crate::geo::normalize_geo_code(payload);
             RuleMatcher::GeoSite(code.to_string())
@@ -430,29 +428,15 @@ fn parse_rule_line(line: &str) -> Parsed {
                 "reject" | "reject-list" | "ad" | "ads" | "advertising" => {
                     RuleMatcher::GeoSite("category-ads-all".into())
                 }
-                "direct" | "direct-list" | "cn" | "china" => {
-                    RuleMatcher::GeoSite("cn".into())
-                }
-                "proxy" | "proxy-list" => {
-                    RuleMatcher::GeoSite("geolocation-!cn".into())
-                }
-                "gfw" | "gfwlist" => {
-                    RuleMatcher::GeoSite("gfw".into())
-                }
-                "cncidr" => {
-                    RuleMatcher::GeoIp("CN".into())
-                }
-                "telegramcidr" => {
-                    RuleMatcher::GeoIp("telegram".into())
-                }
-                "lancidr" | "private" => {
-                    RuleMatcher::GeoSite("private".into())
-                }
+                "direct" | "direct-list" | "cn" | "china" => RuleMatcher::GeoSite("cn".into()),
+                "proxy" | "proxy-list" => RuleMatcher::GeoSite("geolocation-!cn".into()),
+                "gfw" | "gfwlist" => RuleMatcher::GeoSite("gfw".into()),
+                "cncidr" => RuleMatcher::GeoIp("CN".into()),
+                "telegramcidr" => RuleMatcher::GeoIp("telegram".into()),
+                "lancidr" | "private" => RuleMatcher::GeoSite("private".into()),
                 "google" | "youtube" | "telegram" | "netflix" | "openai" | "chatgpt"
-                | "microsoft" | "github" | "twitter" | "facebook" | "apple"
-                | "speedtest" | "steam" => {
-                    RuleMatcher::GeoSite(lower)
-                }
+                | "microsoft" | "github" | "twitter" | "facebook" | "apple" | "speedtest"
+                | "steam" => RuleMatcher::GeoSite(lower),
                 _ => RuleMatcher::RuleSet(payload.to_string()),
             }
         }
@@ -585,10 +569,7 @@ mod tests {
         assert_eq!(import.rules.len(), 1);
         assert_eq!(
             import.unsupported,
-            vec![
-                ("IP-CIDR6".to_string(), 1),
-                ("SRC-IP-CIDR".to_string(), 1)
-            ]
+            vec![("IP-CIDR6".to_string(), 1), ("SRC-IP-CIDR".to_string(), 1)]
         );
         assert!(
             import.summary().contains("IP-CIDR6×1、SRC-IP-CIDR×1"),
@@ -757,12 +738,7 @@ mod verge_script_tests {
         assert_eq!(import.remapped_groups, 6, "六个自定义组名要点名");
         // 只数真正导入的那些：两条 IP-CIDR6 带着 no-resolve 但整条被跳过，不该计进来。
         assert_eq!(import.no_resolve, 3);
-        assert_eq!(
-            import.unsupported,
-            vec![
-                ("IP-CIDR6".to_string(), 2)
-            ]
-        );
+        assert_eq!(import.unsupported, vec![("IP-CIDR6".to_string(), 2)]);
         assert!(import.unparsed.is_empty(), "{:?}", import.unparsed);
         // 注释行、`// 分节` 与空行都不许被当成"认不出的规则"。
         assert_eq!(
@@ -774,9 +750,7 @@ mod verge_script_tests {
             ]
         );
         assert!(
-            import
-                .summary()
-                .contains("不支持 IP-CIDR6×2"),
+            import.summary().contains("不支持 IP-CIDR6×2"),
             "{}",
             import.summary()
         );

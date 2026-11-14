@@ -244,7 +244,10 @@ mod zoom_semantics_tests {
                 if frame == 1 {
                     ui.ctx().set_zoom_factor(1.1);
                 }
-                widths.push((ui.ctx().viewport_rect().width(), ui.ctx().pixels_per_point()));
+                widths.push((
+                    ui.ctx().viewport_rect().width(),
+                    ui.ctx().pixels_per_point(),
+                ));
             });
         }
         // zoom 是"下一帧才生效"的：设了之后那一帧仍旧按 1330 逻辑点排。

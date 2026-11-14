@@ -53,7 +53,8 @@ pub fn draw_icon(painter: &egui::Painter, rect: Rect, icon: Icon, color: Color32
     let s = rect.width().min(rect.height());
     // 方案 A 进阶：温润软黑平滑重映射（若传入的是深冷死黑/高反差黑，自动平滑软化为温润暖木炭灰，消除刺眼生冷感）
     let color = if theme::is_light() {
-        if color == Color32::BLACK || (color.r() <= 0x55 && color.g() <= 0x55 && color.b() <= 0x58) {
+        if color == Color32::BLACK || (color.r() <= 0x55 && color.g() <= 0x55 && color.b() <= 0x58)
+        {
             theme::icon_primary()
         } else {
             color
@@ -135,10 +136,7 @@ pub fn draw_icon(painter: &egui::Painter, rect: Rect, icon: Icon, color: Color32
                 color.gamma_multiply(0.25),
                 Stroke::NONE,
             ));
-            painter.add(egui::epaint::PathShape::closed_line(
-                pts,
-                stroke,
-            ));
+            painter.add(egui::epaint::PathShape::closed_line(pts, stroke));
         }
         Icon::Subscription => {
             // Tray with downward arrow
@@ -186,10 +184,22 @@ pub fn draw_icon(painter: &egui::Painter, rect: Rect, icon: Icon, color: Color32
                 let a3 = mid_angle + 0.14; // 齿顶右侧
                 let a4 = mid_angle + 0.28; // 齿根谷底
 
-                pts.push(Pos2::new(center.x + a1.cos() * r_root, center.y + a1.sin() * r_root));
-                pts.push(Pos2::new(center.x + a2.cos() * r_tip, center.y + a2.sin() * r_tip));
-                pts.push(Pos2::new(center.x + a3.cos() * r_tip, center.y + a3.sin() * r_tip));
-                pts.push(Pos2::new(center.x + a4.cos() * r_root, center.y + a4.sin() * r_root));
+                pts.push(Pos2::new(
+                    center.x + a1.cos() * r_root,
+                    center.y + a1.sin() * r_root,
+                ));
+                pts.push(Pos2::new(
+                    center.x + a2.cos() * r_tip,
+                    center.y + a2.sin() * r_tip,
+                ));
+                pts.push(Pos2::new(
+                    center.x + a3.cos() * r_tip,
+                    center.y + a3.sin() * r_tip,
+                ));
+                pts.push(Pos2::new(
+                    center.x + a4.cos() * r_root,
+                    center.y + a4.sin() * r_root,
+                ));
             }
 
             // 闭合绘制齿轮轮廓
@@ -696,7 +706,10 @@ pub fn draw_icon(painter: &egui::Painter, rect: Rect, icon: Icon, color: Color32
             let p1 = Pos2::new(center.x, center.y - s * 0.40);
             let p2 = Pos2::new(center.x + s * 0.40, center.y + s * 0.36);
             let p3 = Pos2::new(center.x - s * 0.40, center.y + s * 0.36);
-            painter.add(egui::epaint::PathShape::closed_line(vec![p1, p2, p3], stroke));
+            painter.add(egui::epaint::PathShape::closed_line(
+                vec![p1, p2, p3],
+                stroke,
+            ));
             // Exclamation mark line & dot
             painter.line_segment(
                 [
@@ -895,7 +908,10 @@ pub fn draw_icon(painter: &egui::Painter, rect: Rect, icon: Icon, color: Color32
                 Stroke::NONE,
             ));
             painter.line_segment(
-                [Pos2::new(center.x, center.y - r), Pos2::new(center.x, center.y + r)],
+                [
+                    Pos2::new(center.x, center.y - r),
+                    Pos2::new(center.x, center.y + r),
+                ],
                 stroke,
             );
         }
@@ -973,8 +989,14 @@ pub fn draw_icon(painter: &egui::Painter, rect: Rect, icon: Icon, color: Color32
             let r = s * 0.38;
             let alpha_top = -0.38 * std::f32::consts::PI;
             let alpha_bot = 0.38 * std::f32::consts::PI;
-            let p_top = Pos2::new(center.x + r * alpha_top.cos(), center.y + r * alpha_top.sin());
-            let p_bot = Pos2::new(center.x + r * alpha_bot.cos(), center.y + r * alpha_bot.sin());
+            let p_top = Pos2::new(
+                center.x + r * alpha_top.cos(),
+                center.y + r * alpha_top.sin(),
+            );
+            let p_bot = Pos2::new(
+                center.x + r * alpha_bot.cos(),
+                center.y + r * alpha_bot.sin(),
+            );
 
             let c2 = Pos2::new(center.x + s * 0.16, center.y);
             let beta_top = (p_top.y - c2.y).atan2(p_top.x - c2.x);
@@ -996,7 +1018,10 @@ pub fn draw_icon(painter: &egui::Painter, rect: Rect, icon: Icon, color: Color32
             for i in 0..=steps {
                 let t = i as f32 / steps as f32;
                 let b = beta_top - t * (2.0 * std::f32::consts::PI - (beta_bot - beta_top));
-                inner_pts.push(Pos2::new(c2.x + r_inner * b.cos(), c2.y + r_inner * b.sin()));
+                inner_pts.push(Pos2::new(
+                    c2.x + r_inner * b.cos(),
+                    c2.y + r_inner * b.sin(),
+                ));
             }
 
             // 用相邻顶点分割出的凸四边形填充内部，彻底杜绝凹多边形三角化出现的畸变和尖刺
@@ -1017,7 +1042,10 @@ pub fn draw_icon(painter: &egui::Painter, rect: Rect, icon: Icon, color: Color32
             // 闭合外边框轮廓线，与 Sun 图标保持一致的高清质感
             let mut closed_pts = outer_pts;
             closed_pts.extend(inner_pts.into_iter().rev());
-            painter.add(egui::epaint::PathShape::closed_line(closed_pts, fine_stroke));
+            painter.add(egui::epaint::PathShape::closed_line(
+                closed_pts,
+                fine_stroke,
+            ));
         }
         Icon::Folder => {
             // 现代精致文件夹：顶部标签页 + 文件夹主体
@@ -1037,9 +1065,15 @@ pub fn draw_icon(painter: &egui::Painter, rect: Rect, icon: Icon, color: Color32
             let tab_x1 = center.x - s * 0.08;
             let tab_x2 = center.x - s * 0.02;
             let tab_y = center.y - half_h;
-            painter.line_segment([Pos2::new(tab_x0, body_top), Pos2::new(tab_x0, tab_y)], stroke);
+            painter.line_segment(
+                [Pos2::new(tab_x0, body_top), Pos2::new(tab_x0, tab_y)],
+                stroke,
+            );
             painter.line_segment([Pos2::new(tab_x0, tab_y), Pos2::new(tab_x1, tab_y)], stroke);
-            painter.line_segment([Pos2::new(tab_x1, tab_y), Pos2::new(tab_x2, body_top)], stroke);
+            painter.line_segment(
+                [Pos2::new(tab_x1, tab_y), Pos2::new(tab_x2, body_top)],
+                stroke,
+            );
         }
         Icon::Stats => {
             // 柱状统计图：横轴基线 + 四根高低错落的圆角柱。
@@ -1052,10 +1086,8 @@ pub fn draw_icon(painter: &egui::Painter, rect: Rect, icon: Icon, color: Color32
             let heights = [0.28_f32, 0.55, 0.36, 0.70];
             for (i, h) in heights.iter().enumerate() {
                 let bx = x0 + i as f32 * (bar_w + gap);
-                let bar = Rect::from_min_size(
-                    Pos2::new(bx, base_y - s * h),
-                    Vec2::new(bar_w, s * h),
-                );
+                let bar =
+                    Rect::from_min_size(Pos2::new(bx, base_y - s * h), Vec2::new(bar_w, s * h));
                 painter.rect_filled(bar, CornerRadius::same(1), color);
             }
             painter.line_segment(
@@ -1193,7 +1225,10 @@ pub fn danger_icon_btn<'a>(icon: Icon, text: &'a str) -> impl egui::Widget + 'a 
 
         let font_id = egui::FontId::proportional(13.0);
         let text_str = text.to_string();
-        let text_size = ui.painter().layout_no_wrap(text_str.clone(), font_id.clone(), Color32::WHITE).size();
+        let text_size = ui
+            .painter()
+            .layout_no_wrap(text_str.clone(), font_id.clone(), Color32::WHITE)
+            .size();
 
         let desired_size = Vec2::new(
             padding.x * 2.0 + icon_size + icon_gap + text_size.x,
@@ -1205,7 +1240,11 @@ pub fn danger_icon_btn<'a>(icon: Icon, text: &'a str) -> impl egui::Widget + 'a 
             let (bg_fill, stroke_color, fg_color) = if resp.hovered() {
                 (theme::danger_bg(), theme::danger_stroke(), theme::danger())
             } else {
-                (theme::panel_hover(), theme::border_subtle(), theme::text_secondary())
+                (
+                    theme::panel_hover(),
+                    theme::border_subtle(),
+                    theme::text_secondary(),
+                )
             };
 
             ui.painter().rect(

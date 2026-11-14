@@ -65,7 +65,6 @@ pub fn format_speed(bytes_per_sec: u64) -> String {
     }
 }
 
-
 /// 把 RFC3339 时间压成表头/日志里放得下的 `HH:MM`。解析不了就原样截五个字符，
 /// 好过显示成看不懂的错误。
 /// 把库里那条时间戳写成界面上的 `HH:MM`。
@@ -90,7 +89,6 @@ pub fn format_duration_ms(value: Option<u64>) -> String {
         .map(|ms| format!("{ms} ms"))
         .unwrap_or_else(|| "-".into())
 }
-
 
 /// 量着把一行文字截进 `max_width`：放得下原样返回（只量一次），放不下才二分找"接上
 /// 省略号还塞得进"的最长前缀。逐字回退会让一条 300 字符的值每帧排 300 次版，二分是 9 次。
@@ -193,9 +191,7 @@ pub fn latency_text(n: &NodeSummary) -> RichText {
             };
             RichText::new(format!("{ms} ms")).color(color)
         }
-        (Some(false), Some(GOOGLE_PROXY_TEST_KIND)) => {
-            RichText::new("超时").color(red)
-        }
+        (Some(false), Some(GOOGLE_PROXY_TEST_KIND)) => RichText::new("超时").color(red),
         (Some(true), _) => {
             let ms = n.latency_ms.unwrap_or(0);
             let color = if ms <= 300 {
@@ -249,7 +245,6 @@ pub fn source_status_failed(status: &str) -> bool {
         && status != "not modified"
         && status != "content unchanged"
 }
-
 
 pub fn tun_stack_label(stack: TunStack) -> &'static str {
     match stack {
@@ -391,7 +386,10 @@ fn normalize_shoes_rule(raw_payload: &str) -> String {
     if content.starts_with('{') && content.ends_with('}') {
         if let Ok(val) = serde_json::from_str::<serde_json::Value>(&content) {
             if let Some(format) = val.get("format").and_then(|v| v.as_str()) {
-                let code = val.get("code").and_then(|v| v.as_str()).unwrap_or("unknown");
+                let code = val
+                    .get("code")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown");
                 return match format {
                     "geosite_dat" => format!("GEOSITE({code})"),
                     "geoip_dat" => format!("GEOIP({code})"),
@@ -449,15 +447,20 @@ fn string_list_badge(val: &serde_json::Value, key: &str, label: &str) -> Option<
 /// 端口类谓词（destination_port / destination_port_range）→ `DST-PORT(...)` / `PORT-RANGE(...)`
 fn ports_badge(val: &serde_json::Value) -> Option<String> {
     if let Some(ports) = val.get("destination_port").and_then(|v| v.as_array()) {
-        let ports: Vec<String> =
-            ports.iter().filter_map(|p| p.as_u64().map(|n| n.to_string())).collect();
+        let ports: Vec<String> = ports
+            .iter()
+            .filter_map(|p| p.as_u64().map(|n| n.to_string()))
+            .collect();
         if !ports.is_empty() {
             return Some(format!("DST-PORT({})", ports.join(",")));
         }
     }
     if let Some(ranges) = val.get("destination_port_range").and_then(|v| v.as_array()) {
-        let ranges: Vec<String> =
-            ranges.iter().filter_map(|r| r.as_str()).map(str::to_string).collect();
+        let ranges: Vec<String> = ranges
+            .iter()
+            .filter_map(|r| r.as_str())
+            .map(str::to_string)
+            .collect();
         if !ranges.is_empty() {
             return Some(format!("PORT-RANGE({})", ranges.join(",")));
         }

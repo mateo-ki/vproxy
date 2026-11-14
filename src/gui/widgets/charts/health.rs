@@ -3,12 +3,7 @@ use crate::gui::widgets::format_bytes;
 use eframe::egui::{self, Color32, CornerRadius, RichText, Sense, Stroke, Ui, Vec2};
 
 /// 节点池健康可用率水平分段色条
-pub fn render_node_health_bar(
-    ui: &mut Ui,
-    alive: i64,
-    tested: i64,
-    total: i64,
-) {
+pub fn render_node_health_bar(ui: &mut Ui, alive: i64, tested: i64, total: i64) {
     if total <= 0 {
         return;
     }
@@ -61,7 +56,13 @@ pub fn render_node_health_bar(
     };
 
     // 顶部状态文字
-    let text = format!("实测可用率 {:.1}% (可用 {} · 失效 {} · 待测 {})", pct, alive, (tested - alive).max(0), (total - tested).max(0));
+    let text = format!(
+        "实测可用率 {:.1}% (可用 {} · 失效 {} · 待测 {})",
+        pct,
+        alive,
+        (tested - alive).max(0),
+        (total - tested).max(0)
+    );
     painter.text(
         egui::pos2(rect.min.x, rect.min.y + 4.0),
         egui::Align2::LEFT_CENTER,
@@ -90,10 +91,8 @@ pub fn render_mini_progress_bar(ui: &mut Ui, current: i64, total: i64) {
     if total > 0 && current > 0 {
         let ratio = (current as f32 / total as f32).clamp(0.0, 1.0);
         let fill_w = rect.width() * ratio;
-        let fill_rect = egui::Rect::from_min_max(
-            rect.min,
-            egui::pos2(rect.min.x + fill_w, rect.max.y),
-        );
+        let fill_rect =
+            egui::Rect::from_min_max(rect.min, egui::pos2(rect.min.x + fill_w, rect.max.y));
         let color = if ratio >= 0.7 {
             theme::accent()
         } else if ratio >= 0.3 {
@@ -123,7 +122,11 @@ pub fn render_radial_metric(ui: &mut Ui, label: &str, ratio: f32, color: Color32
     let stroke_width = 4.0_f32;
 
     // 底轨
-    painter.circle_stroke(center, radius, Stroke::new(stroke_width, theme::border_subtle()));
+    painter.circle_stroke(
+        center,
+        radius,
+        Stroke::new(stroke_width, theme::border_subtle()),
+    );
 
     // 进度弧
     let clamped = ratio.clamp(0.0, 1.0);
@@ -135,10 +138,16 @@ pub fn render_radial_metric(ui: &mut Ui, label: &str, ratio: f32, color: Color32
             .map(|i| {
                 let t = i as f32 / steps as f32;
                 let angle = start_angle + t * sweep;
-                egui::pos2(center.x + radius * angle.cos(), center.y + radius * angle.sin())
+                egui::pos2(
+                    center.x + radius * angle.cos(),
+                    center.y + radius * angle.sin(),
+                )
             })
             .collect();
-        painter.add(egui::Shape::line(arc_points, Stroke::new(stroke_width, color)));
+        painter.add(egui::Shape::line(
+            arc_points,
+            Stroke::new(stroke_width, color),
+        ));
     }
 
     // 环心百分比
@@ -205,13 +214,8 @@ pub fn render_distribution_bar(
     response.on_hover_text(hover_lines.join("\n"));
 }
 
-
 /// Top 活跃进程带宽消耗与连接数矩阵卡片 (Process Bandwidth Matrix)
-pub fn render_top_processes_card(
-    ui: &mut Ui,
-    processes: &[(&str, u64, usize)],
-    total_bytes: u64,
-) {
+pub fn render_top_processes_card(ui: &mut Ui, processes: &[(&str, u64, usize)], total_bytes: u64) {
     if processes.is_empty() {
         return;
     }
@@ -245,19 +249,27 @@ pub fn render_top_processes_card(
                 };
 
                 let is_elided = clean_proc != *proc;
-                let proc_resp = ui.label(RichText::new(clean_proc).small().strong().color(theme::text_primary()));
+                let proc_resp = ui.label(
+                    RichText::new(clean_proc)
+                        .small()
+                        .strong()
+                        .color(theme::text_primary()),
+                );
                 if is_elided {
                     proc_resp.on_hover_text(*proc);
                 }
 
                 let bar_width = 80.0_f32;
-                let (bar_rect, bar_resp) = ui.allocate_exact_size(Vec2::new(bar_width, 6.0), Sense::hover());
-                ui.painter().rect_filled(bar_rect, CornerRadius::same(3), theme::sidebar());
+                let (bar_rect, bar_resp) =
+                    ui.allocate_exact_size(Vec2::new(bar_width, 6.0), Sense::hover());
+                ui.painter()
+                    .rect_filled(bar_rect, CornerRadius::same(3), theme::sidebar());
                 let fill_rect = egui::Rect::from_min_max(
                     bar_rect.min,
                     egui::pos2(bar_rect.min.x + bar_width * ratio, bar_rect.max.y),
                 );
-                ui.painter().rect_filled(fill_rect, CornerRadius::same(3), color);
+                ui.painter()
+                    .rect_filled(fill_rect, CornerRadius::same(3), color);
                 let pct = if total_bytes > 0 {
                     (*bytes as f64 / total_bytes as f64) * 100.0
                 } else {
@@ -361,4 +373,3 @@ pub fn render_health_strip(ui: &mut Ui, buckets: &[i8; 24]) {
         "最近 24 小时出口实测：{passed} 小时正常 · {failed} 小时有不通 · {silent} 小时没有实测"
     ));
 }
-

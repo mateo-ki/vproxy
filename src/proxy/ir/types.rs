@@ -1,7 +1,7 @@
 use crate::models::Node;
 use crate::proxy::{
-    AutoRoutingStrategy, DnsEnhancedMode, NetworkProtocol,
-    PortMapping, ProxyMode, RoutingMode, TunConfig,
+    AutoRoutingStrategy, DnsEnhancedMode, NetworkProtocol, PortMapping, ProxyMode, RoutingMode,
+    TunConfig,
 };
 use serde::{Deserialize, Serialize};
 

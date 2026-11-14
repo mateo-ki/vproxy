@@ -36,7 +36,9 @@ pub unsafe extern "C" fn vpn_free_string(ptr: *mut c_char) {
 
 /// 辅助函数：将 Rust String 转换为堆分配的 CString 指针。
 fn to_c_string(s: String) -> *mut c_char {
-    CString::new(s).map(CString::into_raw).unwrap_or(std::ptr::null_mut())
+    CString::new(s)
+        .map(CString::into_raw)
+        .unwrap_or(std::ptr::null_mut())
 }
 
 /// 辅助函数：将 C 字符串安全解析为 &str。
@@ -135,9 +137,9 @@ pub unsafe extern "C" fn vpn_compile_config(
     match result {
         Ok(artifact) => match artifact {
             CompiledArtifact::Yaml(yaml) => to_c_string(yaml),
-            CompiledArtifact::Json(json) => {
-                to_c_string(serde_json::to_string_pretty(&json).unwrap_or_else(|_| json.to_string()))
-            }
+            CompiledArtifact::Json(json) => to_c_string(
+                serde_json::to_string_pretty(&json).unwrap_or_else(|_| json.to_string()),
+            ),
         },
         Err(e) => to_c_string(format!(r#"{{"error":"compilation failed: {e}"}}"#)),
     }
@@ -274,14 +276,14 @@ mod tests {
 
         unsafe {
             // 1. Mihomo 编译
-            let config_ptr = vpn_compile_config(
-                c_kernel_mihomo.as_ptr(),
-                c_node.as_ptr(),
-                std::ptr::null(),
-            );
+            let config_ptr =
+                vpn_compile_config(c_kernel_mihomo.as_ptr(), c_node.as_ptr(), std::ptr::null());
             assert!(!config_ptr.is_null());
             let config_str = CStr::from_ptr(config_ptr).to_str().unwrap();
-            assert!(config_str.contains("proxies"), "config should contain proxies: {config_str}");
+            assert!(
+                config_str.contains("proxies"),
+                "config should contain proxies: {config_str}"
+            );
             assert!(config_str.contains("CompileTest"));
             vpn_free_string(config_ptr);
 
@@ -292,14 +294,14 @@ mod tests {
             let hy2_node_json = serde_json::to_string(&hy2_nodes[0]).unwrap();
             let c_hy2_node = CString::new(hy2_node_json).unwrap();
 
-            let config_sb_ptr = vpn_compile_config(
-                c_kernel_sb.as_ptr(),
-                c_hy2_node.as_ptr(),
-                std::ptr::null(),
-            );
+            let config_sb_ptr =
+                vpn_compile_config(c_kernel_sb.as_ptr(), c_hy2_node.as_ptr(), std::ptr::null());
             assert!(!config_sb_ptr.is_null());
             let config_sb_str = CStr::from_ptr(config_sb_ptr).to_str().unwrap();
-            assert!(config_sb_str.contains("outbounds"), "sing-box config should contain outbounds: {config_sb_str}");
+            assert!(
+                config_sb_str.contains("outbounds"),
+                "sing-box config should contain outbounds: {config_sb_str}"
+            );
             assert!(config_sb_str.contains("hysteria2"));
             assert!(config_sb_str.contains("127.0.0.1"));
             vpn_free_string(config_sb_ptr);

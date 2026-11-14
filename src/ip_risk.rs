@@ -282,8 +282,7 @@ async fn fetch_ipinfo(client: &reqwest::Client, address: std::net::IpAddr) -> Re
         .text()
         .await
         .map_err(|e| anyhow!("ipinfo 读取失败: {e:#}"))?;
-    let info: IpInfo =
-        serde_json::from_str(&text).map_err(|e| anyhow!("ipinfo 解析失败: {e}"))?;
+    let info: IpInfo = serde_json::from_str(&text).map_err(|e| anyhow!("ipinfo 解析失败: {e}"))?;
     Ok(info)
 }
 
@@ -528,7 +527,9 @@ pub async fn lookup(client: &reqwest::Client, server: &str) -> Result<IpRisk> {
     if let std::net::IpAddr::V4(v4) = address {
         let octets = v4.octets();
         if octets[0] == 198 && (octets[1] == 18 || octets[1] == 19) {
-            return Err(anyhow!("节点地址为本地 TUN Fake-IP ({v4})，跳过外部归属查询"));
+            return Err(anyhow!(
+                "节点地址为本地 TUN Fake-IP ({v4})，跳过外部归属查询"
+            ));
         }
     }
     classify_ip(client, server, address).await

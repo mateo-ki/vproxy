@@ -246,7 +246,6 @@ impl VpnApp {
             self.save_settings();
         }
     }
-
 }
 
 /// 手柄中心实际走过的区间。**必须**和 egui 自己算的一致，否则刻度和手柄会错位。
@@ -256,7 +255,11 @@ impl VpnApp {
 /// 直接拿 `response.rect.x_range()` 会把刻度整体往右推（实测 140% 处偏 48px，
 /// 2026-10-15 他报的"点恢复 100% 小球跑到 90 刻度"）；② `handle_radius = 轨道高/2.5`，
 /// `HandleShape::Rect` 再乘 `aspect_ratio`。
-pub(crate) fn handle_travel_range(ui: &Ui, response: &egui::Response, rail_width: f32) -> egui::Rangef {
+pub(crate) fn handle_travel_range(
+    ui: &Ui,
+    response: &egui::Response,
+    rail_width: f32,
+) -> egui::Rangef {
     let radius = response.rect.height() / 2.5;
     let radius = match ui.style().visuals.handle_shape {
         egui::style::HandleShape::Circle => radius,
@@ -313,4 +316,3 @@ fn paint_font_scale_ticks(ui: &Ui, rect: egui::Rect, travel: egui::Rangef) {
         }
     }
 }
-

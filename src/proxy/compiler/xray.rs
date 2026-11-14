@@ -118,7 +118,10 @@ impl BackendCompiler for XrayCompiler {
                         rule_obj.insert("domain".into(), json!([format!("geosite:{c}")]));
                     }
                     IRMatcher::GeoIp(c) => {
-                        rule_obj.insert("ip".into(), json!([format!("geoip:{}", c.to_ascii_lowercase())]));
+                        rule_obj.insert(
+                            "ip".into(),
+                            json!([format!("geoip:{}", c.to_ascii_lowercase())]),
+                        );
                     }
                     IRMatcher::IpCidr(c) => {
                         rule_obj.insert("ip".into(), json!([c]));
@@ -134,10 +137,13 @@ impl BackendCompiler for XrayCompiler {
                         continue;
                     }
                     IRMatcher::Network(proto) => {
-                        rule_obj.insert("network".into(), json!(match proto {
-                            crate::proxy::NetworkProtocol::Tcp => "tcp",
-                            crate::proxy::NetworkProtocol::Udp => "udp",
-                        }));
+                        rule_obj.insert(
+                            "network".into(),
+                            json!(match proto {
+                                crate::proxy::NetworkProtocol::Tcp => "tcp",
+                                crate::proxy::NetworkProtocol::Udp => "udp",
+                            }),
+                        );
                     }
                     IRMatcher::Inbound(tag) => {
                         rule_obj.insert("inboundTag".into(), json!([tag]));
@@ -283,7 +289,8 @@ fn build_stream_settings(cfg: &Map<String, Value>, client_fingerprint: Option<&s
             "serviceName": string(cfg, &["serviceName", "service-name"]).unwrap_or("")
         });
     }
-    let fp = client_fingerprint.or_else(|| string(cfg, &["client-fingerprint", "fingerprint", "fp"]));
+    let fp =
+        client_fingerprint.or_else(|| string(cfg, &["client-fingerprint", "fingerprint", "fp"]));
     if security == "tls" {
         let allow_insecure = bool_val(
             cfg,

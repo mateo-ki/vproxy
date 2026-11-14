@@ -93,7 +93,9 @@ pub fn parse_inline_spans(text: &str) -> Vec<InlineSpan<'_>> {
             }
             "https://" | "http://" => {
                 let end = remaining
-                    .find(|c: char| c.is_whitespace() || matches!(c, ')' | ']' | '>' | '，' | '。' | ','))
+                    .find(|c: char| {
+                        c.is_whitespace() || matches!(c, ')' | ']' | '>' | '，' | '。' | ',')
+                    })
                     .unwrap_or(remaining.len());
                 let url = &remaining[..end];
                 spans.push(InlineSpan::Link { label: url, url });
@@ -110,27 +112,67 @@ pub fn parse_inline_spans(text: &str) -> Vec<InlineSpan<'_>> {
 }
 
 /// 解析常规 Conventional Commit 前缀
-fn parse_list_item_prefix(text: &str) -> (Option<(&'static str, Color32, Color32)>, Option<String>, &str) {
+fn parse_list_item_prefix(
+    text: &str,
+) -> (
+    Option<(&'static str, Color32, Color32)>,
+    Option<String>,
+    &str,
+) {
     let trimmed = text.trim();
     if let Some(rest) = trimmed.strip_prefix("[x]") {
-        return (Some(("已完成", theme::success(), theme::success_bg())), None, rest.trim_start());
+        return (
+            Some(("已完成", theme::success(), theme::success_bg())),
+            None,
+            rest.trim_start(),
+        );
     }
     if let Some(rest) = trimmed.strip_prefix("[ ]") {
-        return (Some(("待办", theme::muted(), theme::sidebar())), None, rest.trim_start());
+        return (
+            Some(("待办", theme::muted(), theme::sidebar())),
+            None,
+            rest.trim_start(),
+        );
     }
 
     let prefixes: &[(&str, &'static str, fn() -> (Color32, Color32))] = &[
         ("feat", "新增", || (theme::success(), theme::success_bg())),
-        ("feature", "新增", || (theme::success(), theme::success_bg())),
+        ("feature", "新增", || {
+            (theme::success(), theme::success_bg())
+        }),
         ("fix", "修复", || (theme::warning(), theme::warning_bg())),
         ("bug", "修复", || (theme::warning(), theme::warning_bg())),
         ("perf", "优化", || (theme::accent(), theme::accent_bg())),
-        ("refactor", "重构", || (Color32::from_rgb(168, 85, 247), Color32::from_rgb(168, 85, 247).gamma_multiply(0.18))),
-        ("chore", "维护", || (theme::text_secondary(), theme::panel_hover())),
-        ("docs", "文档", || (Color32::from_rgb(2, 132, 199), Color32::from_rgb(2, 132, 199).gamma_multiply(0.18))),
-        ("style", "样式", || (Color32::from_rgb(236, 72, 153), Color32::from_rgb(236, 72, 153).gamma_multiply(0.18))),
-        ("test", "测试", || (Color32::from_rgb(16, 185, 129), Color32::from_rgb(16, 185, 129).gamma_multiply(0.18))),
-        ("breaking", "破坏性", || (theme::danger(), theme::danger_bg())),
+        ("refactor", "重构", || {
+            (
+                Color32::from_rgb(168, 85, 247),
+                Color32::from_rgb(168, 85, 247).gamma_multiply(0.18),
+            )
+        }),
+        ("chore", "维护", || {
+            (theme::text_secondary(), theme::panel_hover())
+        }),
+        ("docs", "文档", || {
+            (
+                Color32::from_rgb(2, 132, 199),
+                Color32::from_rgb(2, 132, 199).gamma_multiply(0.18),
+            )
+        }),
+        ("style", "样式", || {
+            (
+                Color32::from_rgb(236, 72, 153),
+                Color32::from_rgb(236, 72, 153).gamma_multiply(0.18),
+            )
+        }),
+        ("test", "测试", || {
+            (
+                Color32::from_rgb(16, 185, 129),
+                Color32::from_rgb(16, 185, 129).gamma_multiply(0.18),
+            )
+        }),
+        ("breaking", "破坏性", || {
+            (theme::danger(), theme::danger_bg())
+        }),
     ];
 
     for &(keyword, label, color_fn) in prefixes {
@@ -192,9 +234,17 @@ fn parse_github_release_suffix(text: &str) -> (&str, Option<String>, Option<(Str
 /// 匹配标题关键词以附加优雅图标
 fn match_heading_icon(text: &str) -> &'static str {
     let lower = text.to_lowercase();
-    if lower.contains("what's changed") || lower.contains("变更") || lower.contains("更新日志") || lower.contains("changelog") {
+    if lower.contains("what's changed")
+        || lower.contains("变更")
+        || lower.contains("更新日志")
+        || lower.contains("changelog")
+    {
         "🚀"
-    } else if lower.contains("feat") || lower.contains("特性") || lower.contains("新功能") || lower.contains("亮点") {
+    } else if lower.contains("feat")
+        || lower.contains("特性")
+        || lower.contains("新功能")
+        || lower.contains("亮点")
+    {
         "✨"
     } else if lower.contains("fix") || lower.contains("修复") || lower.contains("bug") {
         "🐛"
@@ -204,7 +254,11 @@ fn match_heading_icon(text: &str) -> &'static str {
         "♻️"
     } else if lower.contains("breaking") || lower.contains("破坏") || lower.contains("警告") {
         "⚠️"
-    } else if lower.contains("upgrade") || lower.contains("升级") || lower.contains("指南") || lower.contains("说明") {
+    } else if lower.contains("upgrade")
+        || lower.contains("升级")
+        || lower.contains("指南")
+        || lower.contains("说明")
+    {
         "💡"
     } else if lower.contains("link") || lower.contains("链接") {
         "🔗"
@@ -214,7 +268,13 @@ fn match_heading_icon(text: &str) -> &'static str {
 }
 
 /// 渲染行内富文本
-fn render_inline_markdown(ui: &mut Ui, text: &str, font_size: f32, default_color: Color32, italic: bool) {
+fn render_inline_markdown(
+    ui: &mut Ui,
+    text: &str,
+    font_size: f32,
+    default_color: Color32,
+    italic: bool,
+) {
     let wrap_w = if ui.available_width().is_finite() && ui.available_width() > 50.0 {
         ui.available_width()
     } else {
@@ -229,46 +289,66 @@ fn render_inline_markdown(ui: &mut Ui, text: &str, font_size: f32, default_color
     for span in spans {
         match span {
             InlineSpan::Text(s) => {
-                job.append(s, 0.0, egui::text::TextFormat {
-                    font_id: FontId::proportional(font_size),
-                    color: default_color,
-                    italics: italic,
-                    ..Default::default()
-                });
+                job.append(
+                    s,
+                    0.0,
+                    egui::text::TextFormat {
+                        font_id: FontId::proportional(font_size),
+                        color: default_color,
+                        italics: italic,
+                        ..Default::default()
+                    },
+                );
             }
             InlineSpan::Bold(s) => {
-                job.append(s, 0.0, egui::text::TextFormat {
-                    font_id: FontId::proportional(font_size),
-                    color: theme::text_primary(),
-                    ..Default::default()
-                });
+                job.append(
+                    s,
+                    0.0,
+                    egui::text::TextFormat {
+                        font_id: FontId::proportional(font_size),
+                        color: theme::text_primary(),
+                        ..Default::default()
+                    },
+                );
             }
             InlineSpan::Italic(s) => {
-                job.append(s, 0.0, egui::text::TextFormat {
-                    font_id: FontId::proportional(font_size),
-                    color: default_color,
-                    italics: true,
-                    ..Default::default()
-                });
+                job.append(
+                    s,
+                    0.0,
+                    egui::text::TextFormat {
+                        font_id: FontId::proportional(font_size),
+                        color: default_color,
+                        italics: true,
+                        ..Default::default()
+                    },
+                );
             }
             InlineSpan::Code(s) => {
-                job.append(s, 0.0, egui::text::TextFormat {
-                    font_id: FontId::monospace(font_size - 1.0),
-                    color: theme::accent_strong(),
-                    background: theme::panel_hover(),
-                    ..Default::default()
-                });
+                job.append(
+                    s,
+                    0.0,
+                    egui::text::TextFormat {
+                        font_id: FontId::monospace(font_size - 1.0),
+                        color: theme::accent_strong(),
+                        background: theme::panel_hover(),
+                        ..Default::default()
+                    },
+                );
             }
             InlineSpan::Link { label, url } => {
                 if first_link_url.is_none() {
                     first_link_url = Some(url.to_string());
                 }
-                job.append(label, 0.0, egui::text::TextFormat {
-                    font_id: FontId::proportional(font_size),
-                    color: theme::accent(),
-                    underline: Stroke::new(1.0, theme::accent()),
-                    ..Default::default()
-                });
+                job.append(
+                    label,
+                    0.0,
+                    egui::text::TextFormat {
+                        font_id: FontId::proportional(font_size),
+                        color: theme::accent(),
+                        underline: Stroke::new(1.0, theme::accent()),
+                        ..Default::default()
+                    },
+                );
             }
         }
     }
@@ -319,32 +399,44 @@ fn render_list_item(ui: &mut Ui, line: &str, is_unordered: bool) {
     }
 
     // 2. 列表圆点
-    job.append("● ", 0.0, egui::text::TextFormat {
-        font_id: FontId::proportional(8.0),
-        color: theme::accent(),
-        valign: egui::Align::Center,
-        ..Default::default()
-    });
+    job.append(
+        "● ",
+        0.0,
+        egui::text::TextFormat {
+            font_id: FontId::proportional(8.0),
+            color: theme::accent(),
+            valign: egui::Align::Center,
+            ..Default::default()
+        },
+    );
 
     // 3. 常规提交前缀微标 (如 [修复], [新增])
     if let Some((badge_label, fg, bg)) = badge {
-        job.append(&format!("[{badge_label}] "), 0.0, egui::text::TextFormat {
-            font_id: FontId::monospace(10.5),
-            color: fg,
-            background: bg,
-            valign: egui::Align::Center,
-            ..Default::default()
-        });
+        job.append(
+            &format!("[{badge_label}] "),
+            0.0,
+            egui::text::TextFormat {
+                font_id: FontId::monospace(10.5),
+                color: fg,
+                background: bg,
+                valign: egui::Align::Center,
+                ..Default::default()
+            },
+        );
     }
 
     // 4. 作用域微标 (如 (gui) 或 (proxy))
     if let Some(scope_text) = scope {
-        job.append(&format!("({scope_text}) "), 0.0, egui::text::TextFormat {
-            font_id: FontId::proportional(11.0),
-            color: theme::muted(),
-            valign: egui::Align::Center,
-            ..Default::default()
-        });
+        job.append(
+            &format!("({scope_text}) "),
+            0.0,
+            egui::text::TextFormat {
+                font_id: FontId::proportional(11.0),
+                color: theme::muted(),
+                valign: egui::Align::Center,
+                ..Default::default()
+            },
+        );
     }
 
     // 5. 列表项正文 (解析加粗、代码块、链接)
@@ -352,63 +444,91 @@ fn render_list_item(ui: &mut Ui, line: &str, is_unordered: bool) {
     for span in spans {
         match span {
             InlineSpan::Text(s) => {
-                job.append(s, 0.0, egui::text::TextFormat {
-                    font_id: FontId::proportional(12.0),
-                    color: theme::text_primary(),
-                    ..Default::default()
-                });
+                job.append(
+                    s,
+                    0.0,
+                    egui::text::TextFormat {
+                        font_id: FontId::proportional(12.0),
+                        color: theme::text_primary(),
+                        ..Default::default()
+                    },
+                );
             }
             InlineSpan::Bold(s) => {
-                job.append(s, 0.0, egui::text::TextFormat {
-                    font_id: FontId::proportional(12.0),
-                    color: theme::text_primary(),
-                    ..Default::default()
-                });
+                job.append(
+                    s,
+                    0.0,
+                    egui::text::TextFormat {
+                        font_id: FontId::proportional(12.0),
+                        color: theme::text_primary(),
+                        ..Default::default()
+                    },
+                );
             }
             InlineSpan::Italic(s) => {
-                job.append(s, 0.0, egui::text::TextFormat {
-                    font_id: FontId::proportional(12.0),
-                    color: theme::text_secondary(),
-                    italics: true,
-                    ..Default::default()
-                });
+                job.append(
+                    s,
+                    0.0,
+                    egui::text::TextFormat {
+                        font_id: FontId::proportional(12.0),
+                        color: theme::text_secondary(),
+                        italics: true,
+                        ..Default::default()
+                    },
+                );
             }
             InlineSpan::Code(s) => {
-                job.append(s, 0.0, egui::text::TextFormat {
-                    font_id: FontId::monospace(11.0),
-                    color: theme::accent_strong(),
-                    background: theme::panel_hover(),
-                    ..Default::default()
-                });
+                job.append(
+                    s,
+                    0.0,
+                    egui::text::TextFormat {
+                        font_id: FontId::monospace(11.0),
+                        color: theme::accent_strong(),
+                        background: theme::panel_hover(),
+                        ..Default::default()
+                    },
+                );
             }
             InlineSpan::Link { label, .. } => {
-                job.append(label, 0.0, egui::text::TextFormat {
-                    font_id: FontId::proportional(12.0),
-                    color: theme::accent(),
-                    underline: Stroke::new(1.0, theme::accent()),
-                    ..Default::default()
-                });
+                job.append(
+                    label,
+                    0.0,
+                    egui::text::TextFormat {
+                        font_id: FontId::proportional(12.0),
+                        color: theme::accent(),
+                        underline: Stroke::new(1.0, theme::accent()),
+                        ..Default::default()
+                    },
+                );
             }
         }
     }
 
     // 6. 作者尾缀
     if let Some(author_text) = author {
-        job.append(&format!(" {author_text}"), 0.0, egui::text::TextFormat {
-            font_id: FontId::proportional(11.0),
-            color: theme::muted(),
-            ..Default::default()
-        });
+        job.append(
+            &format!(" {author_text}"),
+            0.0,
+            egui::text::TextFormat {
+                font_id: FontId::proportional(11.0),
+                color: theme::muted(),
+                ..Default::default()
+            },
+        );
     }
 
     // 7. PR 链接尾缀
     if let Some((ref pr_label, _)) = pr_link {
-        job.append(&format!(" {pr_label}"), 0.0, egui::text::TextFormat {
-            font_id: FontId::proportional(11.0),
-            color: theme::accent(),
-            underline: Stroke::new(1.0, theme::accent()),
-            ..Default::default()
-        });
+        job.append(
+            &format!(" {pr_label}"),
+            0.0,
+            egui::text::TextFormat {
+                font_id: FontId::proportional(11.0),
+                color: theme::accent(),
+                underline: Stroke::new(1.0, theme::accent()),
+                ..Default::default()
+            },
+        );
     }
 
     ui.add_space(2.0);
@@ -451,27 +571,43 @@ pub fn render_markdown(ui: &mut Ui, markdown: &str) {
 
                 ui.add_space(4.0);
                 Frame::NONE
-                    .fill(if theme::is_light() { Color32::from_rgb(245, 247, 250) } else { Color32::from_rgb(20, 22, 26) })
+                    .fill(if theme::is_light() {
+                        Color32::from_rgb(245, 247, 250)
+                    } else {
+                        Color32::from_rgb(20, 22, 26)
+                    })
                     .stroke(Stroke::new(1.0, theme::border_subtle()))
                     .corner_radius(CornerRadius::same(6))
                     .inner_margin(Margin::symmetric(14, 10))
                     .show(ui, |ui| {
                         if !code_block_lang.is_empty() {
                             ui.horizontal(|ui| {
-                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                    ui.label(RichText::new(&code_block_lang).small().monospace().color(theme::muted()));
-                                });
+                                ui.with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| {
+                                        ui.label(
+                                            RichText::new(&code_block_lang)
+                                                .small()
+                                                .monospace()
+                                                .color(theme::muted()),
+                                        );
+                                    },
+                                );
                             });
                             ui.add_space(2.0);
                         }
                         let mut job = egui::text::LayoutJob::default();
                         job.break_on_newline = true;
                         job.wrap.max_width = (ui.available_width() - 8.0).max(60.0);
-                        job.append(&full_code, 0.0, egui::text::TextFormat {
-                            font_id: FontId::monospace(12.0),
-                            color: theme::text_primary(),
-                            ..Default::default()
-                        });
+                        job.append(
+                            &full_code,
+                            0.0,
+                            egui::text::TextFormat {
+                                font_id: FontId::monospace(12.0),
+                                color: theme::text_primary(),
+                                ..Default::default()
+                            },
+                        );
                         ui.label(job);
                     });
                 ui.add_space(6.0);
@@ -502,7 +638,8 @@ pub fn render_markdown(ui: &mut Ui, markdown: &str) {
             ui.add_space(5.0);
             let w = ui.available_width();
             let (rect, _) = ui.allocate_exact_size(Vec2::new(w, 1.0), Sense::hover());
-            ui.painter().rect_filled(rect, CornerRadius::ZERO, theme::border_subtle());
+            ui.painter()
+                .rect_filled(rect, CornerRadius::ZERO, theme::border_subtle());
             ui.add_space(5.0);
             i += 1;
             continue;
@@ -511,11 +648,20 @@ pub fn render_markdown(ui: &mut Ui, markdown: &str) {
         // 4. 标题解析
         if let Some(h1) = trimmed.strip_prefix("# ") {
             ui.add_space(6.0);
-            ui.label(RichText::new(h1.trim()).size(16.0).strong().color(theme::accent_strong()));
+            ui.label(
+                RichText::new(h1.trim())
+                    .size(16.0)
+                    .strong()
+                    .color(theme::accent_strong()),
+            );
             ui.add_space(3.0);
             let w = ui.available_width().min(240.0);
             let (rect, _) = ui.allocate_exact_size(Vec2::new(w, 1.5), Sense::hover());
-            ui.painter().rect_filled(rect, CornerRadius::same(1), theme::accent().gamma_multiply(0.4));
+            ui.painter().rect_filled(
+                rect,
+                CornerRadius::same(1),
+                theme::accent().gamma_multiply(0.4),
+            );
             ui.add_space(4.0);
             i += 1;
             continue;
@@ -524,7 +670,12 @@ pub fn render_markdown(ui: &mut Ui, markdown: &str) {
             ui.add_space(6.0);
             let title = h2.trim();
             let icon = match_heading_icon(title);
-            ui.label(RichText::new(format!("{icon} {title}")).size(14.0).strong().color(theme::text_primary()));
+            ui.label(
+                RichText::new(format!("{icon} {title}"))
+                    .size(14.0)
+                    .strong()
+                    .color(theme::text_primary()),
+            );
             ui.add_space(3.0);
             i += 1;
             continue;
@@ -532,7 +683,12 @@ pub fn render_markdown(ui: &mut Ui, markdown: &str) {
         if let Some(h3) = trimmed.strip_prefix("### ") {
             ui.add_space(4.0);
             let title = h3.trim();
-            ui.label(RichText::new(title).size(13.0).strong().color(theme::text_primary()));
+            ui.label(
+                RichText::new(title)
+                    .size(13.0)
+                    .strong()
+                    .color(theme::text_primary()),
+            );
             ui.add_space(2.0);
             i += 1;
             continue;
@@ -540,7 +696,12 @@ pub fn render_markdown(ui: &mut Ui, markdown: &str) {
         if let Some(h4) = trimmed.strip_prefix("#### ") {
             ui.add_space(3.0);
             let title = h4.trim();
-            ui.label(RichText::new(title).size(12.0).strong().color(theme::text_secondary()));
+            ui.label(
+                RichText::new(title)
+                    .size(12.0)
+                    .strong()
+                    .color(theme::text_secondary()),
+            );
             ui.add_space(2.0);
             i += 1;
             continue;
@@ -564,9 +725,17 @@ pub fn render_markdown(ui: &mut Ui, markdown: &str) {
         }
 
         // 6. 列表项解析 (* / - / + / 数字序号)
-        let is_unordered_bullet = trimmed.starts_with("* ") || trimmed.starts_with("- ") || trimmed.starts_with("+ ");
-        let is_numbered = trimmed.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false)
-            && trimmed.find('.').map(|idx| idx < 4 && trimmed[idx..].starts_with(". ")).unwrap_or(false);
+        let is_unordered_bullet =
+            trimmed.starts_with("* ") || trimmed.starts_with("- ") || trimmed.starts_with("+ ");
+        let is_numbered = trimmed
+            .chars()
+            .next()
+            .map(|c| c.is_ascii_digit())
+            .unwrap_or(false)
+            && trimmed
+                .find('.')
+                .map(|idx| idx < 4 && trimmed[idx..].starts_with(". "))
+                .unwrap_or(false);
 
         if is_unordered_bullet || is_numbered {
             render_list_item(ui, line, is_unordered_bullet);
@@ -598,7 +767,10 @@ mod tests {
                 InlineSpan::Text(" 与 "),
                 InlineSpan::Code("Cargo.lock"),
                 InlineSpan::Text("，详情见 "),
-                InlineSpan::Link { label: "说明", url: "https://example.com" },
+                InlineSpan::Link {
+                    label: "说明",
+                    url: "https://example.com"
+                },
                 InlineSpan::Text("！"),
             ]
         );
@@ -628,7 +800,13 @@ mod tests {
         let (clean, author, pr_link) = parse_github_release_suffix(text);
         assert_eq!(clean, "修复渲染频闪");
         assert_eq!(author, Some("@mateo-ki".to_string()));
-        assert_eq!(pr_link, Some(("PR #123".to_string(), "https://github.com/mateo-ki/vproxy/pull/123".to_string())));
+        assert_eq!(
+            pr_link,
+            Some((
+                "PR #123".to_string(),
+                "https://github.com/mateo-ki/vproxy/pull/123".to_string()
+            ))
+        );
     }
 
     #[test]

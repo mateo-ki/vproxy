@@ -116,7 +116,10 @@ pub async fn export_unified_profile(
         .collect();
 
     // 2. 自建 / 未分组节点
-    let custom_nodes_raw = db.load_nodes(Some(UNGROUPED_SOURCE_ID)).await.unwrap_or_default();
+    let custom_nodes_raw = db
+        .load_nodes(Some(UNGROUPED_SOURCE_ID))
+        .await
+        .unwrap_or_default();
     let custom_nodes = custom_nodes_raw
         .into_iter()
         .map(|n| ProfileCustomNode {
@@ -212,7 +215,10 @@ pub async fn import_unified_profile(
     }
 
     for src in &profile.sources {
-        if let Some(existing) = existing_by_url.get(&src.url).or_else(|| existing_by_name.get(&src.name)) {
+        if let Some(existing) = existing_by_url
+            .get(&src.url)
+            .or_else(|| existing_by_name.get(&src.name))
+        {
             // 已存在：更新属性
             db.update_source(
                 &existing.id,
@@ -418,23 +424,31 @@ mod tests {
 
     #[tokio::test]
     async fn test_database_profile_export_and_import_roundtrip() {
-        let db_path_1 = std::env::temp_dir().join(format!("vproxy-profile-src-{}.db", uuid::Uuid::new_v4()));
-        let db1 = Database::connect(db_path_1.to_str().unwrap()).await.unwrap();
+        let db_path_1 =
+            std::env::temp_dir().join(format!("vproxy-profile-src-{}.db", uuid::Uuid::new_v4()));
+        let db1 = Database::connect(db_path_1.to_str().unwrap())
+            .await
+            .unwrap();
 
         // 插入测试订阅源
-        let src1 = db1.create_source(CreateSource {
-            name: "主订阅-日本专线".to_string(),
-            url_template: "https://example.com/jp.yaml".to_string(),
-            enabled: true,
-            remark: Some("速度最快".to_string()),
-            user_agent: Some("clash.meta".to_string()),
-        }).await.unwrap();
+        let src1 = db1
+            .create_source(CreateSource {
+                name: "主订阅-日本专线".to_string(),
+                url_template: "https://example.com/jp.yaml".to_string(),
+                enabled: true,
+                remark: Some("速度最快".to_string()),
+                user_agent: Some("clash.meta".to_string()),
+            })
+            .await
+            .unwrap();
 
         db1.update_source_rules_and_groups(
             &src1.id,
             Some("- DOMAIN-SUFFIX,google.com,PROXY\n"),
             Some("- name: PROXY\n  type: select\n"),
-        ).await.unwrap();
+        )
+        .await
+        .unwrap();
 
         // 插入自定义节点
         let custom_node = Node {
@@ -473,8 +487,11 @@ mod tests {
         assert!(yaml_text.contains("自建-美国落地"));
 
         // 解析并恢复到新的空数据库 db2
-        let db_path_2 = std::env::temp_dir().join(format!("vproxy-profile-dst-{}.db", uuid::Uuid::new_v4()));
-        let db2 = Database::connect(db_path_2.to_str().unwrap()).await.unwrap();
+        let db_path_2 =
+            std::env::temp_dir().join(format!("vproxy-profile-dst-{}.db", uuid::Uuid::new_v4()));
+        let db2 = Database::connect(db_path_2.to_str().unwrap())
+            .await
+            .unwrap();
 
         let parsed_profile = from_str(&yaml_text).expect("解析 YAML 文本");
         let summary = import_unified_profile(&db2, &parsed_profile, false)
@@ -495,7 +512,10 @@ mod tests {
         assert_eq!(db2_sources.len(), 1);
         assert_eq!(db2_sources[0].name, "主订阅-日本专线");
         assert_eq!(db2_sources[0].url_template, "https://example.com/jp.yaml");
-        assert_eq!(db2_sources[0].rules_yaml.as_deref(), Some("- DOMAIN-SUFFIX,google.com,PROXY\n"));
+        assert_eq!(
+            db2_sources[0].rules_yaml.as_deref(),
+            Some("- DOMAIN-SUFFIX,google.com,PROXY\n")
+        );
 
         let db2_nodes = db2.load_nodes(Some(UNGROUPED_SOURCE_ID)).await.unwrap();
         assert_eq!(db2_nodes.len(), 1);

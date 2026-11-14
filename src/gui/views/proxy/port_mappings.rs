@@ -1,14 +1,16 @@
 use crate::gui::icons::{icon_label, Icon};
 use crate::gui::theme;
-use crate::gui::widgets::{
-    panel_frame, section_title,
-};
+use crate::gui::widgets::{panel_frame, section_title};
 use crate::gui::VpnApp;
 use eframe::egui::{self, CornerRadius, RichText, Stroke, Ui};
 
 impl VpnApp {
     pub(crate) fn ui_proxy_port_mappings(&mut self, ui: &mut Ui) {
-        section_title(ui, self.tr("活动节点列表"), "一节点一端口独立转发 · 外部程序调用 · 绕过全局路由");
+        section_title(
+            ui,
+            self.tr("活动节点列表"),
+            "一节点一端口独立转发 · 外部程序调用 · 绕过全局路由",
+        );
 
         egui::ScrollArea::vertical()
             .id_salt("proxy_port_mappings_scroll")
@@ -252,6 +254,5 @@ impl VpnApp {
         });
         ui.add_space(16.0);
     });
-}
-
+    }
 }

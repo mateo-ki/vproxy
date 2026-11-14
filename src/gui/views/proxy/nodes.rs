@@ -1,19 +1,12 @@
 use super::groups::{node_matches_group, visible_group_names};
 use crate::gui::icons::{self, icon_label, Icon};
 use crate::gui::theme;
-use crate::gui::types::{
-    KernelGroup, ProxySortBy,
-    ProxyView, ProxyViewRow,
-};
+use crate::gui::types::{KernelGroup, ProxySortBy, ProxyView, ProxyViewRow};
 use crate::gui::view_models::nodes_vm::{NodeCardAction, NodesViewModel};
-use crate::gui::widgets::{
-    card_frame, compact_node_card, panel_frame, section_title,
-};
+use crate::gui::widgets::{card_frame, compact_node_card, panel_frame, section_title};
 use crate::gui::VpnApp;
 use crate::models::NodeSummary;
-use crate::proxy::{
-    ProxyState, URL_TEST_GROUP,
-};
+use crate::proxy::{ProxyState, URL_TEST_GROUP};
 use eframe::egui::{self, CornerRadius, Frame, Margin, RichText, Stroke, Ui};
 
 #[allow(dead_code)]
@@ -37,26 +30,33 @@ impl VpnApp {
             sub_groups.as_deref(),
             &self.kernel_groups,
         );
-        if !visible_names.iter().any(|name| name == &self.proxy_selected_group) {
+        if !visible_names
+            .iter()
+            .any(|name| name == &self.proxy_selected_group)
+        {
             self.proxy_selected_group = "全部".to_string();
         }
 
         let is_auto = self.proxy_config.url_test;
         let running = self.proxy_status.state == ProxyState::Running;
-        let current_group_now = if self.proxy_selected_group == "全部" || self.proxy_selected_group == "PROXY" {
-            if is_auto {
-                self.kernel_egress_name()
+        let current_group_now =
+            if self.proxy_selected_group == "全部" || self.proxy_selected_group == "PROXY" {
+                if is_auto {
+                    self.kernel_egress_name()
+                } else {
+                    self.selected_proxy_node_id.as_ref().and_then(|id| {
+                        self.proxy_nodes
+                            .iter()
+                            .find(|n| &n.id == id)
+                            .map(|n| n.name.clone())
+                    })
+                }
             } else {
-                self.selected_proxy_node_id.as_ref().and_then(|id| {
-                    self.proxy_nodes.iter().find(|n| &n.id == id).map(|n| n.name.clone())
-                })
-            }
-        } else {
-            self.kernel_groups
-                .iter()
-                .find(|g| g.name == self.proxy_selected_group)
-                .and_then(|g| g.now.clone())
-        };
+                self.kernel_groups
+                    .iter()
+                    .find(|g| g.name == self.proxy_selected_group)
+                    .and_then(|g| g.now.clone())
+            };
 
         // ===================================================================
         // macOS Sequoia 极简晶体工具栏 (双行自适应排版：第 1 行地区过滤，第 2 行排序/搜索/节点统计)
@@ -84,7 +84,9 @@ impl VpnApp {
                                 .corner_radius(CornerRadius::same(10)),
                             );
                             if reset_resp
-                                .on_hover_text("当前正在按此策略组过滤节点，点击重置并显示「全部」节点")
+                                .on_hover_text(
+                                    "当前正在按此策略组过滤节点，点击重置并显示「全部」节点",
+                                )
                                 .clicked()
                             {
                                 self.proxy_selected_group = "全部".to_string();
@@ -120,10 +122,12 @@ impl VpnApp {
                                     theme::muted(),
                                 )
                             };
-                            let btn = egui::Button::new(RichText::new(label).small().strong().color(text_color))
-                                .fill(fill)
-                                .stroke(stroke)
-                                .corner_radius(CornerRadius::same(10));
+                            let btn = egui::Button::new(
+                                RichText::new(label).small().strong().color(text_color),
+                            )
+                            .fill(fill)
+                            .stroke(stroke)
+                            .corner_radius(CornerRadius::same(10));
                             if ui.add(btn).clicked() && !is_sel {
                                 self.proxy_region_filter = code.to_string();
                                 self.proxy_page = 1;
@@ -137,7 +141,11 @@ impl VpnApp {
 
                     // --- 第 2 行：排序模式 + 搜索框 + 节点统计 ---
                     ui.horizontal(|ui| {
-                        ui.label(RichText::new("排序:").small().color(theme::text_secondary()));
+                        ui.label(
+                            RichText::new("排序:")
+                                .small()
+                                .color(theme::text_secondary()),
+                        );
                         let is_name = self.proxy_sort_by == ProxySortBy::Name;
                         if ui
                             .add(icons::selectable_icon_btn(Icon::Sort, "名称", is_name))
@@ -192,10 +200,13 @@ impl VpnApp {
                                 .inner_margin(Margin::symmetric(8, 3))
                                 .show(ui, |ui| {
                                     ui.label(
-                                        RichText::new(format!("共 {} 节点", self.proxy_nodes.len()))
-                                            .small()
-                                            .strong()
-                                            .color(theme::text_secondary()),
+                                        RichText::new(format!(
+                                            "共 {} 节点",
+                                            self.proxy_nodes.len()
+                                        ))
+                                        .small()
+                                        .strong()
+                                        .color(theme::text_secondary()),
                                     );
                                 });
                         });
@@ -291,7 +302,9 @@ impl VpnApp {
                             ui.label(RichText::new(hint).small().color(theme::muted()));
                             ui.add_space(12.0);
                             ui.horizontal(|ui| {
-                                if !self.proxy_search.is_empty() || self.proxy_region_filter != "all" {
+                                if !self.proxy_search.is_empty()
+                                    || self.proxy_region_filter != "all"
+                                {
                                     if ui.button("清除筛选与搜索").clicked() {
                                         self.proxy_search.clear();
                                         self.proxy_region_filter = "all".into();
@@ -328,7 +341,10 @@ impl VpnApp {
                     self.proxy_page = self.proxy_page.saturating_sub(1).max(1);
                 }
                 if ui
-                    .add_enabled(self.proxy_page < total_pages, egui::Button::new("下一页").small())
+                    .add_enabled(
+                        self.proxy_page < total_pages,
+                        egui::Button::new("下一页").small(),
+                    )
                     .clicked()
                 {
                     self.proxy_page = (self.proxy_page + 1).min(total_pages);
@@ -340,7 +356,14 @@ impl VpnApp {
                         .width(95.0)
                         .show_ui(ui, |ui| {
                             for size in [20, 25, 30, 50, 100] {
-                                if ui.selectable_value(&mut self.proxy_page_size, size, format!("{size} 条/页")).clicked() {
+                                if ui
+                                    .selectable_value(
+                                        &mut self.proxy_page_size,
+                                        size,
+                                        format!("{size} 条/页"),
+                                    )
+                                    .clicked()
+                                {
                                     self.proxy_page = 1;
                                 }
                             }
@@ -359,144 +382,182 @@ impl VpnApp {
                             let end = (start + columns).min(paged_rows.len());
                             let row = &paged_rows[start..end];
                             ui.columns(columns, |column_uis| {
-                            for (column_index, column_ui) in column_uis.iter_mut().enumerate() {
-                                let Some(entry) = row.get(column_index) else {
-                                    continue;
-                                };
-                                let node = &self.proxy_nodes[entry.index];
+                                for (column_index, column_ui) in column_uis.iter_mut().enumerate() {
+                                    let Some(entry) = row.get(column_index) else {
+                                        continue;
+                                    };
+                                    let node = &self.proxy_nodes[entry.index];
 
-                                // 活跃状态判定：优先匹配当前策略组活跃出口，或者全局选中节点
-                                let is_active = if let Some(ref now) = current_group_now {
-                                    now == &node.name
-                                } else if is_auto {
-                                    self.kernel_egress_name().as_deref() == Some(node.name.as_str())
-                                } else {
-                                    selected_id.as_deref() == Some(&node.id)
-                                };
-                                let is_focused = self.focused_node_id.as_deref() == Some(&node.id);
-                                let is_switching = switching_id.as_deref() == Some(&node.id);
+                                    // 活跃状态判定：优先匹配当前策略组活跃出口，或者全局选中节点
+                                    let is_active = if let Some(ref now) = current_group_now {
+                                        now == &node.name
+                                    } else if is_auto {
+                                        self.kernel_egress_name().as_deref()
+                                            == Some(node.name.as_str())
+                                    } else {
+                                        selected_id.as_deref() == Some(&node.id)
+                                    };
+                                    let is_focused =
+                                        self.focused_node_id.as_deref() == Some(&node.id);
+                                    let is_switching = switching_id.as_deref() == Some(&node.id);
 
-                                let source_name = self.source_name_for_id(node.source_id.as_deref());
-                                let card_tip = {
-                                    let mut tip = format!("{}\n{}:{}", node.name, node.server, node.port);
-                                    if let Some(src) = source_name {
-                                        if !src.is_empty() {
-                                            tip.push_str(&format!("\n订阅源: {src}"));
+                                    let source_name =
+                                        self.source_name_for_id(node.source_id.as_deref());
+                                    let card_tip = {
+                                        let mut tip =
+                                            format!("{}\n{}:{}", node.name, node.server, node.port);
+                                        if let Some(src) = source_name {
+                                            if !src.is_empty() {
+                                                tip.push_str(&format!("\n订阅源: {src}"));
+                                            }
                                         }
-                                    }
-                                    if let Some(ms) = node.latency_ms {
-                                        tip.push_str(&format!("\n延迟: {ms} ms"));
-                                    }
-                                    if is_active {
-                                        tip.push_str("\n当前活动出口（右键管理）");
-                                    } else if self.proxy_selected_group != "全部" && self.proxy_selected_group != "PROXY" {
-                                        tip.push_str(&format!(
+                                        if let Some(ms) = node.latency_ms {
+                                            tip.push_str(&format!("\n延迟: {ms} ms"));
+                                        }
+                                        if is_active {
+                                            tip.push_str("\n当前活动出口（右键管理）");
+                                        } else if self.proxy_selected_group != "全部"
+                                            && self.proxy_selected_group != "PROXY"
+                                        {
+                                            tip.push_str(&format!(
                                             "\n左键点击选中，右键设为「{}」活动出口（双击亦可）",
                                             self.proxy_selected_group
                                         ));
-                                    } else {
-                                        tip.push_str("\n左键点击选中，右键设为活动节点（双击亦可）");
-                                    }
-                                    tip
-                                };
-                                let response = compact_node_card(
-                                    column_ui,
-                                    node,
-                                    source_name,
-                                    is_active,
-                                    is_focused,
-                                    is_switching,
-                                )
-                                .on_hover_text(card_tip);
-
-                                let clicked = response.clicked();
-                                let double_clicked = response.double_clicked();
-
-                                let node_id = node.id.clone();
-                                let node_name = node.name.clone();
-                                response.context_menu(|ui| {
-                                    if !is_active {
-                                        let label = if self.proxy_selected_group != "全部" && self.proxy_selected_group != "PROXY" {
-                                            format!("🚀 设为「{}」活动出口", self.proxy_selected_group)
                                         } else {
-                                            "🚀 设为活动节点".to_string()
-                                        };
-                                        if ui.button(label).clicked() {
-                                            if is_auto {
-                                                switch_to_manual = true;
-                                            }
-                                            selected = Some((node_id.clone(), node_name.clone()));
-                                            if running
-                                                && self.proxy_selected_group != "全部"
-                                                && self.proxy_selected_group != "PROXY"
-                                                && self.kernel_groups.iter().any(|g| g.name == self.proxy_selected_group)
-                                            {
-                                                group_switch_member = Some((self.proxy_selected_group.clone(), node_name.clone()));
-                                            }
-                                            ui.close();
+                                            tip.push_str(
+                                                "\n左键点击选中，右键设为活动节点（双击亦可）",
+                                            );
                                         }
-                                    } else {
-                                        ui.label(RichText::new("✓ 当前活动节点").small().color(theme::accent_strong()));
-                                    }
-                                    ui.separator();
-                                    if ui.button("ℹ️ 查看详情").clicked() {
-                                        menu_action = Some(NodeCardAction::ShowDetail(node_id.clone()));
-                                        ui.close();
-                                    }
-                                    if ui
-                                        .add_enabled(!is_busy, egui::Button::new("⚡ 测速节点"))
-                                        .clicked()
-                                    {
-                                        menu_action = Some(NodeCardAction::Speedtest(node_id.clone()));
-                                        ui.close();
-                                    }
-                                    if ui
-                                        .add_enabled(!is_busy, egui::Button::new("📥 下载测速"))
-                                        .clicked()
-                                    {
-                                        menu_action = Some(NodeCardAction::SpeedtestDownload(node_id.clone()));
-                                        ui.close();
-                                    }
-                                    if ui.button("🛡️ IP 检测").clicked() {
-                                        menu_action = Some(NodeCardAction::CheckIpRisk(node_id.clone()));
-                                        ui.close();
-                                    }
-                                    if ui.button("🧭 路由追踪").clicked() {
-                                        menu_action = Some(NodeCardAction::RouteTrace(node_id.clone()));
-                                        ui.close();
-                                    }
-                                    if (is_auto || self.proxy_selected_group != "全部") && !is_active {
-                                        ui.separator();
-                                        if ui.button("锁定为出口（关闭自动选路）").clicked() {
-                                            locked = Some((node_id.clone(), node_name.clone()));
-                                            ui.close();
-                                        }
-                                    }
-                                });
+                                        tip
+                                    };
+                                    let response = compact_node_card(
+                                        column_ui,
+                                        node,
+                                        source_name,
+                                        is_active,
+                                        is_focused,
+                                        is_switching,
+                                    )
+                                    .on_hover_text(card_tip);
 
-                                if double_clicked && !is_active {
-                                    if is_auto {
-                                        switch_to_manual = true;
-                                    }
-                                    selected = Some((node_id.clone(), node_name.clone()));
-                                    if running
-                                        && self.proxy_selected_group != "全部"
-                                        && self.proxy_selected_group != "PROXY"
-                                        && self.kernel_groups.iter().any(|g| g.name == self.proxy_selected_group)
-                                    {
-                                        group_switch_member = Some((self.proxy_selected_group.clone(), node_name.clone()));
-                                    }
-                                } else if clicked {
-                                    menu_action = Some(NodeCardAction::Select {
-                                        id: node_id.clone(),
-                                        name: node_name.clone(),
+                                    let clicked = response.clicked();
+                                    let double_clicked = response.double_clicked();
+
+                                    let node_id = node.id.clone();
+                                    let node_name = node.name.clone();
+                                    response.context_menu(|ui| {
+                                        if !is_active {
+                                            let label = if self.proxy_selected_group != "全部"
+                                                && self.proxy_selected_group != "PROXY"
+                                            {
+                                                format!(
+                                                    "🚀 设为「{}」活动出口",
+                                                    self.proxy_selected_group
+                                                )
+                                            } else {
+                                                "🚀 设为活动节点".to_string()
+                                            };
+                                            if ui.button(label).clicked() {
+                                                if is_auto {
+                                                    switch_to_manual = true;
+                                                }
+                                                selected =
+                                                    Some((node_id.clone(), node_name.clone()));
+                                                if running
+                                                    && self.proxy_selected_group != "全部"
+                                                    && self.proxy_selected_group != "PROXY"
+                                                    && self.kernel_groups.iter().any(|g| {
+                                                        g.name == self.proxy_selected_group
+                                                    })
+                                                {
+                                                    group_switch_member = Some((
+                                                        self.proxy_selected_group.clone(),
+                                                        node_name.clone(),
+                                                    ));
+                                                }
+                                                ui.close();
+                                            }
+                                        } else {
+                                            ui.label(
+                                                RichText::new("✓ 当前活动节点")
+                                                    .small()
+                                                    .color(theme::accent_strong()),
+                                            );
+                                        }
+                                        ui.separator();
+                                        if ui.button("ℹ️ 查看详情").clicked() {
+                                            menu_action =
+                                                Some(NodeCardAction::ShowDetail(node_id.clone()));
+                                            ui.close();
+                                        }
+                                        if ui
+                                            .add_enabled(!is_busy, egui::Button::new("⚡ 测速节点"))
+                                            .clicked()
+                                        {
+                                            menu_action =
+                                                Some(NodeCardAction::Speedtest(node_id.clone()));
+                                            ui.close();
+                                        }
+                                        if ui
+                                            .add_enabled(!is_busy, egui::Button::new("📥 下载测速"))
+                                            .clicked()
+                                        {
+                                            menu_action = Some(NodeCardAction::SpeedtestDownload(
+                                                node_id.clone(),
+                                            ));
+                                            ui.close();
+                                        }
+                                        if ui.button("🛡️ IP 检测").clicked() {
+                                            menu_action =
+                                                Some(NodeCardAction::CheckIpRisk(node_id.clone()));
+                                            ui.close();
+                                        }
+                                        if ui.button("🧭 路由追踪").clicked() {
+                                            menu_action =
+                                                Some(NodeCardAction::RouteTrace(node_id.clone()));
+                                            ui.close();
+                                        }
+                                        if (is_auto || self.proxy_selected_group != "全部")
+                                            && !is_active
+                                        {
+                                            ui.separator();
+                                            if ui.button("锁定为出口（关闭自动选路）").clicked()
+                                            {
+                                                locked = Some((node_id.clone(), node_name.clone()));
+                                                ui.close();
+                                            }
+                                        }
                                     });
+
+                                    if double_clicked && !is_active {
+                                        if is_auto {
+                                            switch_to_manual = true;
+                                        }
+                                        selected = Some((node_id.clone(), node_name.clone()));
+                                        if running
+                                            && self.proxy_selected_group != "全部"
+                                            && self.proxy_selected_group != "PROXY"
+                                            && self
+                                                .kernel_groups
+                                                .iter()
+                                                .any(|g| g.name == self.proxy_selected_group)
+                                        {
+                                            group_switch_member = Some((
+                                                self.proxy_selected_group.clone(),
+                                                node_name.clone(),
+                                            ));
+                                        }
+                                    } else if clicked {
+                                        menu_action = Some(NodeCardAction::Select {
+                                            id: node_id.clone(),
+                                            name: node_name.clone(),
+                                        });
+                                    }
                                 }
-                            }
-                        });
-                        ui.add_space(4.0);
-                    }
-                });
+                            });
+                            ui.add_space(4.0);
+                        }
+                    });
             });
 
             if total_pages > 1 {
@@ -514,7 +575,10 @@ impl VpnApp {
                         self.proxy_page = self.proxy_page.saturating_sub(1).max(1);
                     }
                     if ui
-                        .add_enabled(self.proxy_page < total_pages, egui::Button::new("下一页").small())
+                        .add_enabled(
+                            self.proxy_page < total_pages,
+                            egui::Button::new("下一页").small(),
+                        )
                         .clicked()
                     {
                         self.proxy_page = (self.proxy_page + 1).min(total_pages);
@@ -567,7 +631,6 @@ impl VpnApp {
             .find(|group| group.name == URL_TEST_GROUP)
             .and_then(|group| group.now.clone())
     }
-
 }
 
 #[allow(dead_code)]
@@ -642,4 +705,3 @@ fn build_proxy_view(
         rows,
     }
 }
-

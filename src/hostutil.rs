@@ -183,7 +183,11 @@ fn is_public_ip(ip: IpAddr) -> bool {
 
 /// 判断 CIDR 字符串是否为私有 / 环回 / 链路本地 / 预留网段（域名解析对其默认启用 no-resolve）。
 pub fn is_private_cidr(cidr: &str) -> bool {
-    let ip_str = cidr.split_once('/').map(|(ip, _)| ip).unwrap_or(cidr).trim();
+    let ip_str = cidr
+        .split_once('/')
+        .map(|(ip, _)| ip)
+        .unwrap_or(cidr)
+        .trim();
     if let Ok(ip) = ip_str.parse::<IpAddr>() {
         !is_public_ip(ip)
     } else {

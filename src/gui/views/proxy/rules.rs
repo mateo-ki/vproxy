@@ -2,16 +2,14 @@ use crate::gui::icons::{icon_label, Icon};
 use crate::gui::theme;
 use crate::gui::types::RulesTab;
 use crate::gui::widgets::{
-    card_frame, header_cell, panel_tab,
-    primary_btn,
-    routing_mode_description, routing_mode_detail, section_title,
+    card_frame, header_cell, panel_tab, primary_btn, routing_mode_description, routing_mode_detail,
+    section_title,
 };
 use crate::gui::VpnApp;
 use crate::proxy::{
     adblock_quic_rules, ai_service_rules, dev_mirrors_rules, game_platforms_rules,
-    mihomo_dns_poison_overrides, optimize_traffic_rules,
-    social_telegram_rules, streaming_media_rules,
-    ProxyState, RoutingMode, TrafficRule,
+    mihomo_dns_poison_overrides, optimize_traffic_rules, social_telegram_rules,
+    streaming_media_rules, ProxyState, RoutingMode, TrafficRule,
 };
 use eframe::egui::{self, CornerRadius, Frame, Margin, RichText, Stroke, Ui};
 
@@ -55,7 +53,9 @@ impl VpnApp {
                     panel_tab(ui, &mut tab, RulesTab::Config, Icon::Rules, "规则配置");
                     panel_tab(ui, &mut tab, RulesTab::Hits, Icon::Radar, "命中记录");
                 },
-                |ui| Self::rules_actions(ui, tab_now, busy, geo_updating, proxy_running, &mut action),
+                |ui| {
+                    Self::rules_actions(ui, tab_now, busy, geo_updating, proxy_running, &mut action)
+                },
             );
         } else {
             let _ = ui.horizontal(|ui| {
@@ -65,7 +65,14 @@ impl VpnApp {
             // 连一行都放不下时（200% 系统缩放 + 140% 字体）让它自己折，别越界。
             let _ = ui.horizontal_wrapped(|ui| {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    Self::rules_actions(ui, tab_now, busy, geo_updating, proxy_running, &mut action);
+                    Self::rules_actions(
+                        ui,
+                        tab_now,
+                        busy,
+                        geo_updating,
+                        proxy_running,
+                        &mut action,
+                    );
                 });
             });
         }
@@ -120,7 +127,11 @@ impl VpnApp {
         }
         if geo_updating {
             ui.spinner();
-            ui.label(RichText::new("更新 Geo 库中...").small().color(theme::accent()));
+            ui.label(
+                RichText::new("更新 Geo 库中...")
+                    .small()
+                    .color(theme::accent()),
+            );
         } else {
             let btn_resp = ui
                 .add_enabled(!busy, Self::button_small("一键更新 Geo 规则"))
@@ -169,17 +180,18 @@ impl VpnApp {
                         egui::TextStyle::Small.resolve(ui.style()),
                     );
                     let tip = if shown_summary != summary_text {
-                        format!("{}\n\n统计从本进程启动开始；命中每 30 秒自动落库一次。", summary_text)
+                        format!(
+                            "{}\n\n统计从本进程启动开始；命中每 30 秒自动落库一次。",
+                            summary_text
+                        )
                     } else {
                         "统计从本进程启动开始；命中每 30 秒自动落库一次。".to_string()
                     };
-                    ui.add(
-                        egui::Label::new(
-                            RichText::new(shown_summary)
-                                .small()
-                                .color(theme::text_secondary()),
-                        ),
-                    )
+                    ui.add(egui::Label::new(
+                        RichText::new(shown_summary)
+                            .small()
+                            .color(theme::text_secondary()),
+                    ))
                     .on_hover_text(tip);
                 },
                 |ui| {
@@ -806,16 +818,25 @@ fn fast_extract_group_names(yaml: &str) -> Vec<String> {
             continue;
         }
         if in_groups {
-            if !line.starts_with(' ') && !line.starts_with('\t') && trimmed.contains(':') && !trimmed.starts_with('-') {
+            if !line.starts_with(' ')
+                && !line.starts_with('\t')
+                && trimmed.contains(':')
+                && !trimmed.starts_with('-')
+            {
                 break;
             }
             if let Some(rest) = trimmed.strip_prefix("- name:") {
-                let name = rest.trim().trim_matches(|c| c == '"' || c == '\'' || c == ' ');
+                let name = rest
+                    .trim()
+                    .trim_matches(|c| c == '"' || c == '\'' || c == ' ');
                 if !name.is_empty() {
                     names.push(name.to_string());
                 }
             } else if trimmed.starts_with("name:") {
-                let name = trimmed.trim_start_matches("name:").trim().trim_matches(|c| c == '"' || c == '\'' || c == ' ');
+                let name = trimmed
+                    .trim_start_matches("name:")
+                    .trim()
+                    .trim_matches(|c| c == '"' || c == '\'' || c == ' ');
                 if !name.is_empty() {
                     names.push(name.to_string());
                 }
@@ -827,4 +848,3 @@ fn fast_extract_group_names(yaml: &str) -> Vec<String> {
     }
     names
 }
-

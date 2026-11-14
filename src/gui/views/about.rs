@@ -5,7 +5,9 @@ use crate::gui::theme;
 use crate::gui::types::BgMsg;
 use crate::gui::widgets::{card_frame, fold_title, icon_tile, pill, primary_btn, section_title};
 use crate::gui::VpnApp;
-use eframe::egui::{self, Color32, CornerRadius, Frame, Margin, ProgressBar, RichText, Stroke, Ui, Vec2};
+use eframe::egui::{
+    self, Color32, CornerRadius, Frame, Margin, ProgressBar, RichText, Stroke, Ui, Vec2,
+};
 
 /// 关于页底部的免责声明，一行一条（用户 2026-10-20 要求加）。
 /// 每条都对着代码核过：没有统计上报模块、IP 风险查询要用户点、发布节点要用户填后台地址、
@@ -662,12 +664,15 @@ impl VpnApp {
                     "内核已停止，安装向导已启动：{}（本程序马上会被关闭并由向导带回）",
                     path.display()
                 )),
-                Ok(app_update::Handoff::ManualInstall { command }) => Ok(format!(
-                    "内核已停止，包已就位，请执行：{command}"
-                )),
+                Ok(app_update::Handoff::ManualInstall { command }) => {
+                    Ok(format!("内核已停止，包已就位，请执行：{command}"))
+                }
                 Err(error) => Err(format!("启动安装程序失败: {error:#}")),
             };
-            let _ = tx.send(BgMsg::OpDone { result, unlock: false });
+            let _ = tx.send(BgMsg::OpDone {
+                result,
+                unlock: false,
+            });
         });
     }
 
@@ -685,19 +690,21 @@ impl VpnApp {
         self.fetching_releases = true;
         self.status = "正在拉取 GitHub Releases 版本列表...".into();
         self.rt.spawn(async move {
-            let result = app_update::list_releases(
-                proxy.as_deref(),
-                app_update::current_version(),
-                30,
-            )
-            .await
-            .map_err(|error| error.to_string());
+            let result =
+                app_update::list_releases(proxy.as_deref(), app_update::current_version(), 30)
+                    .await
+                    .map_err(|error| error.to_string());
             let _ = tx.send(BgMsg::AppReleasesListed(result));
         });
     }
 
     pub(crate) fn select_release_version(&mut self, tag: String) {
-        if let Some(item) = self.available_releases.iter().find(|r| r.tag == tag).cloned() {
+        if let Some(item) = self
+            .available_releases
+            .iter()
+            .find(|r| r.tag == tag)
+            .cloned()
+        {
             let current = app_update::current_version();
             let info = item.to_release_info(current);
             self.selected_release_tag = Some(tag.clone());
@@ -765,17 +772,28 @@ impl VpnApp {
                     Vec2::new(inner_w, 24.0),
                     egui::Layout::left_to_right(egui::Align::Center),
                     |ui| {
-                        ui.label(RichText::new("📦 版本说明").strong().size(13.5).color(theme::text_primary()));
+                        ui.label(
+                            RichText::new("📦 版本说明")
+                                .strong()
+                                .size(13.5)
+                                .color(theme::text_primary()),
+                        );
                         ui.add_space(4.0);
                         if is_latest {
-                            pill(ui, &format!("● {tag_display}"), theme::success(), theme::success_bg());
+                            pill(
+                                ui,
+                                &format!("● {tag_display}"),
+                                theme::success(),
+                                theme::success_bg(),
+                            );
                         } else {
                             pill(ui, tag_display, theme::accent(), theme::accent_bg());
                         }
 
                         // 右上角关闭按钮 (✕)
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            let close_btn = ui.add(crate::gui::icons::icon_btn_square(Icon::Close, 11.0));
+                            let close_btn =
+                                ui.add(crate::gui::icons::icon_btn_square(Icon::Close, 11.0));
                             if close_btn
                                 .on_hover_cursor(egui::CursorIcon::PointingHand)
                                 .on_hover_text("关闭窗口 (Esc)")
@@ -886,22 +904,23 @@ fn kv_row(ui: &mut Ui, label: &str, value: &str, action: Option<&str>) -> bool {
             ui.label(RichText::new(label).size(11.5).color(theme::muted()));
         },
     );
-    let val_resp = ui.scope_builder(
-        egui::UiBuilder::new()
-            .id_salt(("about:kv", label, "value"))
-            .max_rect(cell),
-        |ui| {
-            ui.set_clip_rect(cell);
-            ui.add_space(3.0);
-            ui.label(
-                RichText::new(&shown)
-                    .monospace()
-                    .size(VALUE_SIZE)
-                    .color(theme::text_secondary()),
-            );
-        },
-    )
-    .response;
+    let val_resp = ui
+        .scope_builder(
+            egui::UiBuilder::new()
+                .id_salt(("about:kv", label, "value"))
+                .max_rect(cell),
+            |ui| {
+                ui.set_clip_rect(cell);
+                ui.add_space(3.0);
+                ui.label(
+                    RichText::new(&shown)
+                        .monospace()
+                        .size(VALUE_SIZE)
+                        .color(theme::text_secondary()),
+                );
+            },
+        )
+        .response;
     if shown != value {
         val_resp.on_hover_text(value);
     }

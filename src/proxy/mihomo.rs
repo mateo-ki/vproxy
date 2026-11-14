@@ -143,7 +143,10 @@ fn build_mihomo_config_legacy(node: &Node, options: MihomoConfigOptions) -> Resu
         if !mapping.enabled {
             continue;
         }
-        if !port_listeners.iter().any(|l| l.get("port") == Some(&json!(mapping.port))) {
+        if !port_listeners
+            .iter()
+            .any(|l| l.get("port") == Some(&json!(mapping.port)))
+        {
             port_listeners.push(json!({
                 "name": format!("inbound-{}", mapping.port),
                 "type": "mixed",
@@ -164,8 +167,14 @@ fn build_mihomo_config_legacy(node: &Node, options: MihomoConfigOptions) -> Resu
                 let is_tls = obj.get("tls").and_then(Value::as_bool) == Some(true)
                     || obj.contains_key("reality-opts")
                     || obj.contains_key("public-key")
-                    || matches!(p_type, "vless" | "vmess" | "trojan" | "hysteria" | "hysteria2" | "tuic" | "ssr");
-                if is_tls && (!obj.contains_key("client-fingerprint") || obj.get("client-fingerprint").and_then(Value::as_str) == Some("")) {
+                    || matches!(
+                        p_type,
+                        "vless" | "vmess" | "trojan" | "hysteria" | "hysteria2" | "tuic" | "ssr"
+                    );
+                if is_tls
+                    && (!obj.contains_key("client-fingerprint")
+                        || obj.get("client-fingerprint").and_then(Value::as_str) == Some(""))
+                {
                     obj.insert("client-fingerprint".into(), fp_val.clone());
                 }
             }
@@ -197,7 +206,11 @@ fn build_mihomo_config_legacy(node: &Node, options: MihomoConfigOptions) -> Resu
     }
 
     let default_target = match options.routing_mode {
-        RoutingMode::Rule | RoutingMode::ChinaDirect | RoutingMode::Global | RoutingMode::Subscription | RoutingMode::Chain => "PROXY",
+        RoutingMode::Rule
+        | RoutingMode::ChinaDirect
+        | RoutingMode::Global
+        | RoutingMode::Subscription
+        | RoutingMode::Chain => "PROXY",
         RoutingMode::GfwList | RoutingMode::Direct => "DIRECT",
     };
     let match_target = if url_test_active && default_target == "PROXY" {
@@ -302,14 +315,20 @@ fn build_mihomo_config_legacy(node: &Node, options: MihomoConfigOptions) -> Resu
 
     let mut proxy_groups = if url_test_active {
         let (group_type, extra_fields) = match options.auto_strategy {
-            AutoRoutingStrategy::UrlTest => ("url-test", json!({
-                "tolerance": URL_TEST_TOLERANCE_MS,
-                "max-failed": 3,
-            })),
+            AutoRoutingStrategy::UrlTest => (
+                "url-test",
+                json!({
+                    "tolerance": URL_TEST_TOLERANCE_MS,
+                    "max-failed": 3,
+                }),
+            ),
             AutoRoutingStrategy::Fallback => ("fallback", json!({})),
-            AutoRoutingStrategy::LoadBalance => ("load-balance", json!({
-                "strategy": "consistent-hashing",
-            })),
+            AutoRoutingStrategy::LoadBalance => (
+                "load-balance",
+                json!({
+                    "strategy": "consistent-hashing",
+                }),
+            ),
         };
         let mut auto_group = json!({
             "name": URL_TEST_GROUP,
@@ -345,7 +364,10 @@ fn build_mihomo_config_legacy(node: &Node, options: MihomoConfigOptions) -> Resu
     if options.smart_routing {
         // PROXY 组始终作为首位主出站策略组，保持标准 Clash 规范
         let mut final_groups = Vec::new();
-        if let Some(proxy_idx) = proxy_groups.iter().position(|g| g.get("name") == Some(&json!("PROXY"))) {
+        if let Some(proxy_idx) = proxy_groups
+            .iter()
+            .position(|g| g.get("name") == Some(&json!("PROXY")))
+        {
             final_groups.push(proxy_groups.remove(proxy_idx));
         }
         final_groups.extend(smart_groups);
@@ -354,7 +376,12 @@ fn build_mihomo_config_legacy(node: &Node, options: MihomoConfigOptions) -> Resu
     }
 
     let mut final_rules: Vec<String> = Vec::new();
-    if options.smart_routing && matches!(options.routing_mode, RoutingMode::Rule | RoutingMode::ChinaDirect | RoutingMode::Subscription) {
+    if options.smart_routing
+        && matches!(
+            options.routing_mode,
+            RoutingMode::Rule | RoutingMode::ChinaDirect | RoutingMode::Subscription
+        )
+    {
         for r in SMART_ROUTING_PREPEND_RULES {
             final_rules.push(r.to_string());
         }
@@ -365,20 +392,31 @@ fn build_mihomo_config_legacy(node: &Node, options: MihomoConfigOptions) -> Resu
         if !override_text.trim().is_empty() {
             if let Ok(override_val) = serde_yaml::from_str::<Value>(override_text) {
                 // 兼容两种 YAML 格式：带有顶层 "proxy-groups:" 映射，或用户直接粘贴的策略组列表序列
-                let user_groups: Option<Vec<Value>> = if let Some(arr) = override_val.get("proxy-groups").and_then(Value::as_array) {
-                    Some(arr.clone())
-                } else if let Some(arr) = override_val.as_array() {
-                    Some(arr.clone())
-                } else {
-                    None
-                };
+                let user_groups: Option<Vec<Value>> =
+                    if let Some(arr) = override_val.get("proxy-groups").and_then(Value::as_array) {
+                        Some(arr.clone())
+                    } else if let Some(arr) = override_val.as_array() {
+                        Some(arr.clone())
+                    } else {
+                        None
+                    };
 
                 if let Some(groups) = user_groups {
                     for mut g in groups {
                         if let Some(g_obj) = g.as_object_mut() {
-                            let g_name = g_obj.get("name").and_then(Value::as_str).unwrap_or_default().to_string();
-                            let filter_regex = g_obj.get("filter").and_then(Value::as_str).and_then(|pat| regex::Regex::new(pat).ok());
-                            let exclude_regex = g_obj.get("exclude-filter").and_then(Value::as_str).and_then(|pat| regex::Regex::new(pat).ok());
+                            let g_name = g_obj
+                                .get("name")
+                                .and_then(Value::as_str)
+                                .unwrap_or_default()
+                                .to_string();
+                            let filter_regex = g_obj
+                                .get("filter")
+                                .and_then(Value::as_str)
+                                .and_then(|pat| regex::Regex::new(pat).ok());
+                            let exclude_regex = g_obj
+                                .get("exclude-filter")
+                                .and_then(Value::as_str)
+                                .and_then(|pat| regex::Regex::new(pat).ok());
 
                             // 无论内核对 include-all/filter 的支持程度如何，在后端均主动根据 filter 与 exclude-filter
                             // 对可用候选节点精准过滤，并灌入 proxies 列表中，确保 100% 成功剔除 exclude-filter 匹配的节点（如 WARP）
@@ -406,7 +444,9 @@ fn build_mihomo_config_legacy(node: &Node, options: MihomoConfigOptions) -> Resu
                                     }
                                 }
                                 g_obj.insert("proxies".to_string(), json!(matched_proxies));
-                            } else if g_obj.get("proxies").is_none() && g_obj.get("include-all").and_then(Value::as_bool) != Some(true) {
+                            } else if g_obj.get("proxies").is_none()
+                                && g_obj.get("include-all").and_then(Value::as_bool) != Some(true)
+                            {
                                 if !candidate_names.is_empty() {
                                     g_obj.insert("proxies".to_string(), json!(candidate_names));
                                 } else {
@@ -659,7 +699,10 @@ fn build_mihomo_config_legacy(node: &Node, options: MihomoConfigOptions) -> Resu
                         if parsed.name == "proxy-groups" {
                             if let Some(groups_arr) = v.as_array_mut() {
                                 for g in groups_arr.iter_mut() {
-                                    crate::proxy::compiler::mihomo::expand_proxy_group_filters(g, &candidate_names);
+                                    crate::proxy::compiler::mihomo::expand_proxy_group_filters(
+                                        g,
+                                        &candidate_names,
+                                    );
                                 }
                             }
                         }
@@ -673,7 +716,9 @@ fn build_mihomo_config_legacy(node: &Node, options: MihomoConfigOptions) -> Resu
     // Rhai 脚本动态覆写（编程式最终裁决：传入已完成 YAML 覆写的完整 config，执行 main(config) 或扁平语句）
     if let Some(ref script_text) = options.override_script {
         if !script_text.trim().is_empty() {
-            if let Err(e) = crate::proxy::script_override::apply_script_override(&mut config, script_text) {
+            if let Err(e) =
+                crate::proxy::script_override::apply_script_override(&mut config, script_text)
+            {
                 tracing::warn!(error = %e, "应用 Rhai 脚本覆写失败，已安全降级至基础配置");
             }
         }

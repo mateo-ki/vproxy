@@ -146,17 +146,9 @@ impl Palette {
             (readable_on(ink.accent, Color32::WHITE, 4.6), Color32::WHITE)
         };
         let (primary_btn, primary_btn_hover, primary_btn_press) = if ink.light {
-            (
-                button,
-                darken(button, 0.08),
-                darken(button, 0.16),
-            )
+            (button, darken(button, 0.08), darken(button, 0.16))
         } else {
-            (
-                button,
-                lighten(button, 0.10),
-                darken(button, 0.12),
-            )
+            (button, lighten(button, 0.10), darken(button, 0.12))
         };
 
         // 淡强调底（选中项、胶囊、高亮提示块）

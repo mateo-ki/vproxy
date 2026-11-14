@@ -4,26 +4,26 @@ use anyhow::{anyhow, Result};
 pub mod firewall;
 #[cfg(target_os = "macos")]
 pub mod macos_helper;
+#[cfg(all(target_os = "macos", feature = "macos-tun-probe"))]
+pub mod macos_probe;
 #[cfg(target_os = "macos")]
 mod macos_startup;
 #[cfg(all(target_os = "macos", feature = "gui"))]
 pub mod macos_window;
-#[cfg(all(target_os = "macos", feature = "macos-tun-probe"))]
-pub mod macos_probe;
 pub mod tray;
 pub mod window_park;
 pub use tray::{refresh_notification_area, round_window_corners, TrayEvent, TrayHandle};
 pub use window_park::{
     ensure_window_sysmenu_and_minimizebox, park as park_main_window,
-    restore_and_repaint_main_window, unpark as unpark_main_window,
-    wake_main_window_message_loop,
+    restore_and_repaint_main_window, unpark as unpark_main_window, wake_main_window_message_loop,
 };
 
 use crate::constants::platform::SINGLE_INSTANCE_MUTEX as SINGLE_INSTANCE_MUTEX_NAME;
 
 /// 「以管理员方式启动」在窗口创建前提权时被 UAC 取消的会话标记：
 /// 设置页据此提示"本次以普通权限运行"，应用生命周期内不再重复弹 UAC。
-static ADMIN_RELAUNCH_CANCELLED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static ADMIN_RELAUNCH_CANCELLED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
 
 /// 本次会话的「管理员方式启动」提权是否被用户取消（设置页提示用）
 pub fn admin_relaunch_cancelled() -> bool {
@@ -109,7 +109,9 @@ pub fn acquire_single_instance() -> Result<Option<SingleInstanceGuard>> {
                     if let Ok(n) = std::io::Read::read(&mut s, &mut buf) {
                         let msg = String::from_utf8_lossy(&buf[..n]);
                         if msg.contains("WAKEUP") || msg.contains("SHOW") {
-                            crate::startup_log("Unix socket 收到外部实例唤醒请求，通知前台显示窗口");
+                            crate::startup_log(
+                                "Unix socket 收到外部实例唤醒请求，通知前台显示窗口",
+                            );
                             tray::notify_existing_instance();
                         }
                     }
@@ -315,7 +317,10 @@ pub fn kernel_has_tun_capability(kernel_path: &std::path::Path) -> bool {
         if !kernel_path.exists() {
             return false;
         }
-        if let Ok(output) = std::process::Command::new("getcap").arg(kernel_path).output() {
+        if let Ok(output) = std::process::Command::new("getcap")
+            .arg(kernel_path)
+            .output()
+        {
             if output.status.success() {
                 let stdout = String::from_utf8_lossy(&output.stdout).to_lowercase();
                 if stdout.contains("cap_net_admin") {
@@ -334,7 +339,10 @@ pub fn kernel_has_tun_capability(kernel_path: &std::path::Path) -> bool {
 
 /// 返回在 Linux 终端为指定内核赋予 TUN 权限的 shell 命令
 pub fn tun_capability_command(kernel_path: &std::path::Path) -> String {
-    format!("sudo setcap cap_net_admin,cap_net_raw+ep \"{}\"", kernel_path.display())
+    format!(
+        "sudo setcap cap_net_admin,cap_net_raw+ep \"{}\"",
+        kernel_path.display()
+    )
 }
 
 /// 在 Linux 上检查 TUN 虚拟网卡设备是否真实存在且已激活
@@ -376,9 +384,12 @@ pub fn request_elevation(extra_args: &[String]) -> Result<()> {
         .collect::<Vec<_>>()
         .join(" ");
     let verb = "runas\0".encode_utf16().collect::<Vec<_>>();
-    let working_dir = executable
-        .parent()
-        .map(|p| p.as_os_str().encode_wide().chain(std::iter::once(0)).collect::<Vec<_>>());
+    let working_dir = executable.parent().map(|p| {
+        p.as_os_str()
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect::<Vec<_>>()
+    });
     let working_dir_ptr = working_dir
         .as_ref()
         .map(|v| v.as_ptr())
@@ -419,7 +430,9 @@ pub fn request_elevation(extra_args: &[String]) -> Result<()> {
 /// 真正需要网络权限的是代理内核（如 Mihomo / Sing-box）。本函数提供清晰的授权指引。
 #[cfg(target_os = "macos")]
 pub fn request_elevation(_extra_args: &[String]) -> Result<()> {
-    Err(anyhow!("macOS 无需以管理员身份启动界面；启用 Mihomo TUN 时会自动安装或连接后台服务"))
+    Err(anyhow!(
+        "macOS 无需以管理员身份启动界面；启用 Mihomo TUN 时会自动安装或连接后台服务"
+    ))
 }
 
 #[cfg(not(any(windows, target_os = "macos")))]
@@ -519,9 +532,11 @@ pub fn open_url_in_browser(url: &str) -> Result<()> {
 
 #[cfg(windows)]
 fn open_url_via_shell(url: &str) -> Result<()> {
+    use windows_sys::Win32::System::Com::{
+        CoInitializeEx, CoUninitialize, COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE,
+    };
     use windows_sys::Win32::UI::Shell::ShellExecuteW;
     use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
-    use windows_sys::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE};
 
     unsafe {
         // 在新线程中初始化 COM STA 并禁用慢速 OLE1 DDE 广播
@@ -531,9 +546,8 @@ fn open_url_via_shell(url: &str) -> Result<()> {
         );
     }
 
-    let wide = |value: &str| -> Vec<u16> {
-        value.encode_utf16().chain(std::iter::once(0)).collect()
-    };
+    let wide =
+        |value: &str| -> Vec<u16> { value.encode_utf16().chain(std::iter::once(0)).collect() };
     let result = unsafe {
         ShellExecuteW(
             std::ptr::null_mut(),
@@ -548,7 +562,10 @@ fn open_url_via_shell(url: &str) -> Result<()> {
         CoUninitialize();
     }
     if result as isize <= 32 {
-        return Err(anyhow!("调用 ShellExecuteW 失败：{}", shell_error_text(result as isize)));
+        return Err(anyhow!(
+            "调用 ShellExecuteW 失败：{}",
+            shell_error_text(result as isize)
+        ));
     }
     Ok(())
 }
@@ -560,28 +577,22 @@ fn get_default_browser_cmd_template() -> Option<String> {
         KEY_READ,
     };
 
-    let wide = |value: &str| -> Vec<u16> {
-        value.encode_utf16().chain(std::iter::once(0)).collect()
-    };
+    let wide =
+        |value: &str| -> Vec<u16> { value.encode_utf16().chain(std::iter::once(0)).collect() };
 
     let read_reg_string = |root: HKEY, subkey: &str, value_name: Option<&str>| -> Option<String> {
         let subkey_w = wide(subkey);
         let mut hkey: HKEY = std::ptr::null_mut();
-        let status = unsafe {
-            RegOpenKeyExW(
-                root,
-                subkey_w.as_ptr(),
-                0,
-                KEY_READ,
-                &mut hkey,
-            )
-        };
+        let status = unsafe { RegOpenKeyExW(root, subkey_w.as_ptr(), 0, KEY_READ, &mut hkey) };
         if status != 0 || hkey.is_null() {
             return None;
         }
 
         let val_w = value_name.map(wide);
-        let val_ptr = val_w.as_ref().map(|v| v.as_ptr()).unwrap_or(std::ptr::null());
+        let val_ptr = val_w
+            .as_ref()
+            .map(|v| v.as_ptr())
+            .unwrap_or(std::ptr::null());
         let mut type_code: u32 = 0;
         let mut byte_len: u32 = 0;
 
@@ -627,7 +638,8 @@ fn get_default_browser_cmd_template() -> Option<String> {
         HKEY_CURRENT_USER,
         r"Software\Microsoft\Windows\Shell\Associations\UrlAssociations\https\UserChoice",
         Some("ProgId"),
-    ).or_else(|| {
+    )
+    .or_else(|| {
         read_reg_string(
             HKEY_CURRENT_USER,
             r"Software\Microsoft\Windows\Shell\Associations\UrlAssociations\http\UserChoice",
@@ -644,19 +656,9 @@ fn get_default_browser_cmd_template() -> Option<String> {
         )
     } else {
         None
-    }.or_else(|| {
-        read_reg_string(
-            HKEY_CLASSES_ROOT,
-            r"https\shell\open\command",
-            None,
-        )
-    }).or_else(|| {
-        read_reg_string(
-            HKEY_CLASSES_ROOT,
-            r"http\shell\open\command",
-            None,
-        )
-    })
+    }
+    .or_else(|| read_reg_string(HKEY_CLASSES_ROOT, r"https\shell\open\command", None))
+    .or_else(|| read_reg_string(HKEY_CLASSES_ROOT, r"http\shell\open\command", None))
 }
 
 #[cfg(windows)]
@@ -684,9 +686,8 @@ fn try_fast_launch_browser(url: &str) -> Result<bool> {
         format!("{cmd_template} {clean_url}")
     };
 
-    let wide = |value: &str| -> Vec<u16> {
-        value.encode_utf16().chain(std::iter::once(0)).collect()
-    };
+    let wide =
+        |value: &str| -> Vec<u16> { value.encode_utf16().chain(std::iter::once(0)).collect() };
 
     let mut cmd_w: Vec<u16> = wide(&final_cmd);
     let mut si: STARTUPINFOW = unsafe { std::mem::zeroed() };
@@ -900,18 +901,21 @@ pub fn kill_orphan_proxy_cores() -> usize {
                     if !proc_handle.is_null() {
                         let mut full_path: [u16; 1024] = [0; 1024];
                         let mut size = full_path.len() as u32;
-                        let is_ours = if windows_sys::Win32::System::Threading::QueryFullProcessImageNameW(
-                            proc_handle,
-                            0,
-                            full_path.as_mut_ptr(),
-                            &mut size,
-                        ) != 0 {
-                            let path_str = String::from_utf16_lossy(&full_path[..size as usize]);
-                            is_our_proxy_core_path(&path_str)
-                        } else {
-                            // 无法查询路径（可能受权限保护），为安全起见不盲杀第三方进程
-                            false
-                        };
+                        let is_ours =
+                            if windows_sys::Win32::System::Threading::QueryFullProcessImageNameW(
+                                proc_handle,
+                                0,
+                                full_path.as_mut_ptr(),
+                                &mut size,
+                            ) != 0
+                            {
+                                let path_str =
+                                    String::from_utf16_lossy(&full_path[..size as usize]);
+                                is_our_proxy_core_path(&path_str)
+                            } else {
+                                // 无法查询路径（可能受权限保护），为安全起见不盲杀第三方进程
+                                false
+                            };
 
                         if is_ours {
                             if TerminateProcess(proc_handle, 1) != 0 {
@@ -984,7 +988,8 @@ pub fn count_orphan_proxy_cores() -> usize {
                             0,
                             full_path.as_mut_ptr(),
                             &mut size,
-                        ) != 0 {
+                        ) != 0
+                        {
                             let path_str = String::from_utf16_lossy(&full_path[..size as usize]);
                             is_ours = is_our_proxy_core_path(&path_str);
                         }
@@ -1154,7 +1159,8 @@ pub fn query_port_occupant_hint(port: u16) -> Option<String> {
         {
             if let Some(pid_str) = line.split_whitespace().last() {
                 if let Ok(pid) = pid_str.parse::<u32>() {
-                    let proc_name = get_process_name_by_pid(pid).unwrap_or_else(|| "未知进程".to_string());
+                    let proc_name =
+                        get_process_name_by_pid(pid).unwrap_or_else(|| "未知进程".to_string());
                     return Some(format!("占用进程: {proc_name} [PID: {pid}]"));
                 }
             }
@@ -1195,7 +1201,10 @@ pub fn is_our_proxy_core(pid: u32) -> bool {
     // 2. 检查可执行文件路径是否位于本程序的受管内核目录中
     let managed = crate::kernel::managed_kernel_root();
     let managed_str = managed.to_string_lossy();
-    if exe_str.starts_with(&*managed_str) || exe_str.contains("vproxy") || exe_str.contains("vpn-parser") {
+    if exe_str.starts_with(&*managed_str)
+        || exe_str.contains("vproxy")
+        || exe_str.contains("vpn-parser")
+    {
         return true;
     }
     if let Ok(cwd) = std::env::current_dir() {
@@ -1386,11 +1395,19 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn test_is_our_proxy_core_path() {
-        assert!(is_our_proxy_core_path(r"D:\software\VPN Parser\data\kernels\vpcore\vpcore.exe"));
-        assert!(is_our_proxy_core_path(r"C:\Users\admin\vpn-parser\data\kernels\mihomo\mihomo.exe"));
+        assert!(is_our_proxy_core_path(
+            r"D:\software\VPN Parser\data\kernels\vpcore\vpcore.exe"
+        ));
+        assert!(is_our_proxy_core_path(
+            r"C:\Users\admin\vpn-parser\data\kernels\mihomo\mihomo.exe"
+        ));
         assert!(is_our_proxy_core_path(r"C:\Temp\vpn-orphan-123\mihomo.exe"));
-        assert!(!is_our_proxy_core_path(r"C:\Users\admin\Desktop\software\GUI.for.Clash-windows-amd64\data\mihomo\mihomo.exe"));
-        assert!(!is_our_proxy_core_path(r"C:\Program Files\Clash Verge\clash.exe"));
+        assert!(!is_our_proxy_core_path(
+            r"C:\Users\admin\Desktop\software\GUI.for.Clash-windows-amd64\data\mihomo\mihomo.exe"
+        ));
+        assert!(!is_our_proxy_core_path(
+            r"C:\Program Files\Clash Verge\clash.exe"
+        ));
     }
 
     /// 运行时真验一次孤儿清理：起一个名叫 `mihomo` 的进程（用 `sleep` 的副本冒充），
@@ -1596,7 +1613,10 @@ mod tests {
         // 验证注册表能够快速读取到默认浏览器命令模板（例如 chrome.exe 或 msedge.exe）
         let template = get_default_browser_cmd_template();
         println!("Resolved browser command template: {template:?}");
-        assert!(template.is_some(), "Windows 系统应能查找到默认浏览器或 https 协议关联");
+        assert!(
+            template.is_some(),
+            "Windows 系统应能查找到默认浏览器或 https 协议关联"
+        );
         let t = template.unwrap();
         assert!(t.to_lowercase().contains(".exe"));
     }
@@ -1684,7 +1704,10 @@ mod tests {
         };
         assert_eq!(args.parent_pid, 12345);
         assert_eq!(args.kernel, KernelKind::Mihomo);
-        assert_eq!(args.executable, std::path::PathBuf::from("C:\\bin\\mihomo.exe"));
+        assert_eq!(
+            args.executable,
+            std::path::PathBuf::from("C:\\bin\\mihomo.exe")
+        );
     }
 }
 
@@ -1757,10 +1780,13 @@ unsafe extern "system" fn seh_crash_unhandled_exception_filter(
 }
 
 #[cfg(windows)]
-unsafe extern "system" fn console_ctrl_handler(ctrl_type: u32) -> windows_sys::Win32::Foundation::BOOL {
+unsafe extern "system" fn console_ctrl_handler(
+    ctrl_type: u32,
+) -> windows_sys::Win32::Foundation::BOOL {
     use windows_sys::Win32::System::Console::*;
     match ctrl_type {
-        CTRL_C_EVENT | CTRL_BREAK_EVENT | CTRL_CLOSE_EVENT | CTRL_LOGOFF_EVENT | CTRL_SHUTDOWN_EVENT => {
+        CTRL_C_EVENT | CTRL_BREAK_EVENT | CTRL_CLOSE_EVENT | CTRL_LOGOFF_EVENT
+        | CTRL_SHUTDOWN_EVENT => {
             crate::startup_log(&format!(
                 "Console ctrl signal {ctrl_type} received; atomic disabling wininet system proxy & restoring stale DNS..."
             ));
@@ -1775,9 +1801,9 @@ unsafe extern "system" fn console_ctrl_handler(ctrl_type: u32) -> windows_sys::W
 pub fn register_crash_rollback_hook() {
     #[cfg(windows)]
     unsafe {
-        windows_sys::Win32::System::Diagnostics::Debug::SetUnhandledExceptionFilter(
-            Some(seh_crash_unhandled_exception_filter),
-        );
+        windows_sys::Win32::System::Diagnostics::Debug::SetUnhandledExceptionFilter(Some(
+            seh_crash_unhandled_exception_filter,
+        ));
         windows_sys::Win32::System::Console::SetConsoleCtrlHandler(
             Some(console_ctrl_handler),
             1, // TRUE: 注册控制台关闭/关机处理器
@@ -1798,13 +1824,21 @@ pub fn self_heal_stale_system_proxy(mixed_port: u16) -> bool {
 
         // ProxyEnable=1 但 ProxyServer 缺失/为空：浏览器会去连一个不存在的代理地址，
         // 表现为"所有网页都打不开"。这本身就是坏状态，直接归零自愈，不走下面的端口探测。
-        if snapshot.server.as_deref().map(str::trim).unwrap_or("").is_empty() {
+        if snapshot
+            .server
+            .as_deref()
+            .map(str::trim)
+            .unwrap_or("")
+            .is_empty()
+        {
             crate::startup_log(
                 "检测到 WinINet 残留损坏代理配置 (ProxyEnable=1 但 ProxyServer 缺失)，自动执行注册表自愈...",
             );
             let healed = crate::system_proxy::direct_disable_wininet_proxy_atomic();
             if healed {
-                crate::startup_log("注册表自愈完成，已强制重置 ProxyEnable=0 并广播刷新，网络已恢复直连。");
+                crate::startup_log(
+                    "注册表自愈完成，已强制重置 ProxyEnable=0 并广播刷新，网络已恢复直连。",
+                );
             } else {
                 crate::startup_log("警告：注册表自愈未能成功更新注册表。");
             }
@@ -1819,7 +1853,10 @@ pub fn self_heal_stale_system_proxy(mixed_port: u16) -> bool {
         let is_target_local_proxy = server.contains(&format!("127.0.0.1:{mixed_port}"))
             || server.contains(&format!("localhost:{mixed_port}"));
 
-        if !is_target_local_proxy && !server.contains("127.0.0.1:") && !server.contains("localhost:") {
+        if !is_target_local_proxy
+            && !server.contains("127.0.0.1:")
+            && !server.contains("localhost:")
+        {
             return false;
         }
 
@@ -1844,7 +1881,9 @@ pub fn self_heal_stale_system_proxy(mixed_port: u16) -> bool {
             ));
             let healed = crate::system_proxy::direct_disable_wininet_proxy_atomic();
             if healed {
-                crate::startup_log("注册表自愈完成，已强制重置 ProxyEnable=0 并广播刷新，网络已恢复直连。");
+                crate::startup_log(
+                    "注册表自愈完成，已强制重置 ProxyEnable=0 并广播刷新，网络已恢复直连。",
+                );
             } else {
                 crate::startup_log("警告：注册表自愈未能成功更新注册表。");
             }
@@ -2032,7 +2071,11 @@ pub enum StartupSyncAction {
     Leave,
 }
 
-pub fn startup_sync_action(enabled: bool, current: Option<&str>, desired: &str) -> StartupSyncAction {
+pub fn startup_sync_action(
+    enabled: bool,
+    current: Option<&str>,
+    desired: &str,
+) -> StartupSyncAction {
     match (enabled, current) {
         (true, Some(v)) if v == desired => StartupSyncAction::Leave,
         (true, _) => StartupSyncAction::Write,
@@ -2078,7 +2121,14 @@ pub fn sync_launch_at_startup(enabled: bool) -> bool {
     unsafe {
         // 先清理可能存在的旧版本开机启动键名残留（VPN Parser -> VProxy 平滑迁移）
         let mut clean_hkey = std::ptr::null_mut();
-        if RegOpenKeyExW(HKEY_CURRENT_USER, run_key.as_ptr(), 0, KEY_SET_VALUE, &mut clean_hkey) == 0 {
+        if RegOpenKeyExW(
+            HKEY_CURRENT_USER,
+            run_key.as_ptr(),
+            0,
+            KEY_SET_VALUE,
+            &mut clean_hkey,
+        ) == 0
+        {
             let _ = RegDeleteValueW(clean_hkey, legacy_value_name.as_ptr());
             RegCloseKey(clean_hkey);
         }
@@ -2086,7 +2136,14 @@ pub fn sync_launch_at_startup(enabled: bool) -> bool {
         // 先读现状，一致就一个字节都不写
         let mut current: Option<String> = None;
         let mut hkey = std::ptr::null_mut();
-        if RegOpenKeyExW(HKEY_CURRENT_USER, run_key.as_ptr(), 0, KEY_QUERY_VALUE, &mut hkey) == 0 {
+        if RegOpenKeyExW(
+            HKEY_CURRENT_USER,
+            run_key.as_ptr(),
+            0,
+            KEY_QUERY_VALUE,
+            &mut hkey,
+        ) == 0
+        {
             let mut buf = [0u16; 520];
             let mut len = (buf.len() * 2) as u32;
             let status = RegQueryValueExW(
@@ -2135,8 +2192,13 @@ pub fn sync_launch_at_startup(enabled: bool) -> bool {
             }
             StartupSyncAction::Remove => {
                 let mut hkey = std::ptr::null_mut();
-                if RegOpenKeyExW(HKEY_CURRENT_USER, run_key.as_ptr(), 0, KEY_SET_VALUE, &mut hkey)
-                    != 0
+                if RegOpenKeyExW(
+                    HKEY_CURRENT_USER,
+                    run_key.as_ptr(),
+                    0,
+                    KEY_SET_VALUE,
+                    &mut hkey,
+                ) != 0
                 {
                     // 键打不开 = 值也无从谈起，目标状态已达成
                     return true;
@@ -2231,7 +2293,9 @@ impl ElevatedChild {
 
     pub async fn wait(&mut self) -> std::io::Result<std::process::ExitStatus> {
         use std::os::windows::process::ExitStatusExt;
-        use windows_sys::Win32::System::Threading::{GetExitCodeProcess, WaitForSingleObject, INFINITE};
+        use windows_sys::Win32::System::Threading::{
+            GetExitCodeProcess, WaitForSingleObject, INFINITE,
+        };
 
         let handle = self.handle as usize;
         tokio::task::spawn_blocking(move || {
@@ -2338,7 +2402,9 @@ pub fn start_elevated_kernel_runner(
     if success == 0 || info.hProcess.is_null() {
         let err = unsafe { GetLastError() };
         if err == 1223 {
-            return Err(anyhow!("用户在 UAC 授权弹窗中选择了「否」或取消了管理员提权"));
+            return Err(anyhow!(
+                "用户在 UAC 授权弹窗中选择了「否」或取消了管理员提权"
+            ));
         }
         return Err(anyhow!("提权启动无头内核守护进程失败: Win32 错误码 {err}"));
     }
@@ -2399,7 +2465,9 @@ pub fn run_elevated_kernel_supervisor(args: ElevatedKernelArgs) -> Result<()> {
     // 1. 打开父进程 SYNCHRONIZE 句柄。如果父进程已经死掉，直接退出。
     let parent_handle = unsafe { OpenProcess(SYNCHRONIZE, FALSE, args.parent_pid) };
     if parent_handle.is_null() {
-        crate::startup_log("Parent process already exited or cannot be opened. Supervisor exiting.");
+        crate::startup_log(
+            "Parent process already exited or cannot be opened. Supervisor exiting.",
+        );
         return Ok(());
     }
 
@@ -2428,10 +2496,19 @@ pub fn run_elevated_kernel_supervisor(args: ElevatedKernelArgs) -> Result<()> {
     let mut command = std::process::Command::new(&args.executable);
     match args.kernel {
         KernelKind::Mihomo => {
-            command.arg("-d").arg(&args.data_root).arg("-f").arg(&args.config);
+            command
+                .arg("-d")
+                .arg(&args.data_root)
+                .arg("-f")
+                .arg(&args.config);
         }
         KernelKind::SingBox => {
-            command.arg("run").arg("-D").arg(&args.data_root).arg("-c").arg(&args.config);
+            command
+                .arg("run")
+                .arg("-D")
+                .arg(&args.data_root)
+                .arg("-c")
+                .arg(&args.config);
         }
         KernelKind::Xray => {
             command.arg("run").arg("-c").arg(&args.config);
@@ -2440,7 +2517,11 @@ pub fn run_elevated_kernel_supervisor(args: ElevatedKernelArgs) -> Result<()> {
             command.arg("--no-reload").arg(&args.config);
         }
         KernelKind::Meow => {
-            command.arg("-d").arg(&args.data_root).arg("-f").arg(&args.config);
+            command
+                .arg("-d")
+                .arg(&args.data_root)
+                .arg("-f")
+                .arg(&args.config);
         }
         KernelKind::VpCore => {
             command.arg("run").arg("-c").arg(&args.config);
@@ -2485,9 +2566,7 @@ pub fn run_elevated_kernel_supervisor(args: ElevatedKernelArgs) -> Result<()> {
     let child_handle = child.as_raw_handle() as windows_sys::Win32::Foundation::HANDLE;
     let handles = [parent_handle, child_handle];
 
-    let wait_result = unsafe {
-        WaitForMultipleObjects(2, handles.as_ptr(), FALSE, INFINITE)
-    };
+    let wait_result = unsafe { WaitForMultipleObjects(2, handles.as_ptr(), FALSE, INFINITE) };
 
     if wait_result == WAIT_OBJECT_0 {
         // 父进程退出了！主 GUI 崩溃或被强杀
@@ -2586,7 +2665,9 @@ mod startup_sync_e2e {
             }
             let text = String::from_utf8_lossy(&out.stdout);
             text.lines()
-                .find(|line| line.contains(crate::constants::platform::LAUNCH_AT_STARTUP_VALUE_NAME))
+                .find(|line| {
+                    line.contains(crate::constants::platform::LAUNCH_AT_STARTUP_VALUE_NAME)
+                })
                 .and_then(|line| line.split("REG_SZ").nth(1))
                 .map(|rest| rest.trim().to_string())
         }
@@ -2602,9 +2683,6 @@ mod startup_sync_e2e {
             "开启后 Run 键应指向当前 exe（引号包裹），实际 {written:?}"
         );
         assert!(removed, "删除 HKCU Run 键值被拒绝");
-        assert!(
-            read_value().is_none(),
-            "关闭后 Run 键里不应再有 VProxy 值"
-        );
+        assert!(read_value().is_none(), "关闭后 Run 键里不应再有 VProxy 值");
     }
 }

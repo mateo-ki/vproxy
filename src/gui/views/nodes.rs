@@ -2,9 +2,7 @@ use crate::gui::danger_btn;
 use crate::gui::icons::{icon_label, Icon};
 use crate::gui::theme;
 use crate::gui::view_models::nodes_vm::{NodeCardAction, NodesViewModel};
-use crate::gui::widgets::{
-    card_frame, compact_node_card, panel_frame, section_title, sort_label,
-};
+use crate::gui::widgets::{card_frame, compact_node_card, panel_frame, section_title, sort_label};
 use crate::gui::VpnApp;
 use crate::speedtest::SpeedtestIntensity;
 use eframe::egui::{self, Color32, CornerRadius, Frame, Margin, RichText, Sense, Stroke, Ui};
@@ -51,7 +49,11 @@ impl VpnApp {
                 let mut next_lat = None;
 
                 ui.horizontal(|ui| {
-                    crate::gui::widgets::render_protocol_donut_chart(ui, &s.protocol_stats, s.node_count);
+                    crate::gui::widgets::render_protocol_donut_chart(
+                        ui,
+                        &s.protocol_stats,
+                        s.node_count,
+                    );
                     ui.add_space(8.0);
 
                     ui.vertical(|ui| {
@@ -64,20 +66,36 @@ impl VpnApp {
                         ui.add_space(3.0);
 
                         let lat_stats = crate::gui::widgets::LatencySpectrumStats::from_latencies(
-                            self.nodes.iter().map(|n| n.latency_ms)
+                            self.nodes.iter().map(|n| n.latency_ms),
                         );
                         crate::gui::widgets::render_latency_spectrum(ui, &lat_stats);
                         ui.add_space(4.0);
 
                         ui.horizontal_wrapped(|ui| {
-                            let is_all = self.protocol_filter.is_empty() || self.protocol_filter == "all";
-                            if crate::gui::widgets::protocol_stat_chip(ui, "All", s.node_count, is_all).clicked() {
+                            let is_all =
+                                self.protocol_filter.is_empty() || self.protocol_filter == "all";
+                            if crate::gui::widgets::protocol_stat_chip(
+                                ui,
+                                "All",
+                                s.node_count,
+                                is_all,
+                            )
+                            .clicked()
+                            {
                                 next_proto = Some("".to_string());
                             }
 
                             for p in &s.protocol_stats {
-                                let is_active = self.protocol_filter.eq_ignore_ascii_case(&p.protocol);
-                                if crate::gui::widgets::protocol_stat_chip(ui, &p.protocol, p.count, is_active).clicked() {
+                                let is_active =
+                                    self.protocol_filter.eq_ignore_ascii_case(&p.protocol);
+                                if crate::gui::widgets::protocol_stat_chip(
+                                    ui,
+                                    &p.protocol,
+                                    p.count,
+                                    is_active,
+                                )
+                                .clicked()
+                                {
                                     if is_active {
                                         next_proto = Some("".to_string());
                                     } else {
@@ -88,26 +106,55 @@ impl VpnApp {
 
                             ui.separator();
 
-                            let is_all_lat = (self.latency_filter.is_empty() || self.latency_filter == "all") && !self.only_available_nodes;
+                            let is_all_lat = (self.latency_filter.is_empty()
+                                || self.latency_filter == "all")
+                                && !self.only_available_nodes;
                             let (color_all, stroke_all) = if is_all_lat {
                                 (theme::accent_bg(), Stroke::new(1.0_f32, theme::accent()))
                             } else {
-                                (theme::sidebar(), Stroke::new(1.0_f32, theme::border_subtle()))
+                                (
+                                    theme::sidebar(),
+                                    Stroke::new(1.0_f32, theme::border_subtle()),
+                                )
                             };
-                            if ui.add(egui::Button::new(RichText::new("全部状态").small().strong()).fill(color_all).stroke(stroke_all).corner_radius(CornerRadius::same(10))).clicked() {
+                            if ui
+                                .add(
+                                    egui::Button::new(RichText::new("全部状态").small().strong())
+                                        .fill(color_all)
+                                        .stroke(stroke_all)
+                                        .corner_radius(CornerRadius::same(10)),
+                                )
+                                .clicked()
+                            {
                                 next_lat = Some(("all".to_string(), false));
                             }
 
-                            let is_alive = self.only_available_nodes || self.latency_filter == "alive";
+                            let is_alive =
+                                self.only_available_nodes || self.latency_filter == "alive";
                             let (color_alive, stroke_alive) = if is_alive {
                                 (theme::accent_bg(), Stroke::new(1.0_f32, theme::accent()))
                             } else {
-                                (theme::sidebar(), Stroke::new(1.0_f32, theme::border_subtle()))
+                                (
+                                    theme::sidebar(),
+                                    Stroke::new(1.0_f32, theme::border_subtle()),
+                                )
                             };
                             let label_alive = format!("● {tr_available_only}");
-                            if ui.add(egui::Button::new(RichText::new(label_alive).small().strong()).fill(color_alive).stroke(stroke_alive).corner_radius(CornerRadius::same(10))).clicked() {
+                            if ui
+                                .add(
+                                    egui::Button::new(RichText::new(label_alive).small().strong())
+                                        .fill(color_alive)
+                                        .stroke(stroke_alive)
+                                        .corner_radius(CornerRadius::same(10)),
+                                )
+                                .clicked()
+                            {
                                 let new_only = !self.only_available_nodes;
-                                let new_filter = if new_only { "alive".to_string() } else { "all".to_string() };
+                                let new_filter = if new_only {
+                                    "alive".to_string()
+                                } else {
+                                    "all".to_string()
+                                };
                                 next_lat = Some((new_filter, new_only));
                             }
 
@@ -115,11 +162,26 @@ impl VpnApp {
                             let (color_untest, stroke_untest) = if is_untested {
                                 (theme::accent_bg(), Stroke::new(1.0_f32, theme::accent()))
                             } else {
-                                (theme::sidebar(), Stroke::new(1.0_f32, theme::border_subtle()))
+                                (
+                                    theme::sidebar(),
+                                    Stroke::new(1.0_f32, theme::border_subtle()),
+                                )
                             };
                             let label_untest = format!("⚪ {tr_untested}");
-                            if ui.add(egui::Button::new(RichText::new(label_untest).small().strong()).fill(color_untest).stroke(stroke_untest).corner_radius(CornerRadius::same(10))).clicked() {
-                                let new_filter = if is_untested { "all".to_string() } else { "untested".to_string() };
+                            if ui
+                                .add(
+                                    egui::Button::new(RichText::new(label_untest).small().strong())
+                                        .fill(color_untest)
+                                        .stroke(stroke_untest)
+                                        .corner_radius(CornerRadius::same(10)),
+                                )
+                                .clicked()
+                            {
+                                let new_filter = if is_untested {
+                                    "all".to_string()
+                                } else {
+                                    "untested".to_string()
+                                };
                                 next_lat = Some((new_filter, false));
                             }
                         });
@@ -191,7 +253,12 @@ impl VpnApp {
                 // 第二行：地区快速筛选胶囊行 + 排序下拉（紧随「其它」后面）
                 ui.horizontal_wrapped(|ui| {
                     ui.spacing_mut().item_spacing.x = 8.0;
-                    ui.label(RichText::new("地区:").small().strong().color(theme::muted()));
+                    ui.label(
+                        RichText::new("地区:")
+                            .small()
+                            .strong()
+                            .color(theme::muted()),
+                    );
                     for (val, lbl) in [
                         ("all", "全部"),
                         ("HK", "🇭🇰 香港"),
@@ -203,12 +270,29 @@ impl VpnApp {
                         ("OTHER", "🌐 其它"),
                     ] {
                         let is_active = self.region_filter == val;
-                        let text_color = if is_active { theme::accent_strong() } else { theme::text_secondary() };
+                        let text_color = if is_active {
+                            theme::accent_strong()
+                        } else {
+                            theme::text_secondary()
+                        };
                         let pill = ui.add(
-                            egui::Button::new(RichText::new(lbl).small().strong().color(text_color))
-                                .fill(if is_active { theme::accent_bg() } else { theme::page_bg() })
-                                .stroke(Stroke::new(1.0_f32, if is_active { theme::accent() } else { theme::border_subtle() }))
-                                .corner_radius(CornerRadius::same(12)),
+                            egui::Button::new(
+                                RichText::new(lbl).small().strong().color(text_color),
+                            )
+                            .fill(if is_active {
+                                theme::accent_bg()
+                            } else {
+                                theme::page_bg()
+                            })
+                            .stroke(Stroke::new(
+                                1.0_f32,
+                                if is_active {
+                                    theme::accent()
+                                } else {
+                                    theme::border_subtle()
+                                },
+                            ))
+                            .corner_radius(CornerRadius::same(12)),
                         );
                         if pill.clicked() && !is_active {
                             self.region_filter = val.to_string();
@@ -233,7 +317,10 @@ impl VpnApp {
                                 ("updated", tr_upd),
                                 ("name", tr_nam),
                             ] {
-                                if ui.selectable_value(&mut self.sort_by, val.into(), lbl).changed() {
+                                if ui
+                                    .selectable_value(&mut self.sort_by, val.into(), lbl)
+                                    .changed()
+                                {
                                     filter_changed = true;
                                 }
                             }
@@ -305,7 +392,6 @@ impl VpnApp {
         if let Some(action) = action {
             self.handle_node_card_action(action);
         }
-
     }
 
     pub(crate) fn render_nodes_toolbar_search_and_filters(
@@ -325,7 +411,8 @@ impl VpnApp {
                 .hint_text(tr_search_hint),
         );
         crate::gui::widgets::note_text_field(ui, &search_field);
-        let enter_pressed = search_field.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+        let enter_pressed =
+            search_field.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
         let lost_focus = search_field.lost_focus();
         if enter_pressed || (lost_focus && self.keyword != self.keyword_applied) {
             self.keyword_applied = self.keyword.clone();
@@ -346,11 +433,18 @@ impl VpnApp {
         ui.separator();
 
         // 订阅源下拉筛选（支持下拉模糊搜索）
-        ui.label(RichText::new(format!("{tr_sources_label}:")).small().color(theme::muted()));
+        ui.label(
+            RichText::new(format!("{tr_sources_label}:"))
+                .small()
+                .color(theme::muted()),
+        );
         let source_label = if self.source_filter.is_empty() {
             tr_all_sources.to_string()
         } else if self.source_filter == crate::db::UNGROUPED_SOURCE_ID {
-            let ungrouped_name = self.sources.iter().find(|s| s.id == crate::db::UNGROUPED_SOURCE_ID)
+            let ungrouped_name = self
+                .sources
+                .iter()
+                .find(|s| s.id == crate::db::UNGROUPED_SOURCE_ID)
                 .map(|s| s.name.as_str())
                 .unwrap_or("导入节点");
             if ungrouped_name == "导入节点" {
@@ -361,7 +455,10 @@ impl VpnApp {
         } else if let Some(s) = self.sources.iter().find(|s| s.id == self.source_filter) {
             let name = &s.name;
             if name.chars().count() > 8 {
-                format!("{tr_sources_label}: {}…", name.chars().take(8).collect::<String>())
+                format!(
+                    "{tr_sources_label}: {}…",
+                    name.chars().take(8).collect::<String>()
+                )
             } else {
                 format!("{tr_sources_label}: {name}")
             }
@@ -399,7 +496,10 @@ impl VpnApp {
                     .max_height(220.0)
                     .show(ui, |ui| {
                         let q = self.source_search_query.trim().to_lowercase();
-                        if ui.selectable_label(self.source_filter.is_empty(), tr_all_sources).clicked() {
+                        if ui
+                            .selectable_label(self.source_filter.is_empty(), tr_all_sources)
+                            .clicked()
+                        {
                             if !self.source_filter.is_empty() {
                                 self.source_filter.clear();
                                 *filter_changed = true;
@@ -407,8 +507,12 @@ impl VpnApp {
                             ui.close();
                         }
 
-                        let ungrouped_src = self.sources.iter().find(|s| s.id == crate::db::UNGROUPED_SOURCE_ID);
-                        let ungrouped_name = ungrouped_src.map(|s| s.name.as_str()).unwrap_or("导入节点");
+                        let ungrouped_src = self
+                            .sources
+                            .iter()
+                            .find(|s| s.id == crate::db::UNGROUPED_SOURCE_ID);
+                        let ungrouped_name =
+                            ungrouped_src.map(|s| s.name.as_str()).unwrap_or("导入节点");
                         let ungrouped_count = ungrouped_src.map(|s| s.last_node_count).unwrap_or(0);
                         let match_ungrouped = q.is_empty()
                             || ungrouped_name.to_lowercase().contains(&q)
@@ -439,7 +543,12 @@ impl VpnApp {
                             }
                             if !q.is_empty() {
                                 let match_name = s.name.to_lowercase().contains(&q);
-                                let match_remark = s.remark.as_deref().unwrap_or("").to_lowercase().contains(&q);
+                                let match_remark = s
+                                    .remark
+                                    .as_deref()
+                                    .unwrap_or("")
+                                    .to_lowercase()
+                                    .contains(&q);
                                 let match_url = s.url_template.to_lowercase().contains(&q);
                                 if !match_name && !match_remark && !match_url {
                                     continue;
@@ -458,7 +567,11 @@ impl VpnApp {
                         }
 
                         if matched == 0 && !q.is_empty() {
-                            ui.label(RichText::new(self.tr("无匹配订阅源")).small().color(theme::muted()));
+                            ui.label(
+                                RichText::new(self.tr("无匹配订阅源"))
+                                    .small()
+                                    .color(theme::muted()),
+                            );
                         }
                     });
             });
@@ -524,8 +637,19 @@ impl VpnApp {
                     }
                     ui.separator();
                     ui.label(RichText::new("测速强度设置:").small().color(theme::muted()));
-                    for intensity in [SpeedtestIntensity::Fast, SpeedtestIntensity::Standard, SpeedtestIntensity::Deep] {
-                        if ui.selectable_value(&mut self.speedtest_intensity, intensity, intensity.label()).changed() {
+                    for intensity in [
+                        SpeedtestIntensity::Fast,
+                        SpeedtestIntensity::Standard,
+                        SpeedtestIntensity::Deep,
+                    ] {
+                        if ui
+                            .selectable_value(
+                                &mut self.speedtest_intensity,
+                                intensity,
+                                intensity.label(),
+                            )
+                            .changed()
+                        {
                             ui.close();
                         }
                     }
@@ -614,11 +738,17 @@ impl VpnApp {
         }
 
         let tr_modal_title = self.tr("导入本地 YAML / 配置文件").to_string();
-        let tr_modal_subtitle = self.tr("支持 Clash / Mihomo YAML 配置文件，可直接输入路径或将文件拖拽至窗口。").to_string();
+        let tr_modal_subtitle = self
+            .tr("支持 Clash / Mihomo YAML 配置文件，可直接输入路径或将文件拖拽至窗口。")
+            .to_string();
         let tr_path_label = self.tr("配置文件绝对路径：").to_string();
-        let tr_path_hint = self.tr("例如 /etc/clash/config.yaml 或 D:\\config.yaml").to_string();
+        let tr_path_hint = self
+            .tr("例如 /etc/clash/config.yaml 或 D:\\config.yaml")
+            .to_string();
         let tr_clear_path = self.tr("清空路径").to_string();
-        let tr_reg_source = self.tr("注册为本地订阅源（便于在节点池中按来源筛选与管理）").to_string();
+        let tr_reg_source = self
+            .tr("注册为本地订阅源（便于在节点池中按来源筛选与管理）")
+            .to_string();
         let tr_source_name_label = format!("{}:", self.tr("订阅源名称"));
         let tr_source_name_hint = self.tr("默认取文件名").to_string();
         let tr_cancel = self.tr("取消").to_string();
@@ -688,7 +818,11 @@ impl VpnApp {
             if self.import_yaml_as_source {
                 ui.add_space(4.0);
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new(&tr_source_name_label).small().color(theme::muted()));
+                    ui.label(
+                        RichText::new(&tr_source_name_label)
+                            .small()
+                            .color(theme::muted()),
+                    );
                     ui.add(
                         egui::TextEdit::singleline(&mut self.import_yaml_source_name)
                             .desired_width(220.0)
@@ -760,15 +894,13 @@ where
                             let Some(node) = row.get(column_index) else {
                                 continue;
                             };
-                            let is_active =
-                                selected_proxy_node_id == Some(&node.id);
-                            let is_focused =
-                                focused_node_id == Some(&node.id);
-                            let is_switching =
-                                switching_node_id == Some(&node.id);
+                            let is_active = selected_proxy_node_id == Some(&node.id);
+                            let is_focused = focused_node_id == Some(&node.id);
+                            let is_switching = switching_node_id == Some(&node.id);
                             let source_name = source_resolver(node.source_id.as_deref());
                             let card_tip = {
-                                let mut tip = format!("{}\n{}:{}", node.name, node.server, node.port);
+                                let mut tip =
+                                    format!("{}\n{}:{}", node.name, node.server, node.port);
                                 if let Some(src) = source_name {
                                     if !src.is_empty() {
                                         tip.push_str(&format!("\n订阅源: {src}"));
@@ -784,9 +916,15 @@ where
                                 }
                                 tip
                             };
-                            let response =
-                                compact_node_card(column_ui, node, source_name, is_active, is_focused, is_switching)
-                                    .on_hover_text(card_tip);
+                            let response = compact_node_card(
+                                column_ui,
+                                node,
+                                source_name,
+                                is_active,
+                                is_focused,
+                                is_switching,
+                            )
+                            .on_hover_text(card_tip);
                             let clicked = response.clicked();
                             let double_clicked = response.double_clicked();
                             response.context_menu(|ui| {
@@ -799,7 +937,11 @@ where
                                         ui.close();
                                     }
                                 } else {
-                                    ui.label(RichText::new("✓ 当前活动节点").small().color(theme::accent_strong()));
+                                    ui.label(
+                                        RichText::new("✓ 当前活动节点")
+                                            .small()
+                                            .color(theme::accent_strong()),
+                                    );
                                 }
                                 ui.separator();
                                 if ui
@@ -813,7 +955,8 @@ where
                                     .add_enabled(!is_busy, egui::Button::new("📥 下载测速"))
                                     .clicked()
                                 {
-                                    card_action = Some(NodeCardAction::SpeedtestDownload(node.id.clone()));
+                                    card_action =
+                                        Some(NodeCardAction::SpeedtestDownload(node.id.clone()));
                                     ui.close();
                                 }
                                 if ui.button("ℹ️ 查看详情").clicked() {
@@ -821,7 +964,8 @@ where
                                     ui.close();
                                 }
                                 if ui.button("🛡️ IP 检测").clicked() {
-                                    card_action = Some(NodeCardAction::CheckIpRisk(node.id.clone()));
+                                    card_action =
+                                        Some(NodeCardAction::CheckIpRisk(node.id.clone()));
                                     ui.close();
                                 }
                                 if ui.button("🧭 路由追踪").clicked() {
@@ -855,7 +999,6 @@ where
 }
 
 impl VpnApp {
-
     pub(crate) fn ui_detail(&mut self, ctx: &egui::Context) {
         if !self.show_detail {
             return;

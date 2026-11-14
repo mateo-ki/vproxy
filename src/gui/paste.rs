@@ -84,7 +84,11 @@ fn first_url(text: &str) -> Option<String> {
         // 裸地址：必须有主机 + 路径 + 主机带点，才敢当订阅地址；否则一段英文句子会被误判。
         if !token.contains("://") {
             if let Some((host, _)) = token.split_once('/') {
-                if host.contains('.') && !host.starts_with('.') && !host.ends_with('.') && !host.contains(',') {
+                if host.contains('.')
+                    && !host.starts_with('.')
+                    && !host.ends_with('.')
+                    && !host.contains(',')
+                {
                     return Some(format!("https://{token}"));
                 }
             }
@@ -149,9 +153,7 @@ pub fn recognize(text: &str) -> Option<Detected> {
             });
         }
         if !rules.is_empty() {
-            return Some(Detected::Rules {
-                count: rules.len(),
-            });
+            return Some(Detected::Rules { count: rules.len() });
         }
     }
     // 1) 纯分流规则文本（如多行 DOMAIN-SUFFIX,google.com,PROXY）
@@ -176,7 +178,12 @@ pub fn recognize(text: &str) -> Option<Detected> {
             .filter(|s| s.len() < file_name.len())
             .unwrap_or("")
             .to_ascii_lowercase();
-        let is_config_ext = ext == "yaml" || ext == "yml" || ext == "txt" || ext == "json" || ext == "conf" || ext == "list";
+        let is_config_ext = ext == "yaml"
+            || ext == "yml"
+            || ext == "txt"
+            || ext == "json"
+            || ext == "conf"
+            || ext == "list";
         let file_exists = p.is_file();
 
         if file_exists || is_config_ext {
@@ -230,7 +237,8 @@ pub fn is_duplicate(
     existing: impl IntoIterator<Item = (String, String)>,
 ) -> Option<String> {
     let target = url.trim();
-    let target_clean = crate::collector::local_file_path(target).unwrap_or_else(|| target.to_string());
+    let target_clean =
+        crate::collector::local_file_path(target).unwrap_or_else(|| target.to_string());
     existing
         .into_iter()
         .find(|(_, template)| {
@@ -676,7 +684,10 @@ mod tests {
         let intake_res = intake("/Users/loukas/Downloads/clash.yaml", &[], true).unwrap();
         assert_eq!(
             intake_res.create,
-            Some(("clash.yaml".into(), "/Users/loukas/Downloads/clash.yaml".into()))
+            Some((
+                "clash.yaml".into(),
+                "/Users/loukas/Downloads/clash.yaml".into()
+            ))
         );
         assert!(matches!(intake_res.outcome, PasteOutcome::Added { .. }));
         let (_, _, title, body) = describe(&intake_res.outcome);
@@ -712,10 +723,7 @@ rules:
 "#;
         assert_eq!(
             recognize(clash_yaml),
-            Some(Detected::ClashConfig {
-                nodes: 1,
-                rules: 3,
-            })
+            Some(Detected::ClashConfig { nodes: 1, rules: 3 })
         );
 
         let rules_only = r#"
@@ -724,10 +732,6 @@ rules:
 "IP-CIDR,192.168.0.0/16,DIRECT",
 "GEOIP,CN,DIRECT"
 "#;
-        assert_eq!(
-            recognize(rules_only),
-            Some(Detected::Rules { count: 4 })
-        );
+        assert_eq!(recognize(rules_only), Some(Detected::Rules { count: 4 }));
     }
 }
-

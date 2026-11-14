@@ -340,10 +340,10 @@ fn run_tray_loop(
     };
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         AppendMenuW, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu, DestroyWindow,
-        DispatchMessageW, GetCursorPos, GetMessageW, GetSystemMetrics, HICON, IMAGE_ICON,
-        LoadIconW, LoadImageW, LR_DEFAULTCOLOR, LR_SHARED, PostMessageW, PostQuitMessage,
-        RegisterClassW, RegisterWindowMessageW, SetForegroundWindow, SM_CXSMICON, SM_CYSMICON,
-        TrackPopupMenu, TranslateMessage, IDI_APPLICATION, MF_GRAYED, MF_SEPARATOR, MF_STRING, MSG,
+        DispatchMessageW, GetCursorPos, GetMessageW, GetSystemMetrics, LoadIconW, LoadImageW,
+        PostMessageW, PostQuitMessage, RegisterClassW, RegisterWindowMessageW, SetForegroundWindow,
+        TrackPopupMenu, TranslateMessage, HICON, IDI_APPLICATION, IMAGE_ICON, LR_DEFAULTCOLOR,
+        LR_SHARED, MF_GRAYED, MF_SEPARATOR, MF_STRING, MSG, SM_CXSMICON, SM_CYSMICON,
         TPM_RETURNCMD, TPM_RIGHTBUTTON, WM_CLOSE, WM_DESTROY, WM_LBUTTONDBLCLK, WM_LBUTTONUP,
         WM_RBUTTONUP, WM_USER, WNDCLASSW, WS_OVERLAPPED,
     };

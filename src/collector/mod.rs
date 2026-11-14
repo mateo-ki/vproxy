@@ -288,13 +288,7 @@ impl Collector {
             if let Some(ui) = userinfo {
                 let _ = self
                     .db
-                    .update_source_userinfo(
-                        &source.id,
-                        ui.upload,
-                        ui.download,
-                        ui.total,
-                        ui.expire,
-                    )
+                    .update_source_userinfo(&source.id, ui.upload, ui.download, ui.total, ui.expire)
                     .await;
             }
             let via_note = match via.as_deref() {
@@ -333,31 +327,33 @@ impl Collector {
             let parse_started = Instant::now();
             let source_id = source.id.clone();
             let parse_permit = PARSE_LIMIT.clone().acquire_owned().await;
-            let (nodes, extracted_rules, raw_rules_yaml, raw_groups_yaml) = match tokio::task::spawn_blocking(move || {
-                let _permit = parse_permit;
-                let body = String::from_utf8_lossy(&body);
-                let (rules_yaml, groups_yaml) = crate::parser::extract_subscription_rules_and_groups(&body);
-                let rules = crate::parser::extract_subscription_rules(&body);
-                let nodes = parse_subscription(&body, Some(&source_id));
-                (nodes, rules, rules_yaml, groups_yaml)
-            })
-            .await
-            {
-                Ok(tuple) => tuple,
-                Err(error) => {
-                    let message = format!("parse task failed: {error}");
-                    self.mark_source_fetched(&source.id, &message, 0).await;
-                    return FetchResult {
-                        source_id: source.id.clone(),
-                        source_name: source.name.clone(),
-                        resolved_url,
-                        success: false,
-                        message,
-                        node_count: 0,
-                        extracted_rules: Vec::new(),
-                    };
-                }
-            };
+            let (nodes, extracted_rules, raw_rules_yaml, raw_groups_yaml) =
+                match tokio::task::spawn_blocking(move || {
+                    let _permit = parse_permit;
+                    let body = String::from_utf8_lossy(&body);
+                    let (rules_yaml, groups_yaml) =
+                        crate::parser::extract_subscription_rules_and_groups(&body);
+                    let rules = crate::parser::extract_subscription_rules(&body);
+                    let nodes = parse_subscription(&body, Some(&source_id));
+                    (nodes, rules, rules_yaml, groups_yaml)
+                })
+                .await
+                {
+                    Ok(tuple) => tuple,
+                    Err(error) => {
+                        let message = format!("parse task failed: {error}");
+                        self.mark_source_fetched(&source.id, &message, 0).await;
+                        return FetchResult {
+                            source_id: source.id.clone(),
+                            source_name: source.name.clone(),
+                            resolved_url,
+                            success: false,
+                            message,
+                            node_count: 0,
+                            extracted_rules: Vec::new(),
+                        };
+                    }
+                };
             self.tasks.timings(
                 task_id,
                 &source.id,
@@ -480,7 +476,13 @@ impl Collector {
                 .max(Duration::from_secs(15))
                 .min(budget);
             return self
-                .download_candidate(source, &candidates[0], task_id, budget, single_header_budget)
+                .download_candidate(
+                    source,
+                    &candidates[0],
+                    task_id,
+                    budget,
+                    single_header_budget,
+                )
                 .await;
         }
         self.race_candidates(source, &candidates, task_id, budget, header_budget)
@@ -1224,23 +1226,24 @@ pub fn local_file_path(url: &str) -> Option<String> {
     };
 
     // 3. 处理 ~ 家目录扩展（例如 macOS / Linux 常见的 ~/Downloads/clash.yaml）
-    let path_str = if unescaped == "~" || unescaped.starts_with("~/") || unescaped.starts_with("~\\") {
-        let home = std::env::var_os("HOME")
-            .or_else(|| std::env::var_os("USERPROFILE"))
-            .map(std::path::PathBuf::from);
-        if let Some(home_path) = home {
-            if unescaped == "~" {
-                home_path.to_string_lossy().to_string()
+    let path_str =
+        if unescaped == "~" || unescaped.starts_with("~/") || unescaped.starts_with("~\\") {
+            let home = std::env::var_os("HOME")
+                .or_else(|| std::env::var_os("USERPROFILE"))
+                .map(std::path::PathBuf::from);
+            if let Some(home_path) = home {
+                if unescaped == "~" {
+                    home_path.to_string_lossy().to_string()
+                } else {
+                    let sub = &unescaped[2..];
+                    home_path.join(sub).to_string_lossy().to_string()
+                }
             } else {
-                let sub = &unescaped[2..];
-                home_path.join(sub).to_string_lossy().to_string()
+                unescaped
             }
         } else {
             unescaped
-        }
-    } else {
-        unescaped
-    };
+        };
 
     // 4. 判定是否为合法的本地文件系统路径
     let b = path_str.as_bytes();
@@ -1387,7 +1390,8 @@ mod tests {
 
     #[test]
     fn test_parse_subscription_userinfo() {
-        let header = "upload=1073741824; download=2147483648; total=107374182400; expire=1700000000";
+        let header =
+            "upload=1073741824; download=2147483648; total=107374182400; expire=1700000000";
         let info = parse_subscription_userinfo(header);
         assert_eq!(info.upload, Some(1073741824));
         assert_eq!(info.download, Some(2147483648));
@@ -1476,7 +1480,9 @@ mod tests {
             let std_listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
             std_listener.local_addr().unwrap().port()
         };
-        TcpListener::bind(format!("127.0.0.1:{port}")).await.unwrap()
+        TcpListener::bind(format!("127.0.0.1:{port}"))
+            .await
+            .unwrap()
     }
 
     #[tokio::test]

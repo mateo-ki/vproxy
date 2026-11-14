@@ -7,7 +7,9 @@ use crate::gui::widgets::{format_bytes, format_speed};
 use crate::gui::VpnApp;
 use crate::kernel::KernelPreference;
 use crate::proxy::{ProxyMode, ProxyState, RoutingMode};
-use eframe::egui::{self, Color32, CornerRadius, Frame, Margin, Rect, RichText, Sense, Stroke, Ui, Vec2};
+use eframe::egui::{
+    self, Color32, CornerRadius, Frame, Margin, Rect, RichText, Sense, Stroke, Ui, Vec2,
+};
 use std::collections::VecDeque;
 
 // ---------------------------------------------------------------------------
@@ -235,7 +237,12 @@ fn dash_svc_card(
 
     let painter = ui.painter();
     painter.rect_filled(rect, CornerRadius::same(11), fill);
-    painter.rect_stroke(rect, CornerRadius::same(11), stroke, egui::StrokeKind::Inside);
+    painter.rect_stroke(
+        rect,
+        CornerRadius::same(11),
+        stroke,
+        egui::StrokeKind::Inside,
+    );
 
     let inner_rect = rect.shrink2(Vec2::new(6.0, 1.5));
     let dot_center = egui::pos2(inner_rect.left() + 3.0, inner_rect.center().y);
@@ -256,11 +263,8 @@ fn dash_svc_card(
     };
 
     // 先量右侧状态文本；名字可用空间不足 40px 时干脆不画状态，把空间全让给名字
-    let status_galley = painter.layout_no_wrap(
-        status_text.to_string(),
-        status_font.clone(),
-        status_color,
-    );
+    let status_galley =
+        painter.layout_no_wrap(status_text.to_string(), status_font.clone(), status_color);
     let status_w = status_galley.rect.width();
     let name_max_with_status = inner_rect.right() - 6.0 - name_x - status_w - 6.0;
     let show_status = name_max_with_status >= 40.0;
@@ -273,10 +277,17 @@ fn dash_svc_card(
     // 名称强制单行 + 省略号，永不折行重叠
     let name_text = svc_truncate(painter, name, name_font.clone(), name_max);
     let is_truncated = name_text != name || !show_status;
-    let name_color = if selected { apple_blue() } else { theme::text_primary() };
+    let name_color = if selected {
+        apple_blue()
+    } else {
+        theme::text_primary()
+    };
     let name_galley = painter.layout_no_wrap(name_text, name_font, name_color);
     painter.galley(
-        egui::pos2(name_x, inner_rect.center().y - name_galley.rect.height() / 2.0),
+        egui::pos2(
+            name_x,
+            inner_rect.center().y - name_galley.rect.height() / 2.0,
+        ),
         name_galley,
         name_color,
     );
@@ -309,7 +320,11 @@ fn dash_switch(ui: &mut Ui, on: bool) -> egui::Response {
         Color32::from_rgb(214, 218, 225).gamma_multiply(if theme::is_light() { 1.0 } else { 0.35 })
     };
     let knob_r = 8.0_f32;
-    let knob_x = if on { rect.right() - 3.0 - knob_r } else { rect.left() + 3.0 + knob_r };
+    let knob_x = if on {
+        rect.right() - 3.0 - knob_r
+    } else {
+        rect.left() + 3.0 + knob_r
+    };
     let center = egui::pos2(knob_x, rect.center().y);
     ui.painter().rect_filled(rect, CornerRadius::same(11), bg);
     ui.painter().circle_filled(center, knob_r, Color32::WHITE);
@@ -318,7 +333,11 @@ fn dash_switch(ui: &mut Ui, on: bool) -> egui::Response {
 
 /// 紧凑型 iOS 风格开关（38x16，加长轨道，高度紧凑），与系统代理开关同款外观。
 fn dash_switch_compact(ui: &mut Ui, on: bool, enabled: bool) -> egui::Response {
-    let sense = if enabled { Sense::click() } else { Sense::hover() };
+    let sense = if enabled {
+        Sense::click()
+    } else {
+        Sense::hover()
+    };
     let (rect, resp) = ui.allocate_exact_size(Vec2::new(38.0, 16.0), sense);
     let bg = if !enabled {
         Color32::from_rgb(214, 218, 225).gamma_multiply(if theme::is_light() { 0.45 } else { 0.18 })
@@ -328,13 +347,21 @@ fn dash_switch_compact(ui: &mut Ui, on: bool, enabled: bool) -> egui::Response {
         Color32::from_rgb(214, 218, 225).gamma_multiply(if theme::is_light() { 1.0 } else { 0.35 })
     };
     let knob_r = 5.8_f32;
-    let knob_x = if on && enabled { rect.right() - 2.2 - knob_r } else { rect.left() + 2.2 + knob_r };
+    let knob_x = if on && enabled {
+        rect.right() - 2.2 - knob_r
+    } else {
+        rect.left() + 2.2 + knob_r
+    };
     let center = egui::pos2(knob_x, rect.center().y);
     ui.painter().rect_filled(rect, CornerRadius::same(8), bg);
     ui.painter().circle_filled(
         center,
         knob_r,
-        if enabled { Color32::WHITE } else { Color32::from_gray(175) },
+        if enabled {
+            Color32::WHITE
+        } else {
+            Color32::from_gray(175)
+        },
     );
     if enabled {
         resp.on_hover_cursor(egui::CursorIcon::PointingHand)
@@ -357,10 +384,7 @@ fn dash_bottom_proxy_item(
 ) -> Option<egui::Response> {
     let mut icon_clicked_resp = None;
     // 画框式精确外框：外框宽严格 = w + 28（内容不再撑宽卡片）
-    let outer = Rect::from_min_size(
-        ui.cursor().min,
-        Vec2::new(w + 28.0, h + 20.0),
-    );
+    let outer = Rect::from_min_size(ui.cursor().min, Vec2::new(w + 28.0, h + 20.0));
     dash_card_at(ui, outer);
     // 画框不推进 cursor：显式把光标拨到卡右侧，行内下一元素从这继续
     ui.advance_cursor_after_rect(outer);
@@ -368,89 +392,92 @@ fn dash_bottom_proxy_item(
     ui.scope_builder(egui::UiBuilder::new().max_rect(band), |ui| {
         ui.set_clip_rect(ui.clip_rect().intersect(band));
         ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                // 内部横向间距清零（宽度预算按 icon 34 + 显式 8 + 文字 + 右侧 52 精确计算，
-                // 默认 10px 间距会让每张卡实际渲染比预算宽 30px，把整行顶出屏幕）
-                ui.spacing_mut().item_spacing.x = 0.0;
-                // 图标圆角方块（窄卡自动隐藏，给标题腾位置）
-                let show_icon = w >= 150.0;
-                if show_icon {
-                    let sense = if can_open_drawer { Sense::click() } else { Sense::hover() };
-                    let (icon_rect, icon_resp) = ui.allocate_exact_size(Vec2::splat(32.0), sense);
-                    let is_hovered = can_open_drawer && icon_resp.hovered();
-                    let icon_bg = if theme::is_light() {
-                        if is_hovered {
-                            icon_color.gamma_multiply(0.22)
-                        } else {
-                            icon_color.gamma_multiply(0.12)
-                        }
-                    } else if is_hovered {
-                        theme::accent_bg()
-                    } else {
-                        theme::sidebar()
-                    };
-                    ui.painter().rect_filled(icon_rect, CornerRadius::same(9), icon_bg);
-                    draw_icon(ui.painter(), icon_rect.shrink(8.0), icon, icon_color);
-                    if can_open_drawer {
-                        let icon_resp = icon_resp
-                            .on_hover_cursor(egui::CursorIcon::PointingHand)
-                            .on_hover_text("点击打开网络设置抽屉（DNS 协议与 TUN 虚拟网卡配置）");
-                        if is_hovered {
-                            ui.painter().rect_stroke(
-                                icon_rect,
-                                CornerRadius::same(9),
-                                Stroke::new(1.2_f32, icon_color),
-                                egui::StrokeKind::Inside,
-                            );
-                        }
-                        icon_clicked_resp = Some(icon_resp);
-                    }
-                    ui.add_space(8.0);
-                }
-
-                // 文字列（宽度受控并截断）：整块文字用 painter 精确垂直居中绘制
-                let painter = ui.painter().clone();
-                let text_w = if show_icon {
-                    (w - 32.0 - 8.0 - 52.0).max(40.0)
+            // 内部横向间距清零（宽度预算按 icon 34 + 显式 8 + 文字 + 右侧 52 精确计算，
+            // 默认 10px 间距会让每张卡实际渲染比预算宽 30px，把整行顶出屏幕）
+            ui.spacing_mut().item_spacing.x = 0.0;
+            // 图标圆角方块（窄卡自动隐藏，给标题腾位置）
+            let show_icon = w >= 150.0;
+            if show_icon {
+                let sense = if can_open_drawer {
+                    Sense::click()
                 } else {
-                    (w - 44.0).max(40.0)
+                    Sense::hover()
                 };
-                let (text_rect, text_resp) =
-                    ui.allocate_exact_size(Vec2::new(text_w, h), Sense::hover());
-                let title_font = egui::FontId::proportional(if show_icon { 12.5 } else { 10.5 });
-                let sub_font = egui::FontId::proportional(10.5);
-                let title_text = svc_truncate(&painter, title, title_font.clone(), text_w);
-                let sub_text = svc_truncate(&painter, sub, sub_font.clone(), text_w);
-                let is_truncated = title_text != title || sub_text != sub;
-                let title_galley = painter.layout_no_wrap(title_text, title_font, theme::text_primary());
-                let sub_galley = painter.layout_no_wrap(sub_text, sub_font, theme::muted());
-                let line_gap = 2.0_f32;
-                let block_h = title_galley.rect.height() + line_gap + sub_galley.rect.height();
-                let block_top = text_rect.center().y - block_h / 2.0;
-                // 单次清晰绘制标题，彻底杜绝双次偏移叠加造成的文字重影与字符覆盖
-                painter.galley(
-                    egui::pos2(text_rect.left(), block_top),
-                    title_galley,
-                    theme::text_primary(),
-                );
-                painter.galley(
-                    egui::pos2(
-                        text_rect.left(),
-                        block_top + 16.0 + line_gap,
-                    ),
-                    sub_galley,
-                    theme::muted(),
-                );
-                if is_truncated {
-                    text_resp.on_hover_text(format!("{title}\n{sub}"));
+                let (icon_rect, icon_resp) = ui.allocate_exact_size(Vec2::splat(32.0), sense);
+                let is_hovered = can_open_drawer && icon_resp.hovered();
+                let icon_bg = if theme::is_light() {
+                    if is_hovered {
+                        icon_color.gamma_multiply(0.22)
+                    } else {
+                        icon_color.gamma_multiply(0.12)
+                    }
+                } else if is_hovered {
+                    theme::accent_bg()
+                } else {
+                    theme::sidebar()
+                };
+                ui.painter()
+                    .rect_filled(icon_rect, CornerRadius::same(9), icon_bg);
+                draw_icon(ui.painter(), icon_rect.shrink(8.0), icon, icon_color);
+                if can_open_drawer {
+                    let icon_resp = icon_resp
+                        .on_hover_cursor(egui::CursorIcon::PointingHand)
+                        .on_hover_text("点击打开网络设置抽屉（DNS 协议与 TUN 虚拟网卡配置）");
+                    if is_hovered {
+                        ui.painter().rect_stroke(
+                            icon_rect,
+                            CornerRadius::same(9),
+                            Stroke::new(1.2_f32, icon_color),
+                            egui::StrokeKind::Inside,
+                        );
+                    }
+                    icon_clicked_resp = Some(icon_resp);
                 }
+                ui.add_space(8.0);
+            }
 
-                // 右侧操作小部件（开关或状态圆点，统一留 6px 右边距）
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.add_space(6.0);
-                    widget(ui);
-                });
+            // 文字列（宽度受控并截断）：整块文字用 painter 精确垂直居中绘制
+            let painter = ui.painter().clone();
+            let text_w = if show_icon {
+                (w - 32.0 - 8.0 - 52.0).max(40.0)
+            } else {
+                (w - 44.0).max(40.0)
+            };
+            let (text_rect, text_resp) =
+                ui.allocate_exact_size(Vec2::new(text_w, h), Sense::hover());
+            let title_font = egui::FontId::proportional(if show_icon { 12.5 } else { 10.5 });
+            let sub_font = egui::FontId::proportional(10.5);
+            let title_text = svc_truncate(&painter, title, title_font.clone(), text_w);
+            let sub_text = svc_truncate(&painter, sub, sub_font.clone(), text_w);
+            let is_truncated = title_text != title || sub_text != sub;
+            let title_galley =
+                painter.layout_no_wrap(title_text, title_font, theme::text_primary());
+            let sub_galley = painter.layout_no_wrap(sub_text, sub_font, theme::muted());
+            let line_gap = 2.0_f32;
+            let block_h = title_galley.rect.height() + line_gap + sub_galley.rect.height();
+            let block_top = text_rect.center().y - block_h / 2.0;
+            // 单次清晰绘制标题，彻底杜绝双次偏移叠加造成的文字重影与字符覆盖
+            painter.galley(
+                egui::pos2(text_rect.left(), block_top),
+                title_galley,
+                theme::text_primary(),
+            );
+            painter.galley(
+                egui::pos2(text_rect.left(), block_top + 16.0 + line_gap),
+                sub_galley,
+                theme::muted(),
+            );
+            if is_truncated {
+                text_resp.on_hover_text(format!("{title}\n{sub}"));
+            }
+
+            // 右侧操作小部件（开关或状态圆点，统一留 6px 右边距）
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.add_space(6.0);
+                widget(ui);
             });
         });
+    });
 
     icon_clicked_resp
 }
@@ -481,10 +508,12 @@ fn dash_sparkline(ui: &mut Ui, w: f32, h: f32, vals: Vec<f32>, color: Color32) {
         let t2 = t * t;
         let t3 = t2 * t;
         egui::pos2(
-            0.5 * (2.0 * p1.x + (-p0.x + p2.x) * t
+            0.5 * (2.0 * p1.x
+                + (-p0.x + p2.x) * t
                 + (2.0 * p0.x - 5.0 * p1.x + 4.0 * p2.x - p3.x) * t2
                 + (-p0.x + 3.0 * p1.x - 3.0 * p2.x + p3.x) * t3),
-            0.5 * (2.0 * p1.y + (-p0.y + p2.y) * t
+            0.5 * (2.0 * p1.y
+                + (-p0.y + p2.y) * t
                 + (2.0 * p0.y - 5.0 * p1.y + 4.0 * p2.y - p3.y) * t2
                 + (-p0.y + 3.0 * p1.y - 3.0 * p2.y + p3.y) * t3),
         )
@@ -547,7 +576,11 @@ pub(crate) fn display_risk<'a>(
     let Some(id) = node_id else {
         return None;
     };
-    let egress = if egress_owner == Some(id) { egress } else { None };
+    let egress = if egress_owner == Some(id) {
+        egress
+    } else {
+        None
+    };
     let front = if front_owner == Some(id) { front } else { None };
     egress.or(front)
 }
@@ -659,7 +692,14 @@ impl VpnApp {
                     ui.vertical(|ui| {
                         ui.set_min_width(total_w);
                         ui.set_max_width(total_w);
-                        self.render_dashboard(ui, total_w, &selected_node, is_running, is_starting, prepared);
+                        self.render_dashboard(
+                            ui,
+                            total_w,
+                            &selected_node,
+                            is_running,
+                            is_starting,
+                            prepared,
+                        );
                     });
                 });
             });
@@ -709,7 +749,7 @@ impl VpnApp {
         let _row3_h = 154.0_f32;
 
         // 宽度预算先扣除每张卡自身的左右内边距（Frame 外框 = 内容 + margin）。
-        let cm = 40.0_f32;  // 状态卡边距 20*2
+        let cm = 40.0_f32; // 状态卡边距 20*2
         let cm2 = 28.0_f32; // 其余卡边距 14*2
         let pool = (total_w - cm * 3.0 - gap * 2.0).max(120.0);
         let rate_w = (pool * 0.21).round();
@@ -739,8 +779,14 @@ impl VpnApp {
         let x_rules = x_svc + out_col + gap;
         let x_mode = x_rules + out_col + gap; // 必须 == x_up
         let x_perf = x_mode + out_mode + gap; // 必须 == x_down
-        debug_assert!((x_mode - x_up).abs() < 1.0, "列网格漂移: mode {x_mode} vs up {x_up}");
-        debug_assert!((x_perf - x_down).abs() < 1.0, "列网格漂移: perf {x_perf} vs down {x_down}");
+        debug_assert!(
+            (x_mode - x_up).abs() < 1.0,
+            "列网格漂移: mode {x_mode} vs up {x_up}"
+        );
+        debug_assert!(
+            (x_perf - x_down).abs() < 1.0,
+            "列网格漂移: perf {x_perf} vs down {x_down}"
+        );
 
         ui.vertical(|ui| {
             ui.spacing_mut().item_spacing.y = 8.0;
@@ -758,13 +804,23 @@ impl VpnApp {
                 ] {
                     let origin = egui::pos2(row_top.x + x, row_top.y);
                     let card_rect = Rect::from_min_size(origin, egui::vec2(w + 40.0, row1_needed));
-                    ui.scope_builder(egui::UiBuilder::new().max_rect(card_rect), |ui| {
-                        match draw {
-                            0 => self.dash_status_card(ui, w, row1_needed - 20.0, selected_node, is_running, is_starting, prepared, is_compact),
+                    ui.scope_builder(
+                        egui::UiBuilder::new().max_rect(card_rect),
+                        |ui| match draw {
+                            0 => self.dash_status_card(
+                                ui,
+                                w,
+                                row1_needed - 20.0,
+                                selected_node,
+                                is_running,
+                                is_starting,
+                                prepared,
+                                is_compact,
+                            ),
                             1 => self.dash_rate_card(ui, w, row1_needed - 20.0, true),
                             _ => self.dash_rate_card(ui, w, row1_needed - 20.0, false),
-                        }
-                    });
+                        },
+                    );
                 }
             });
 
@@ -780,14 +836,16 @@ impl VpnApp {
                         (x_perf, perf_w, 2),
                     ] {
                         let origin = egui::pos2(row_top.x + x, row_top.y);
-                        let card_rect = Rect::from_min_size(origin, egui::vec2(w + 28.0, row_mid_h));
-                        ui.scope_builder(egui::UiBuilder::new().max_rect(card_rect), |ui| {
-                            match kind {
+                        let card_rect =
+                            Rect::from_min_size(origin, egui::vec2(w + 28.0, row_mid_h));
+                        ui.scope_builder(
+                            egui::UiBuilder::new().max_rect(card_rect),
+                            |ui| match kind {
                                 0 => self.dash_connections_card(ui, w, row_mid_h - 20.0),
                                 1 => self.dash_software_perf_card(ui, w, row_mid_h - 20.0),
                                 _ => self.dash_kernel_perf_card(ui, w, row_mid_h - 20.0),
-                            }
-                        });
+                            },
+                        );
                     }
                 });
             }
@@ -816,9 +874,11 @@ impl VpnApp {
                                 let card2_h = row_h2 - card_gap - card1_h;
 
                                 // 采用绝对几何定位渲染两张子卡片，彻底免疫内部 scope_builder 光标收缩造成的两卡重叠
-                                let rect1 = Rect::from_min_size(origin, egui::vec2(w + 28.0, card1_h));
+                                let rect1 =
+                                    Rect::from_min_size(origin, egui::vec2(w + 28.0, card1_h));
                                 let origin2 = egui::pos2(origin.x, origin.y + card1_h + card_gap);
-                                let rect2 = Rect::from_min_size(origin2, egui::vec2(w + 28.0, card2_h));
+                                let rect2 =
+                                    Rect::from_min_size(origin2, egui::vec2(w + 28.0, card2_h));
 
                                 ui.scope_builder(egui::UiBuilder::new().max_rect(rect1), |ui| {
                                     self.dash_mode_card(ui, w, card1_h);
@@ -1617,7 +1677,7 @@ impl VpnApp {
                         });   // ScrollArea::show
                     });       // ui.vertical
                 });           // allocate_new_ui
-            });               // Area::show
+            }); // Area::show
 
         if close {
             self.group_drawer = None;
@@ -1649,7 +1709,8 @@ impl VpnApp {
             DashboardDrawer::Logs => (screen.width() * 0.50).clamp(500.0, 800.0),
             DashboardDrawer::Network => (screen.width() * 0.50).clamp(540.0, 780.0),
             DashboardDrawer::Kernels => (screen.width() * 0.52).clamp(520.0, 780.0),
-        }.min(screen.width() - 40.0);
+        }
+        .min(screen.width() - 40.0);
 
         let mut close = false;
 
@@ -1702,8 +1763,14 @@ impl VpnApp {
             DashboardDrawer::Rules => ("分流规则", "规则命中统计与自定义路由策略"),
             DashboardDrawer::Kernels => ("内核管理", "代理内核版本、偏好与运行状态"),
             DashboardDrawer::Groups => ("分流策略组", "策略组节点分流与调度配置"),
-            DashboardDrawer::Connections => ("网络连接与 DNS 审计", "分流流向监控 · 活动连接跟踪 · 进程带宽矩阵 · 内核实时 DNS 解析记录"),
-            DashboardDrawer::Traffic => ("流量统计排行", "节点 · 域名 · 软件进程三维度排行 · 实时速率 · 累计上行与下行"),
+            DashboardDrawer::Connections => (
+                "网络连接与 DNS 审计",
+                "分流流向监控 · 活动连接跟踪 · 进程带宽矩阵 · 内核实时 DNS 解析记录",
+            ),
+            DashboardDrawer::Traffic => (
+                "流量统计排行",
+                "节点 · 域名 · 软件进程三维度排行 · 实时速率 · 累计上行与下行",
+            ),
         };
 
         // 抽屉本体：右侧原生浮层（严格在标题栏与状态栏之间的内容区，紧贴窗口最右侧，严禁右侧留白）
@@ -1721,12 +1788,14 @@ impl VpnApp {
                 // 拦截抽屉本体所有点击与拖拽，防止事件穿透至底层卡片
                 let _ = ui.interact(
                     drawer_rect,
-                    ui.id().with(("drawer_panel_interact", format!("{:?}", drawer))),
+                    ui.id()
+                        .with(("drawer_panel_interact", format!("{:?}", drawer))),
                     Sense::click_and_drag(),
                 );
 
                 // 绘制抽屉底色与左侧描边
-                ui.painter().rect_filled(drawer_rect, CornerRadius::ZERO, panel_fill);
+                ui.painter()
+                    .rect_filled(drawer_rect, CornerRadius::ZERO, panel_fill);
                 ui.painter().line_segment(
                     [drawer_rect.left_top(), drawer_rect.left_bottom()],
                     Stroke::new(1.0_f32, apple_stroke()),
@@ -1757,7 +1826,8 @@ impl VpnApp {
                 );
                 let drag_resp = ui.interact(
                     drag_rect,
-                    ui.id().with(("drawer_header_drag", format!("{:?}", drawer))),
+                    ui.id()
+                        .with(("drawer_header_drag", format!("{:?}", drawer))),
                     Sense::drag(),
                 );
                 if drag_resp.drag_started() {
@@ -1779,11 +1849,7 @@ impl VpnApp {
                                 .strong()
                                 .color(theme::text_primary()),
                         );
-                        ui.label(
-                            RichText::new(subtitle)
-                                .size(10.5)
-                                .color(theme::muted()),
-                        );
+                        ui.label(RichText::new(subtitle).size(10.5).color(theme::muted()));
                     });
                 });
 
@@ -1826,7 +1892,10 @@ impl VpnApp {
                 // 细微满宽分割线
                 let sep_y = header_rect.max.y;
                 ui.painter().line_segment(
-                    [egui::pos2(drawer_rect.left(), sep_y), egui::pos2(drawer_rect.right(), sep_y)],
+                    [
+                        egui::pos2(drawer_rect.left(), sep_y),
+                        egui::pos2(drawer_rect.right(), sep_y),
+                    ],
                     Stroke::new(1.0_f32, apple_stroke()),
                 );
 
@@ -1870,13 +1939,10 @@ impl VpnApp {
         is_compact: bool,
     ) {
         // 外框矩形精确绘制（与速率卡同构，外框高严格 = h + 边距，不受内容影响）
-        let outer = Rect::from_min_size(
-            ui.cursor().min,
-            Vec2::new(w + 40.0, h + 20.0),
-        );
+        let outer = Rect::from_min_size(ui.cursor().min, Vec2::new(w + 40.0, h + 20.0));
         dash_card_at(ui, outer);
-    // 画框不推进 cursor：显式把光标拨到卡右侧，行内下一元素从这继续
-    ui.advance_cursor_after_rect(outer);
+        // 画框不推进 cursor：显式把光标拨到卡右侧，行内下一元素从这继续
+        ui.advance_cursor_after_rect(outer);
         let inner = outer.shrink2(Vec2::new(20.0, 10.0));
         ui.scope_builder(egui::UiBuilder::new().max_rect(inner), |ui| {
             ui.set_clip_rect(ui.clip_rect().intersect(inner));
@@ -2408,10 +2474,7 @@ impl VpnApp {
         };
 
         // 外框矩形精确绘制（与状态卡同构，外框高严格 = h + 边距，不受内容影响）
-        let outer = Rect::from_min_size(
-            ui.cursor().min,
-            Vec2::new(w + 40.0, h + 20.0),
-        );
+        let outer = Rect::from_min_size(ui.cursor().min, Vec2::new(w + 40.0, h + 20.0));
         dash_card_at(ui, outer);
 
         // 画框不推进 cursor：显式把光标拨到卡右侧，行内下一元素从这继续
@@ -2448,10 +2511,8 @@ impl VpnApp {
                     );
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.add(
-                            egui::Label::new(
-                                RichText::new(peak_str).small().color(theme::muted()),
-                            )
-                            .truncate(),
+                            egui::Label::new(RichText::new(peak_str).small().color(theme::muted()))
+                                .truncate(),
                         );
                     });
                 });
@@ -2476,7 +2537,6 @@ impl VpnApp {
             });
         });
     }
-
 
     /// 仪表盘底部核心代理控制底栏：前三卡对齐状态卡宽度，系统代理/TUN 平分剩余。
     #[allow(clippy::too_many_arguments)]
@@ -2517,7 +2577,11 @@ impl VpnApp {
                 Icon::Terminal,
                 apple_blue(),
                 "终端代理",
-                if terminal_on { "环境变量已配置".into() } else { "未配置环境".into() },
+                if terminal_on {
+                    "环境变量已配置".into()
+                } else {
+                    "未配置环境".into()
+                },
             ),
             (
                 ProxyItemKind::Port,
@@ -2543,7 +2607,11 @@ impl VpnApp {
                 ProxyItemKind::System,
                 Icon::Shield,
                 apple_blue(),
-                if sys_supported { "系统代理" } else { "本地端口" },
+                if sys_supported {
+                    "系统代理"
+                } else {
+                    "本地端口"
+                },
                 "127.0.0.1".into(),
             ),
             (
@@ -2561,60 +2629,117 @@ impl VpnApp {
             let (icon, icon_col) = (*icon, *icon_col);
             match kind {
                 ProxyItemKind::Terminal => {
-                    dash_bottom_proxy_item(ui, item_w, card_h, icon, icon_col, title, sub, false, |ui| {
-                        let resp = dash_switch(ui, terminal_on);
-                        if resp.clicked() {
-                            let new_state = !terminal_on;
-                            self.proxy_config.terminal_proxy = new_state;
-                            self.save_proxy_config_quiet();
-                            let port = self.proxy_status.mixed_port;
-                            if running {
-                                if new_state {
-                                    let _ = crate::system_proxy::terminal::enable(port);
-                                    self.status = format!("终端代理已即时开启 (端口 {port})，已自动同步 Git 代理");
-                                } else {
-                                    let _ = crate::system_proxy::terminal::disable();
-                                    self.status = "终端代理已即时关闭，已还原 Git 代理".into();
+                    dash_bottom_proxy_item(
+                        ui,
+                        item_w,
+                        card_h,
+                        icon,
+                        icon_col,
+                        title,
+                        sub,
+                        false,
+                        |ui| {
+                            let resp = dash_switch(ui, terminal_on);
+                            if resp.clicked() {
+                                let new_state = !terminal_on;
+                                self.proxy_config.terminal_proxy = new_state;
+                                self.save_proxy_config_quiet();
+                                let port = self.proxy_status.mixed_port;
+                                if running {
+                                    if new_state {
+                                        let _ = crate::system_proxy::terminal::enable(port);
+                                        self.status = format!(
+                                            "终端代理已即时开启 (端口 {port})，已自动同步 Git 代理"
+                                        );
+                                    } else {
+                                        let _ = crate::system_proxy::terminal::disable();
+                                        self.status = "终端代理已即时关闭，已还原 Git 代理".into();
+                                    }
                                 }
                             }
-                        }
-                    });
+                        },
+                    );
                 }
                 ProxyItemKind::Port => {
                     let port_sub = format!("{} · {}", sub, self.proxy_status.mixed_port);
-                    dash_bottom_proxy_item(ui, item_w, card_h, icon, icon_col, title, &port_sub, false, |ui| {
-                        dash_dot(ui, if running { apple_green_dot() } else { theme::muted() });
-                    });
+                    dash_bottom_proxy_item(
+                        ui,
+                        item_w,
+                        card_h,
+                        icon,
+                        icon_col,
+                        title,
+                        &port_sub,
+                        false,
+                        |ui| {
+                            dash_dot(
+                                ui,
+                                if running {
+                                    apple_green_dot()
+                                } else {
+                                    theme::muted()
+                                },
+                            );
+                        },
+                    );
                 }
                 ProxyItemKind::Lan => {
-                    dash_bottom_proxy_item(ui, item_w, card_h, icon, icon_col, title, sub, false, |ui| {
-                        let resp = dash_switch(ui, lan_on);
-                        if resp.clicked() {
-                            self.proxy_config.allow_lan = !lan_on;
-                            self.save_proxy_config();
-                        }
-                    });
+                    dash_bottom_proxy_item(
+                        ui,
+                        item_w,
+                        card_h,
+                        icon,
+                        icon_col,
+                        title,
+                        sub,
+                        false,
+                        |ui| {
+                            let resp = dash_switch(ui, lan_on);
+                            if resp.clicked() {
+                                self.proxy_config.allow_lan = !lan_on;
+                                self.save_proxy_config();
+                            }
+                        },
+                    );
                 }
                 ProxyItemKind::System => {
                     let sys_sub = format!("{}:{}", sub, self.proxy_status.mixed_port);
-                    let card_resp = dash_bottom_proxy_item(ui, item_w, card_h, icon, icon_col, title, &sys_sub, true, |ui| {
-                        let resp = dash_switch(ui, sys_on);
-                        if resp.clicked() && !self.proxy_busy {
-                            if sys_on {
-                                // 关系统代理：若 tun 开着则切到 Tun，否则切到 None（纯端口模式）
-                                self.proxy_config.mode = if tun_on { ProxyMode::Tun } else { ProxyMode::None };
-                                self.status = "正在关闭系统代理...".into();
-                            } else {
-                                // 开系统代理：若同时开 TUN 则为 Both，否则为 System
-                                self.proxy_config.mode = if tun_on { ProxyMode::Both } else { ProxyMode::System };
-                                self.status = "正在启用系统代理...".into();
+                    let card_resp = dash_bottom_proxy_item(
+                        ui,
+                        item_w,
+                        card_h,
+                        icon,
+                        icon_col,
+                        title,
+                        &sys_sub,
+                        true,
+                        |ui| {
+                            let resp = dash_switch(ui, sys_on);
+                            if resp.clicked() && !self.proxy_busy {
+                                if sys_on {
+                                    // 关系统代理：若 tun 开着则切到 Tun，否则切到 None（纯端口模式）
+                                    self.proxy_config.mode = if tun_on {
+                                        ProxyMode::Tun
+                                    } else {
+                                        ProxyMode::None
+                                    };
+                                    self.status = "正在关闭系统代理...".into();
+                                } else {
+                                    // 开系统代理：若同时开 TUN 则为 Both，否则为 System
+                                    self.proxy_config.mode = if tun_on {
+                                        ProxyMode::Both
+                                    } else {
+                                        ProxyMode::System
+                                    };
+                                    self.status = "正在启用系统代理...".into();
+                                }
+                                self.save_proxy_config();
+                                // 模式变化的应用由 save_proxy_config 登记 pending、在
+                                // ProxyConfigSaved 回调里执行（此处同步 apply 会撞上刚置位的
+                                // proxy_busy 死守卫，TUN 开关曾因此只落库不生效）
                             }
-                            self.save_proxy_config();
-                            // 模式变化的应用由 save_proxy_config 登记 pending、在
-                            // ProxyConfigSaved 回调里执行（此处同步 apply 会撞上刚置位的
-                            // proxy_busy 死守卫，TUN 开关曾因此只落库不生效）
-                        }
-                    });
+                        },
+                    );
                     if let Some(resp) = card_resp {
                         if resp.clicked() {
                             self.dashboard_drawer = Some(DashboardDrawer::Network);
@@ -2622,23 +2747,41 @@ impl VpnApp {
                     }
                 }
                 ProxyItemKind::Tun => {
-                    let card_resp = dash_bottom_proxy_item(ui, item_w, card_h, icon, icon_col, title, sub, true, |ui| {
-                        let resp = dash_switch(ui, tun_on);
-                        if resp.clicked() && !self.proxy_busy {
-                            if tun_on {
-                                // 关 TUN：若 sys 开着则切到 System，否则切到 None（纯端口模式）
-                                self.proxy_config.mode = if sys_on { ProxyMode::System } else { ProxyMode::None };
-                                self.status = "TUN 模式已关闭".into();
-                            } else {
-                                // 开 TUN：若同时开系统代理则为 Both，否则为 Tun
-                                self.proxy_config.mode = if sys_on { ProxyMode::Both } else { ProxyMode::Tun };
-                                self.status = "TUN 模式已启用".into();
+                    let card_resp = dash_bottom_proxy_item(
+                        ui,
+                        item_w,
+                        card_h,
+                        icon,
+                        icon_col,
+                        title,
+                        sub,
+                        true,
+                        |ui| {
+                            let resp = dash_switch(ui, tun_on);
+                            if resp.clicked() && !self.proxy_busy {
+                                if tun_on {
+                                    // 关 TUN：若 sys 开着则切到 System，否则切到 None（纯端口模式）
+                                    self.proxy_config.mode = if sys_on {
+                                        ProxyMode::System
+                                    } else {
+                                        ProxyMode::None
+                                    };
+                                    self.status = "TUN 模式已关闭".into();
+                                } else {
+                                    // 开 TUN：若同时开系统代理则为 Both，否则为 Tun
+                                    self.proxy_config.mode = if sys_on {
+                                        ProxyMode::Both
+                                    } else {
+                                        ProxyMode::Tun
+                                    };
+                                    self.status = "TUN 模式已启用".into();
+                                }
+                                self.save_proxy_config();
+                                // 模式变化的应用由 save_proxy_config 登记 pending、在
+                                // ProxyConfigSaved 回调里执行（同上，同步 apply 会撞死守卫）
                             }
-                            self.save_proxy_config();
-                            // 模式变化的应用由 save_proxy_config 登记 pending、在
-                            // ProxyConfigSaved 回调里执行（同上，同步 apply 会撞死守卫）
-                        }
-                    });
+                        },
+                    );
                     if let Some(resp) = card_resp {
                         if resp.clicked() {
                             self.dashboard_drawer = Some(DashboardDrawer::Network);
@@ -2651,7 +2794,7 @@ impl VpnApp {
         let cm3 = 28.0_f32;
         let cm_status = 28.0_f32;
         // 底栏卡之间的间距：与行距一致的 8px
-        let inner_gap = 8.0_f32;  // 与行内 gap 一致
+        let inner_gap = 8.0_f32; // 与行内 gap 一致
         let (w3, w_sys, w_tun) = match align {
             Some((conns_w, _, _)) => {
                 // 前三卡平分实时连接外框宽：3*(w3+28) + 2*inner_gap = conns_w + 28
@@ -2682,13 +2825,7 @@ impl VpnApp {
             let step2 = w_sys + cm3 + inner_gap;
             let x_sys = three_end + inner_gap;
             ui.allocate_ui(egui::vec2(total_w, bar_h), |ui| {
-                let positions = [
-                    0.0,
-                    step3,
-                    step3 * 2.0,
-                    x_sys,
-                    x_sys + step2,
-                ];
+                let positions = [0.0, step3, step3 * 2.0, x_sys, x_sys + step2];
                 for (idx, x) in positions.iter().enumerate() {
                     let item_w = match idx {
                         3 => w_sys,
@@ -2708,10 +2845,7 @@ impl VpnApp {
 
     /// 服务状态：经当前代理实测 Google/ChatGPT/GitHub/YouTube 是否能连通。
     fn dash_services_card(&mut self, ui: &mut Ui, w: f32, h: f32) {
-        let outer = Rect::from_min_size(
-            ui.cursor().min,
-            Vec2::new(w + 28.0, h + 20.0),
-        );
+        let outer = Rect::from_min_size(ui.cursor().min, Vec2::new(w + 28.0, h + 20.0));
         dash_card_at(ui, outer);
         ui.advance_cursor_after_rect(outer);
         let inner = outer.shrink2(Vec2::new(14.0, 6.0));
@@ -2857,10 +2991,7 @@ impl VpnApp {
             .collect();
         hits.sort_by(|a, b| b.2.cmp(&a.2));
 
-        let outer = Rect::from_min_size(
-            ui.cursor().min,
-            Vec2::new(w + 28.0, h + 20.0),
-        );
+        let outer = Rect::from_min_size(ui.cursor().min, Vec2::new(w + 28.0, h + 20.0));
         dash_card_at(ui, outer);
         ui.advance_cursor_after_rect(outer);
         let inner = outer.shrink2(Vec2::new(14.0, 6.0));
@@ -2876,8 +3007,14 @@ impl VpnApp {
                             .color(theme::text_secondary()),
                     );
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        let (gear_rect, gear_resp) = ui.allocate_exact_size(Vec2::splat(15.0), Sense::click());
-                        draw_icon(ui.painter(), gear_rect.shrink(1.0), Icon::Gear, theme::text_secondary());
+                        let (gear_rect, gear_resp) =
+                            ui.allocate_exact_size(Vec2::splat(15.0), Sense::click());
+                        draw_icon(
+                            ui.painter(),
+                            gear_rect.shrink(1.0),
+                            Icon::Gear,
+                            theme::text_secondary(),
+                        );
                         let gear_resp = gear_resp
                             .on_hover_cursor(egui::CursorIcon::PointingHand)
                             .on_hover_text("点击配置分流规则（右侧滑出抽屉）");
@@ -2885,8 +3022,17 @@ impl VpnApp {
                             self.dashboard_drawer = Some(DashboardDrawer::Rules);
                         }
                         if gear_resp.hovered() {
-                            ui.painter().rect_filled(gear_rect, CornerRadius::same(3), apple_sub_bg());
-                            draw_icon(ui.painter(), gear_rect.shrink(1.0), Icon::Gear, theme::accent());
+                            ui.painter().rect_filled(
+                                gear_rect,
+                                CornerRadius::same(3),
+                                apple_sub_bg(),
+                            );
+                            draw_icon(
+                                ui.painter(),
+                                gear_rect.shrink(1.0),
+                                Icon::Gear,
+                                theme::accent(),
+                            );
                         }
                     });
                 });
@@ -2911,74 +3057,87 @@ impl VpnApp {
                     });
                 } else {
                     let reject_bg = if theme::is_light() {
-                            Color32::from_rgb(252, 235, 234)
-                        } else {
-                            theme::accent_bg()
-                        };
-                        let reject_fg = if theme::is_light() {
-                            Color32::from_rgb(201, 42, 42)
-                        } else {
-                            theme::danger()
-                        };
-                        let direct_bg = if theme::is_light() {
-                            Color32::from_rgb(232, 246, 237)
-                        } else {
-                            theme::accent_bg()
-                        };
-                        let direct_fg = if theme::is_light() {
-                            Color32::from_rgb(27, 122, 58)
-                        } else {
-                            theme::success()
-                        };
-                        let proxy_bg = if theme::is_light() {
-                            Color32::from_rgb(234, 243, 255)
-                        } else {
-                            theme::accent_bg()
-                        };
-                        let proxy_fg = apple_blue();
+                        Color32::from_rgb(252, 235, 234)
+                    } else {
+                        theme::accent_bg()
+                    };
+                    let reject_fg = if theme::is_light() {
+                        Color32::from_rgb(201, 42, 42)
+                    } else {
+                        theme::danger()
+                    };
+                    let direct_bg = if theme::is_light() {
+                        Color32::from_rgb(232, 246, 237)
+                    } else {
+                        theme::accent_bg()
+                    };
+                    let direct_fg = if theme::is_light() {
+                        Color32::from_rgb(27, 122, 58)
+                    } else {
+                        theme::success()
+                    };
+                    let proxy_bg = if theme::is_light() {
+                        Color32::from_rgb(234, 243, 255)
+                    } else {
+                        theme::accent_bg()
+                    };
+                    let proxy_fg = apple_blue();
 
-                        // 最多展示前 3/4 条规则，配合舒适行距，确保永远不溢出卡片下边缘
-                        for (idx, (rule, target, count)) in hits.iter().take(if h > 120.0 { 4 } else { 3 }).enumerate() {
-                            let is_direct =
-                                target.eq_ignore_ascii_case("DIRECT") || rule.contains("DIRECT");
-                            let is_reject =
-                                target.eq_ignore_ascii_case("REJECT") || rule.contains("REJECT");
-                            let (tag, tag_bg, tag_fg) = if is_reject {
-                                ("拦截", reject_bg, reject_fg)
-                            } else if is_direct {
-                                ("直连", direct_bg, direct_fg)
-                            } else {
-                                ("代理", proxy_bg, proxy_fg)
-                            };
-                            ui.horizontal(|ui| {
-                                let right_w = 68.0;
-                                let rule_w = (ui.available_width() - right_w).max(30.0);
-                                ui.add_sized(
-                                    [rule_w, 18.0],
-                                    egui::Label::new(
-                                        RichText::new(*rule)
-                                            .size(10.5)
-                                            .strong()
-                                            .color(theme::text_primary()),
-                                    )
-                                    .truncate(),
-                                );
-                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                    ui.label(RichText::new(Self::format_hits(*count)).size(9.5).color(theme::muted()));
+                    // 最多展示前 3/4 条规则，配合舒适行距，确保永远不溢出卡片下边缘
+                    for (idx, (rule, target, count)) in
+                        hits.iter().take(if h > 120.0 { 4 } else { 3 }).enumerate()
+                    {
+                        let is_direct =
+                            target.eq_ignore_ascii_case("DIRECT") || rule.contains("DIRECT");
+                        let is_reject =
+                            target.eq_ignore_ascii_case("REJECT") || rule.contains("REJECT");
+                        let (tag, tag_bg, tag_fg) = if is_reject {
+                            ("拦截", reject_bg, reject_fg)
+                        } else if is_direct {
+                            ("直连", direct_bg, direct_fg)
+                        } else {
+                            ("代理", proxy_bg, proxy_fg)
+                        };
+                        ui.horizontal(|ui| {
+                            let right_w = 68.0;
+                            let rule_w = (ui.available_width() - right_w).max(30.0);
+                            ui.add_sized(
+                                [rule_w, 18.0],
+                                egui::Label::new(
+                                    RichText::new(*rule)
+                                        .size(10.5)
+                                        .strong()
+                                        .color(theme::text_primary()),
+                                )
+                                .truncate(),
+                            );
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    ui.label(
+                                        RichText::new(Self::format_hits(*count))
+                                            .size(9.5)
+                                            .color(theme::muted()),
+                                    );
                                     ui.add_space(3.0);
                                     dash_pill(ui, tag, tag_bg, tag_fg);
-                                });
-                            });
-                            if idx < 2 && hits.len() > idx + 1 {
-                                ui.add_space(2.0);
-                                let (sep_rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 1.0), Sense::hover());
-                                ui.painter().rect_filled(sep_rect, CornerRadius::ZERO, apple_stroke2());
-                                ui.add_space(2.0);
-                            }
+                                },
+                            );
+                        });
+                        if idx < 2 && hits.len() > idx + 1 {
+                            ui.add_space(2.0);
+                            let (sep_rect, _) = ui.allocate_exact_size(
+                                Vec2::new(ui.available_width(), 1.0),
+                                Sense::hover(),
+                            );
+                            ui.painter()
+                                .rect_filled(sep_rect, CornerRadius::ZERO, apple_stroke2());
+                            ui.add_space(2.0);
                         }
                     }
-                });
+                }
             });
+        });
     }
 
     /// 命中数缩写：1234 → 1.2k，123456 → 12.3w。
@@ -2998,7 +3157,10 @@ impl VpnApp {
     fn dash_mode_card(&mut self, ui: &mut Ui, w: f32, h: f32) {
         let mode_label = |mode: RoutingMode| -> &'static str {
             match mode {
-                RoutingMode::Rule | RoutingMode::ChinaDirect | RoutingMode::GfwList | RoutingMode::Subscription => "规则",
+                RoutingMode::Rule
+                | RoutingMode::ChinaDirect
+                | RoutingMode::GfwList
+                | RoutingMode::Subscription => "规则",
                 RoutingMode::Global => "全局",
                 RoutingMode::Direct => "直连",
                 RoutingMode::Chain => "规则",
@@ -3011,10 +3173,7 @@ impl VpnApp {
         };
         let is_busy = self.proxy_busy;
 
-        let outer = Rect::from_min_size(
-            ui.cursor().min,
-            Vec2::new(w + 28.0, h),
-        );
+        let outer = Rect::from_min_size(ui.cursor().min, Vec2::new(w + 28.0, h));
         dash_card_at(ui, outer);
         ui.advance_cursor_after_rect(outer);
         let inner = outer.shrink2(Vec2::new(14.0, 5.0));
@@ -3093,10 +3252,7 @@ impl VpnApp {
         let kernel_name = active_kernel.display_name();
         let chain_on = self.proxy_config.chain_proxy_enabled && supports_chain;
 
-        let outer = Rect::from_min_size(
-            ui.cursor().min,
-            Vec2::new(w + 28.0, h),
-        );
+        let outer = Rect::from_min_size(ui.cursor().min, Vec2::new(w + 28.0, h));
         dash_card_at(ui, outer);
         ui.advance_cursor_after_rect(outer);
         let inner = outer.shrink2(Vec2::new(14.0, 5.0));
@@ -3464,14 +3620,14 @@ impl VpnApp {
             sub_groups.as_deref(),
             &self.kernel_groups,
         );
-        if !visible_names.iter().any(|name| name == &self.proxy_selected_group) {
+        if !visible_names
+            .iter()
+            .any(|name| name == &self.proxy_selected_group)
+        {
             self.proxy_selected_group = "全部".to_string();
         }
 
-        let outer = Rect::from_min_size(
-            ui.cursor().min,
-            Vec2::new(w + 28.0, h + 20.0),
-        );
+        let outer = Rect::from_min_size(ui.cursor().min, Vec2::new(w + 28.0, h + 20.0));
         dash_card_at(ui, outer);
         ui.advance_cursor_after_rect(outer);
         let inner = outer.shrink2(Vec2::new(14.0, 6.0));
@@ -3591,10 +3747,7 @@ impl VpnApp {
     }
 
     fn dash_connections_card(&mut self, ui: &mut Ui, w: f32, h: f32) {
-        let outer = Rect::from_min_size(
-            ui.cursor().min,
-            Vec2::new(w + 28.0, h + 20.0),
-        );
+        let outer = Rect::from_min_size(ui.cursor().min, Vec2::new(w + 28.0, h + 20.0));
         dash_card_at(ui, outer);
         ui.advance_cursor_after_rect(outer);
         let inner = outer.shrink2(Vec2::new(14.0, 8.0));
@@ -3611,7 +3764,8 @@ impl VpnApp {
                     );
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        let resp = ui.link(RichText::new("详情 >").size(10.5).color(theme::muted()))
+                        let resp = ui
+                            .link(RichText::new("详情 >").size(10.5).color(theme::muted()))
                             .on_hover_cursor(egui::CursorIcon::PointingHand)
                             .on_hover_text("点击滑出活跃连接详细管理面板");
                         if resp.clicked() {
@@ -3693,19 +3847,20 @@ impl VpnApp {
                                                 ui.available_width().max(40.0),
                                                 egui::FontId::proportional(10.5),
                                             );
-                                            let resp = ui.add(
-                                                egui::Label::new(
+                                            let resp = ui
+                                                .add(egui::Label::new(
                                                     RichText::new(shown_title)
                                                         .size(10.5)
                                                         .strong()
                                                         .color(theme::text_primary()),
-                                                ),
-                                            ).on_hover_text(format!(
+                                                ))
+                                                .on_hover_text(format!(
                                                 "主机: {}\n目标: {}\n进程: {}\n规则: {}\n出口: {}",
                                                 c.host, c.destination, c.process, c.rule, c.target
                                             ));
                                             if resp.clicked() {
-                                                self.dashboard_drawer = Some(DashboardDrawer::Connections);
+                                                self.dashboard_drawer =
+                                                    Some(DashboardDrawer::Connections);
                                             }
 
                                             // 目标出口策略 / 节点
@@ -3748,10 +3903,7 @@ impl VpnApp {
     }
 
     fn dash_software_perf_card(&mut self, ui: &mut Ui, w: f32, h: f32) {
-        let outer = Rect::from_min_size(
-            ui.cursor().min,
-            Vec2::new(w + 28.0, h + 20.0),
-        );
+        let outer = Rect::from_min_size(ui.cursor().min, Vec2::new(w + 28.0, h + 20.0));
         dash_card_at(ui, outer);
         ui.advance_cursor_after_rect(outer);
         let inner = outer.shrink2(Vec2::new(14.0, 8.0));
@@ -3799,28 +3951,48 @@ impl VpnApp {
 
                 let cpu_center = format!("{:.0}%", cpu);
                 let mem_center = format!("{:.0}M", mem);
-                let disk_center = if disk < 0.05 { "0M".to_string() } else if disk < 10.0 { format!("{:.1}M", disk) } else { format!("{:.0}M", disk) };
+                let disk_center = if disk < 0.05 {
+                    "0M".to_string()
+                } else if disk < 10.0 {
+                    format!("{:.1}M", disk)
+                } else {
+                    format!("{:.0}M", disk)
+                };
 
                 let cpu_sub = format!("{:.1}%", cpu);
                 let mem_sub = format!("{:.1} MB", mem);
-                let disk_sub = if disk < 0.01 { "0 MB/s".to_string() } else if disk < 10.0 { format!("{:.2} MB/s", disk) } else { format!("{:.1} MB/s", disk) };
+                let disk_sub = if disk < 0.01 {
+                    "0 MB/s".to_string()
+                } else if disk < 10.0 {
+                    format!("{:.2} MB/s", disk)
+                } else {
+                    format!("{:.1} MB/s", disk)
+                };
 
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 4.0;
                     render_ring_gauge(ui, col_w, cpu_ratio, &cpu_center, "CPU", &cpu_sub, cpu_col);
                     render_ring_gauge(ui, col_w, mem_ratio, &mem_center, "内存", &mem_sub, mem_col);
-                    render_ring_gauge(ui, col_w, disk_ratio, &disk_center, "磁盘", &disk_sub, disk_col);
+                    render_ring_gauge(
+                        ui,
+                        col_w,
+                        disk_ratio,
+                        &disk_center,
+                        "磁盘",
+                        &disk_sub,
+                        disk_col,
+                    );
                 });
             });
         });
     }
 
     fn dash_kernel_perf_card(&mut self, ui: &mut Ui, w: f32, h: f32) {
-        let is_running = matches!(self.proxy_status.state, ProxyState::Running | ProxyState::Degraded);
-        let outer = Rect::from_min_size(
-            ui.cursor().min,
-            Vec2::new(w + 28.0, h + 20.0),
+        let is_running = matches!(
+            self.proxy_status.state,
+            ProxyState::Running | ProxyState::Degraded
         );
+        let outer = Rect::from_min_size(ui.cursor().min, Vec2::new(w + 28.0, h + 20.0));
         dash_card_at(ui, outer);
         ui.advance_cursor_after_rect(outer);
         let inner = outer.shrink2(Vec2::new(14.0, 8.0));
@@ -3847,7 +4019,8 @@ impl VpnApp {
                                 KernelPreference::Xray => "Xray",
                                 KernelPreference::Meow => "Meow",
                                 KernelPreference::VpCore => "VP-Core",
-                            }.to_string()
+                            }
+                            .to_string()
                         };
                         let pid_text = if let Some(pid) = self.proxy_status.kernel_pid {
                             format!("{k_name} PID: {pid}")
@@ -3856,28 +4029,48 @@ impl VpnApp {
                         } else {
                             "未启动".to_string()
                         };
-                        ui.label(
-                            RichText::new(pid_text)
-                                .size(10.0)
-                                .color(if is_running {
-                                    theme::accent()
-                                } else {
-                                    theme::muted()
-                                }),
-                        );
+                        ui.label(RichText::new(pid_text).size(10.0).color(if is_running {
+                            theme::accent()
+                        } else {
+                            theme::muted()
+                        }));
                     });
                 });
 
                 ui.add_space(8.0);
 
                 let col_w = ((w - 8.0) / 3.0).max(36.0);
-                let cpu = if is_running { self.kernel_perf_stats.cpu_percent } else { 0.0 };
-                let mem = if is_running { self.kernel_perf_stats.mem_mb } else { 0.0 };
-                let disk = if is_running { self.kernel_perf_stats.disk_mbps } else { 0.0 };
+                let cpu = if is_running {
+                    self.kernel_perf_stats.cpu_percent
+                } else {
+                    0.0
+                };
+                let mem = if is_running {
+                    self.kernel_perf_stats.mem_mb
+                } else {
+                    0.0
+                };
+                let disk = if is_running {
+                    self.kernel_perf_stats.disk_mbps
+                } else {
+                    0.0
+                };
 
-                let cpu_ratio = if is_running { (cpu / 100.0).clamp(0.0, 1.0) } else { 0.0 };
-                let mem_ratio = if is_running { (mem / 256.0).clamp(0.0, 1.0) } else { 0.0 };
-                let disk_ratio = if is_running { (disk / 5.0).clamp(0.0, 1.0) } else { 0.0 };
+                let cpu_ratio = if is_running {
+                    (cpu / 100.0).clamp(0.0, 1.0)
+                } else {
+                    0.0
+                };
+                let mem_ratio = if is_running {
+                    (mem / 256.0).clamp(0.0, 1.0)
+                } else {
+                    0.0
+                };
+                let disk_ratio = if is_running {
+                    (disk / 5.0).clamp(0.0, 1.0)
+                } else {
+                    0.0
+                };
 
                 let cpu_col = if cpu > 80.0 {
                     Color32::from_rgb(255, 59, 48)
@@ -3891,22 +4084,41 @@ impl VpnApp {
 
                 let cpu_center = format!("{:.0}%", cpu);
                 let mem_center = format!("{:.0}M", mem);
-                let disk_center = if disk < 0.05 { "0M".to_string() } else if disk < 10.0 { format!("{:.1}M", disk) } else { format!("{:.0}M", disk) };
+                let disk_center = if disk < 0.05 {
+                    "0M".to_string()
+                } else if disk < 10.0 {
+                    format!("{:.1}M", disk)
+                } else {
+                    format!("{:.0}M", disk)
+                };
 
                 let cpu_sub = format!("{:.1}%", cpu);
                 let mem_sub = format!("{:.1} MB", mem);
-                let disk_sub = if disk < 0.01 { "0 MB/s".to_string() } else if disk < 10.0 { format!("{:.2} MB/s", disk) } else { format!("{:.1} MB/s", disk) };
+                let disk_sub = if disk < 0.01 {
+                    "0 MB/s".to_string()
+                } else if disk < 10.0 {
+                    format!("{:.2} MB/s", disk)
+                } else {
+                    format!("{:.1} MB/s", disk)
+                };
 
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 4.0;
                     render_ring_gauge(ui, col_w, cpu_ratio, &cpu_center, "CPU", &cpu_sub, cpu_col);
                     render_ring_gauge(ui, col_w, mem_ratio, &mem_center, "内存", &mem_sub, mem_col);
-                    render_ring_gauge(ui, col_w, disk_ratio, &disk_center, "磁盘", &disk_sub, disk_col);
+                    render_ring_gauge(
+                        ui,
+                        col_w,
+                        disk_ratio,
+                        &disk_center,
+                        "磁盘",
+                        &disk_sub,
+                        disk_col,
+                    );
                 });
             });
         });
     }
-
 }
 
 /// 方案 1：极简微型环形仪表盘 (Apple Watch / Activity 风格 Ring Gauge)
@@ -3937,11 +4149,7 @@ fn render_ring_gauge(
     } else {
         Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), 42)
     };
-    painter.circle_stroke(
-        center,
-        ring_radius,
-        Stroke::new(stroke_width, track_color),
-    );
+    painter.circle_stroke(center, ring_radius, Stroke::new(stroke_width, track_color));
 
     // 2. 高亮进度弧 (Progress Arc)
     let clamped_ratio = ratio.clamp(0.0, 1.0);
@@ -4024,5 +4232,3 @@ fn render_ring_gauge(
         );
     });
 }
-
-

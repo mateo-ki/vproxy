@@ -1,5 +1,5 @@
-pub mod appearance;
 pub mod api;
+pub mod appearance;
 pub mod automation;
 pub mod cleanup;
 pub mod general;
@@ -9,7 +9,9 @@ pub mod network;
 mod tests;
 
 #[allow(unused_imports)]
-pub(crate) use appearance::{font_scale_ticks, handle_travel_range, FONT_SCALE_MAX, FONT_SCALE_MIN};
+pub(crate) use appearance::{
+    font_scale_ticks, handle_travel_range, FONT_SCALE_MAX, FONT_SCALE_MIN,
+};
 
 use crate::gui::icons::{icon_label, Icon};
 use crate::gui::theme;
@@ -23,7 +25,11 @@ const SETTINGS_ACTIONS_WIDTH: f32 = 300.0;
 
 impl VpnApp {
     pub(crate) fn ui_settings(&mut self, ui: &mut Ui) {
-        section_title(ui, self.tr("系统设置"), "应用行为 · 定时拉取 · 测速参数 · 网络与自愈服务");
+        section_title(
+            ui,
+            self.tr("系统设置"),
+            "应用行为 · 定时拉取 · 测速参数 · 网络与自愈服务",
+        );
 
         let mut tab = self.settings_tab;
         let mut save_clicked = false;
@@ -45,13 +51,7 @@ impl VpnApp {
             "settings:header",
             SETTINGS_ACTIONS_WIDTH,
             |ui| {
-                panel_tab(
-                    ui,
-                    &mut tab,
-                    SettingsTab::General,
-                    Icon::Gear,
-                    tr_general,
-                );
+                panel_tab(ui, &mut tab, SettingsTab::General, Icon::Gear, tr_general);
                 panel_tab(
                     ui,
                     &mut tab,
@@ -66,33 +66,12 @@ impl VpnApp {
                     Icon::Lightning,
                     tr_automation,
                 );
-                panel_tab(
-                    ui,
-                    &mut tab,
-                    SettingsTab::Network,
-                    Icon::Shield,
-                    tr_network,
-                );
-                panel_tab(
-                    ui,
-                    &mut tab,
-                    SettingsTab::Api,
-                    Icon::Plug,
-                    tr_api,
-                );
-                panel_tab(
-                    ui,
-                    &mut tab,
-                    SettingsTab::Cleanup,
-                    Icon::Trash,
-                    tr_cleanup,
-                );
+                panel_tab(ui, &mut tab, SettingsTab::Network, Icon::Shield, tr_network);
+                panel_tab(ui, &mut tab, SettingsTab::Api, Icon::Plug, tr_api);
+                panel_tab(ui, &mut tab, SettingsTab::Cleanup, Icon::Trash, tr_cleanup);
             },
             |ui| {
-                if ui
-                    .add_enabled(!saving, primary_btn(tr_save))
-                    .clicked()
-                {
+                if ui.add_enabled(!saving, primary_btn(tr_save)).clicked() {
                     save_clicked = true;
                 }
                 if ui
@@ -114,7 +93,11 @@ impl VpnApp {
                     );
                     icon_label(ui, Icon::Alert, 12.0, theme::warning());
                 } else {
-                    ui.label(RichText::new(tr_synced).color(theme::accent_strong()).small());
+                    ui.label(
+                        RichText::new(tr_synced)
+                            .color(theme::accent_strong())
+                            .small(),
+                    );
                     icon_label(ui, Icon::Check, 12.0, theme::accent_strong());
                 }
             },
@@ -143,5 +126,4 @@ impl VpnApp {
                 SettingsTab::Cleanup => self.ui_settings_cleanup(ui),
             });
     }
-
 }

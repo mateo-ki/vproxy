@@ -158,7 +158,11 @@ impl VpnApp {
             ui.add_space(4.0);
             ui.horizontal(|ui| {
                 if ui
-                    .add(icons::button_with_icon(Icon::Sync, "深度整理内存", theme::accent()))
+                    .add(icons::button_with_icon(
+                        Icon::Sync,
+                        "深度整理内存",
+                        theme::accent(),
+                    ))
                     .on_hover_text("整理系统工作集，立即释放进程未使用的物理内存")
                     .clicked()
                 {
@@ -192,7 +196,9 @@ impl VpnApp {
             ui.horizontal(|ui| {
                 if ui
                     .add_enabled(elevated, primary_btn("立即写入防火墙规则"))
-                    .on_hover_text("对本程序和已下载到 managed kernels 目录的内核 exe 逐条写入允许规则")
+                    .on_hover_text(
+                        "对本程序和已下载到 managed kernels 目录的内核 exe 逐条写入允许规则",
+                    )
                     .clicked()
                 {
                     self.apply_firewall_rules();
@@ -209,7 +215,11 @@ impl VpnApp {
         card_frame().show(ui, |ui| {
             ui.horizontal(|ui| {
                 icon_label(ui, Icon::Export, 16.0, theme::accent());
-                ui.label(RichText::new("统一配置备份与全量迁移 (Unified Profile)").strong().size(15.0));
+                ui.label(
+                    RichText::new("统一配置备份与全量迁移 (Unified Profile)")
+                        .strong()
+                        .size(15.0),
+                );
                 status_badge(ui, "跨端归一化", theme::accent_strong());
             });
             ui.add_space(8.0);
@@ -218,7 +228,11 @@ impl VpnApp {
                 ui.spacing_mut().item_spacing.x = 8.0;
 
                 if ui
-                    .add(icons::button_with_icon(Icon::Package, "一键备份到本地", theme::accent()))
+                    .add(icons::button_with_icon(
+                        Icon::Package,
+                        "一键备份到本地",
+                        theme::accent(),
+                    ))
                     .on_hover_text("导出 YAML 配置并保存至 data/backups/，同时自动复制到剪贴板")
                     .clicked()
                 {
@@ -226,7 +240,11 @@ impl VpnApp {
                 }
 
                 if ui
-                    .add(icons::button_with_icon(Icon::Export, "另存为配置文件...", theme::accent()))
+                    .add(icons::button_with_icon(
+                        Icon::Export,
+                        "另存为配置文件...",
+                        theme::accent(),
+                    ))
                     .on_hover_text("弹出系统文件选择框，将当前统一配置另存为指定 .yaml 配置文件")
                     .clicked()
                 {
@@ -234,15 +252,25 @@ impl VpnApp {
                 }
 
                 if ui
-                    .add(icons::button_with_icon(Icon::Folder, "从文件导入还原...", theme::accent()))
-                    .on_hover_text("选取本地 YAML / JSON 配置文件无损还原订阅源、分流规则与自定义节点")
+                    .add(icons::button_with_icon(
+                        Icon::Folder,
+                        "从文件导入还原...",
+                        theme::accent(),
+                    ))
+                    .on_hover_text(
+                        "选取本地 YAML / JSON 配置文件无损还原订阅源、分流规则与自定义节点",
+                    )
                     .clicked()
                 {
                     self.import_profile_from_file();
                 }
 
                 if ui
-                    .add(icons::button_with_icon(Icon::Clipboard, "从剪贴板还原", theme::accent()))
+                    .add(icons::button_with_icon(
+                        Icon::Clipboard,
+                        "从剪贴板还原",
+                        theme::accent(),
+                    ))
                     .on_hover_text("从剪贴板读取统一配置文本并解析恢复")
                     .clicked()
                 {
@@ -252,9 +280,18 @@ impl VpnApp {
 
             if let Some((ref status, is_err)) = self.profile_status {
                 ui.add_space(8.0);
-                let color = if is_err { theme::danger() } else { theme::success() };
+                let color = if is_err {
+                    theme::danger()
+                } else {
+                    theme::success()
+                };
                 ui.horizontal(|ui| {
-                    icon_label(ui, if is_err { Icon::Alert } else { Icon::Check }, 14.0, color);
+                    icon_label(
+                        ui,
+                        if is_err { Icon::Alert } else { Icon::Check },
+                        14.0,
+                        color,
+                    );
                     ui.label(RichText::new(status).small().color(color));
                 });
             }
@@ -264,6 +301,4 @@ impl VpnApp {
             self.save_settings();
         }
     }
-
-
 }

@@ -1,8 +1,6 @@
 use crate::gui::icons::{draw_icon, icon_label, Icon};
 use crate::gui::theme;
-use crate::gui::widgets::{
-    clean_node_display_name, danger_btn, render_country_code_badge,
-};
+use crate::gui::widgets::{clean_node_display_name, danger_btn, render_country_code_badge};
 use crate::gui::VpnApp;
 use crate::speedtest::SpeedtestIntensity;
 use eframe::egui::{
@@ -103,20 +101,41 @@ fn draw_speedometer_dial(ui: &mut Ui, w: f32, mbps: f32, is_busy: bool, phase: u
     for &(s, label) in milestones {
         let f = speed_to_frac(s);
         let a = (start_deg + f * span_deg).to_radians();
-        let p_in = Pos2::new(center.x + (r - 7.0) * a.cos(), center.y + (r - 7.0) * a.sin());
-        let p_out = Pos2::new(center.x + (r - 11.0) * a.cos(), center.y + (r - 11.0) * a.sin());
+        let p_in = Pos2::new(
+            center.x + (r - 7.0) * a.cos(),
+            center.y + (r - 7.0) * a.sin(),
+        );
+        let p_out = Pos2::new(
+            center.x + (r - 11.0) * a.cos(),
+            center.y + (r - 11.0) * a.sin(),
+        );
         painter.line_segment([p_in, p_out], Stroke::new(1.0_f32, tick_col));
 
-        let p_text = Pos2::new(center.x + (r - 20.0) * a.cos(), center.y + (r - 20.0) * a.sin());
-        painter.text(p_text, egui::Align2::CENTER_CENTER, label, tick_font.clone(), tick_col);
+        let p_text = Pos2::new(
+            center.x + (r - 20.0) * a.cos(),
+            center.y + (r - 20.0) * a.sin(),
+        );
+        painter.text(
+            p_text,
+            egui::Align2::CENTER_CENTER,
+            label,
+            tick_font.clone(),
+            tick_col,
+        );
     }
 
     // 4. 外圈浮动指针 (Floating Needle)：起始半径 48px，完全避开中心 34pt 数字读数与胶囊
     let current_a = (start_deg + active_frac * span_deg).to_radians();
     let r_inner = 48.0_f32;
     let r_outer = r - 10.0; // 68.0px
-    let p_inner = Pos2::new(center.x + r_inner * current_a.cos(), center.y + r_inner * current_a.sin());
-    let p_outer = Pos2::new(center.x + r_outer * current_a.cos(), center.y + r_outer * current_a.sin());
+    let p_inner = Pos2::new(
+        center.x + r_inner * current_a.cos(),
+        center.y + r_inner * current_a.sin(),
+    );
+    let p_outer = Pos2::new(
+        center.x + r_outer * current_a.cos(),
+        center.y + r_outer * current_a.sin(),
+    );
     let needle_col = if theme::is_light() {
         Color32::from_rgb(17, 24, 39)
     } else {
@@ -125,7 +144,10 @@ fn draw_speedometer_dial(ui: &mut Ui, w: f32, mbps: f32, is_busy: bool, phase: u
     painter.line_segment([p_inner, p_outer], Stroke::new(2.4_f32, needle_col));
 
     // 轨道游标指示圆点 (在轨道上显示当前速率精准落点)
-    let bead_pos = Pos2::new(center.x + r * current_a.cos(), center.y + r * current_a.sin());
+    let bead_pos = Pos2::new(
+        center.x + r * current_a.cos(),
+        center.y + r * current_a.sin(),
+    );
     painter.circle_filled(bead_pos, 4.0, Color32::WHITE);
     painter.circle_stroke(bead_pos, 4.0, Stroke::new(1.8_f32, active_track_col));
 
@@ -141,14 +163,20 @@ fn draw_speedometer_dial(ui: &mut Ui, w: f32, mbps: f32, is_busy: bool, phase: u
     );
 
     // 单位胶囊: 位于中央数字正下方，彻底拉开间距，不与指针产生任何遮挡
-    let unit_rect = Rect::from_center_size(Pos2::new(center.x, center.y + 32.0), Vec2::new(76.0, 18.0));
+    let unit_rect =
+        Rect::from_center_size(Pos2::new(center.x, center.y + 32.0), Vec2::new(76.0, 18.0));
     let unit_bg = if theme::is_light() {
         Color32::WHITE
     } else {
         Color32::from_rgb(38, 42, 50)
     };
     painter.rect_filled(unit_rect, CornerRadius::same(9), unit_bg);
-    painter.rect_stroke(unit_rect, CornerRadius::same(9), Stroke::new(1.0_f32, theme::border_subtle()), egui::StrokeKind::Inside);
+    painter.rect_stroke(
+        unit_rect,
+        CornerRadius::same(9),
+        Stroke::new(1.0_f32, theme::border_subtle()),
+        egui::StrokeKind::Inside,
+    );
 
     let unit_text = if is_busy {
         match phase {
@@ -165,7 +193,11 @@ fn draw_speedometer_dial(ui: &mut Ui, w: f32, mbps: f32, is_busy: bool, phase: u
         egui::Align2::CENTER_CENTER,
         unit_text,
         egui::FontId::proportional(10.0),
-        if is_busy { active_track_col } else { theme::text_secondary() },
+        if is_busy {
+            active_track_col
+        } else {
+            theme::text_secondary()
+        },
     );
 }
 
@@ -193,8 +225,15 @@ fn draw_stage_flow(ui: &mut Ui, w: f32, phase: usize) {
     for i in 0..2 {
         let x0 = rect.center().x + step_x_offsets[i] + 20.0;
         let x1 = rect.center().x + step_x_offsets[i + 1] - 20.0;
-        let line_col = if phase > i + 1 || phase == 4 { active_col } else { inactive_col };
-        painter.line_segment([Pos2::new(x0, center_y), Pos2::new(x1, center_y)], Stroke::new(2.0_f32, line_col));
+        let line_col = if phase > i + 1 || phase == 4 {
+            active_col
+        } else {
+            inactive_col
+        };
+        painter.line_segment(
+            [Pos2::new(x0, center_y), Pos2::new(x1, center_y)],
+            Stroke::new(2.0_f32, line_col),
+        );
     }
 
     // 阶段点与名称
@@ -203,7 +242,11 @@ fn draw_stage_flow(ui: &mut Ui, w: f32, phase: usize) {
         let is_completed = phase > i + 1 || phase == 4;
         let is_active = phase == i + 1;
 
-        let dot_col = if is_completed || is_active { active_col } else { inactive_col };
+        let dot_col = if is_completed || is_active {
+            active_col
+        } else {
+            inactive_col
+        };
         painter.circle_filled(Pos2::new(x - 14.0, center_y), 3.5, dot_col);
         if is_active {
             painter.circle_stroke(
@@ -248,12 +291,23 @@ fn draw_metric_subcard(
         Color32::from_rgb(38, 42, 50)
     };
     painter.rect_filled(rect, CornerRadius::same(12), card_bg);
-    painter.rect_stroke(rect, CornerRadius::same(12), Stroke::new(1.0_f32, theme::border_subtle()), egui::StrokeKind::Inside);
+    painter.rect_stroke(
+        rect,
+        CornerRadius::same(12),
+        Stroke::new(1.0_f32, theme::border_subtle()),
+        egui::StrokeKind::Inside,
+    );
 
     // 左侧圆形图标徽章
     let circle_center = Pos2::new(rect.left() + 20.0, rect.center().y);
     painter.circle_filled(circle_center, 13.0, icon_bg);
-    painter.text(circle_center, egui::Align2::CENTER_CENTER, icon, egui::FontId::proportional(12.0), icon_fg);
+    painter.text(
+        circle_center,
+        egui::Align2::CENTER_CENTER,
+        icon,
+        egui::FontId::proportional(12.0),
+        icon_fg,
+    );
 
     // 标签与数值
     let text_x = rect.left() + 40.0;
@@ -436,7 +490,10 @@ fn draw_realtime_rate_chart(
         let y = plot_rect.bottom() - ratio * plot_h;
         if *ratio > 0.001 {
             painter.line_segment(
-                [Pos2::new(plot_rect.left(), y), Pos2::new(plot_rect.right(), y)],
+                [
+                    Pos2::new(plot_rect.left(), y),
+                    Pos2::new(plot_rect.right(), y),
+                ],
                 grid_stroke,
             );
         }
@@ -457,10 +514,7 @@ fn draw_realtime_rate_chart(
         theme::muted(),
     );
     // Y 轴垂直轴线
-    painter.line_segment(
-        [plot_rect.left_top(), plot_rect.left_bottom()],
-        axis_stroke,
-    );
+    painter.line_segment([plot_rect.left_top(), plot_rect.left_bottom()], axis_stroke);
 
     // 2. 绘制 X 轴（时间轴）水平底线与刻度值
     let max_time_s = 3.6_f32; // 采样周期 75ms × 48帧 = 3.6秒
@@ -473,13 +527,19 @@ fn draw_realtime_rate_chart(
         let x = plot_rect.left() + (t / max_time_s) * plot_w;
         // 刻度小短线
         painter.line_segment(
-            [Pos2::new(x, plot_rect.bottom()), Pos2::new(x, plot_rect.bottom() + 3.0)],
+            [
+                Pos2::new(x, plot_rect.bottom()),
+                Pos2::new(x, plot_rect.bottom() + 3.0),
+            ],
             axis_stroke,
         );
         // 纵向参考辅助虚线
         if t > 0.05 && t < 3.55 {
             painter.line_segment(
-                [Pos2::new(x, plot_rect.top()), Pos2::new(x, plot_rect.bottom())],
+                [
+                    Pos2::new(x, plot_rect.top()),
+                    Pos2::new(x, plot_rect.bottom()),
+                ],
                 grid_stroke,
             );
         }
@@ -626,7 +686,10 @@ fn draw_realtime_rate_chart(
 
     // 5. 鼠标悬停数据探针交互（光标指示线、曲线上高亮圆点与悬浮 HUD 数据卡）
     if let Some(pos) = ui.input(|i| i.pointer.hover_pos()) {
-        if plot_rect.x_range().contains(pos.x) && pos.y >= plot_rect.top() - 6.0 && pos.y <= plot_rect.bottom() + 8.0 {
+        if plot_rect.x_range().contains(pos.x)
+            && pos.y >= plot_rect.top() - 6.0
+            && pos.y <= plot_rect.bottom() + 8.0
+        {
             let mouse_x = pos.x.clamp(plot_rect.left(), plot_rect.right());
             let t_ratio = ((mouse_x - plot_rect.left()) / plot_w).clamp(0.0, 1.0);
             let t_sec = t_ratio * max_time_s;
@@ -658,7 +721,10 @@ fn draw_realtime_rate_chart(
                     },
                 );
                 painter.line_segment(
-                    [Pos2::new(mouse_x, plot_rect.top()), Pos2::new(mouse_x, plot_rect.bottom())],
+                    [
+                        Pos2::new(mouse_x, plot_rect.top()),
+                        Pos2::new(mouse_x, plot_rect.bottom()),
+                    ],
                     cursor_stroke,
                 );
 
@@ -680,14 +746,20 @@ fn draw_realtime_rate_chart(
 
                 // C. 悬浮数据浮动卡片 (HUD Tooltip)
                 let tip_w = 120.0_f32;
-                let tip_h = if dl_val.is_some() && ul_val.is_some() { 64.0_f32 } else { 46.0_f32 };
+                let tip_h = if dl_val.is_some() && ul_val.is_some() {
+                    64.0_f32
+                } else {
+                    46.0_f32
+                };
                 let tip_x = if mouse_x + tip_w + 14.0 > inner.right() {
                     mouse_x - tip_w - 10.0
                 } else {
                     mouse_x + 10.0
                 };
-                let tip_y = (pos.y - tip_h / 2.0).clamp(plot_rect.top(), plot_rect.bottom() - tip_h);
-                let tip_rect = Rect::from_min_size(Pos2::new(tip_x, tip_y), Vec2::new(tip_w, tip_h));
+                let tip_y =
+                    (pos.y - tip_h / 2.0).clamp(plot_rect.top(), plot_rect.bottom() - tip_h);
+                let tip_rect =
+                    Rect::from_min_size(Pos2::new(tip_x, tip_y), Vec2::new(tip_w, tip_h));
 
                 let tip_bg = if theme::is_light() {
                     Color32::from_rgba_premultiplied(255, 255, 255, 245)
@@ -715,26 +787,42 @@ fn draw_realtime_rate_chart(
 
                 // 下载速率
                 if let Some(dl) = dl_val {
-                    painter.circle_filled(Pos2::new(tip_rect.left() + 12.0, cur_y + 6.0), 3.0, dl_color);
+                    painter.circle_filled(
+                        Pos2::new(tip_rect.left() + 12.0, cur_y + 6.0),
+                        3.0,
+                        dl_color,
+                    );
                     painter.text(
                         Pos2::new(tip_rect.left() + 20.0, cur_y),
                         egui::Align2::LEFT_TOP,
                         format!("下载: {:.1} Mbps", dl),
                         egui::FontId::proportional(10.5),
-                        if theme::is_light() { Color32::from_rgb(25, 75, 85) } else { Color32::from_rgb(100, 200, 220) },
+                        if theme::is_light() {
+                            Color32::from_rgb(25, 75, 85)
+                        } else {
+                            Color32::from_rgb(100, 200, 220)
+                        },
                     );
                     cur_y += 16.0;
                 }
 
                 // 上传速率
                 if let Some(ul) = ul_val {
-                    painter.circle_filled(Pos2::new(tip_rect.left() + 12.0, cur_y + 6.0), 3.0, ul_color);
+                    painter.circle_filled(
+                        Pos2::new(tip_rect.left() + 12.0, cur_y + 6.0),
+                        3.0,
+                        ul_color,
+                    );
                     painter.text(
                         Pos2::new(tip_rect.left() + 20.0, cur_y),
                         egui::Align2::LEFT_TOP,
                         format!("上传: {:.1} Mbps", ul),
                         egui::FontId::proportional(10.5),
-                        if theme::is_light() { Color32::from_rgb(105, 45, 210) } else { Color32::from_rgb(175, 130, 255) },
+                        if theme::is_light() {
+                            Color32::from_rgb(105, 45, 210)
+                        } else {
+                            Color32::from_rgb(175, 130, 255)
+                        },
                     );
                 }
             }
@@ -784,7 +872,9 @@ impl VpnApp {
         } else if let Some(dl) = self.speedtest_last_dl_mbps {
             dl
         } else if let Some(ref node) = selected_node {
-            node.download_kbps.map(|k| (k * 8.0 / 1000.0) as f32).unwrap_or(0.0)
+            node.download_kbps
+                .map(|k| (k * 8.0 / 1000.0) as f32)
+                .unwrap_or(0.0)
         } else {
             0.0
         };
@@ -798,7 +888,12 @@ impl VpnApp {
         // 测速阶段判定：0=未测速, 1=延迟握手, 2=下载吞吐, 3=上传, 4=完成
         let current_phase = if self.speedtest_busy {
             self.speedtest_phase
-        } else if self.speedtest_last_dl_mbps.is_some() || selected_node.as_ref().and_then(|n| n.download_kbps).is_some() {
+        } else if self.speedtest_last_dl_mbps.is_some()
+            || selected_node
+                .as_ref()
+                .and_then(|n| n.download_kbps)
+                .is_some()
+        {
             4
         } else {
             0
@@ -1267,13 +1362,21 @@ impl VpnApp {
                 self.speedtest_show_settings = false;
             }
             ui.add_space(8.0);
-            ui.label(RichText::new("调整节点延迟筛查与带宽吞吐测速参数").small().color(theme::muted()));
+            ui.label(
+                RichText::new("调整节点延迟筛查与带宽吞吐测速参数")
+                    .small()
+                    .color(theme::muted()),
+            );
         });
 
         ui.add_space(10.0);
 
         Frame::NONE
-            .fill(if theme::is_light() { Color32::WHITE } else { Color32::from_rgb(34, 37, 44) })
+            .fill(if theme::is_light() {
+                Color32::WHITE
+            } else {
+                Color32::from_rgb(34, 37, 44)
+            })
             .stroke(Stroke::new(1.0_f32, theme::border_subtle()))
             .corner_radius(CornerRadius::same(14))
             .inner_margin(Margin::same(16))
@@ -1283,18 +1386,44 @@ impl VpnApp {
 
                     // 1. 强度胶囊选择器
                     ui.horizontal(|ui| {
-                        ui.label(RichText::new("测速强度模式:").size(12.5).strong().color(theme::text_primary()));
+                        ui.label(
+                            RichText::new("测速强度模式:")
+                                .size(12.5)
+                                .strong()
+                                .color(theme::text_primary()),
+                        );
                         for (mode, name, tip) in [
-                            (SpeedtestIntensity::Fast, "极速 (Fast)", "高并发、短超时（1.2s），快速预筛淘汰死节点"),
-                            (SpeedtestIntensity::Standard, "标准 (Standard)", "标准并发、适度超时（1.5s），推荐日常使用"),
-                            (SpeedtestIntensity::Deep, "深度 (Deep)", "低并发、长超时（3.5s），精准测量边远节点"),
+                            (
+                                SpeedtestIntensity::Fast,
+                                "极速 (Fast)",
+                                "高并发、短超时（1.2s），快速预筛淘汰死节点",
+                            ),
+                            (
+                                SpeedtestIntensity::Standard,
+                                "标准 (Standard)",
+                                "标准并发、适度超时（1.5s），推荐日常使用",
+                            ),
+                            (
+                                SpeedtestIntensity::Deep,
+                                "深度 (Deep)",
+                                "低并发、长超时（3.5s），精准测量边远节点",
+                            ),
                         ] {
                             let active = self.speedtest_intensity == mode;
                             let btn = if active {
-                                egui::Button::new(RichText::new(name).size(11.0).strong().color(Color32::WHITE))
-                                    .fill(theme::accent())
+                                egui::Button::new(
+                                    RichText::new(name)
+                                        .size(11.0)
+                                        .strong()
+                                        .color(Color32::WHITE),
+                                )
+                                .fill(theme::accent())
                             } else {
-                                egui::Button::new(RichText::new(name).size(11.0).color(theme::text_secondary()))
+                                egui::Button::new(
+                                    RichText::new(name)
+                                        .size(11.0)
+                                        .color(theme::text_secondary()),
+                                )
                             };
                             if ui.add(btn).on_hover_text(tip).clicked() && !active {
                                 self.speedtest_intensity = mode;
@@ -1306,7 +1435,12 @@ impl VpnApp {
 
                     // 2. 并发数滑动条
                     ui.horizontal(|ui| {
-                        ui.label(RichText::new("测速并发上限:").size(12.5).strong().color(theme::text_primary()));
+                        ui.label(
+                            RichText::new("测速并发上限:")
+                                .size(12.5)
+                                .strong()
+                                .color(theme::text_primary()),
+                        );
                         let resp = ui.add(
                             egui::Slider::new(&mut self.settings.speedtest_concurrency, 8..=128)
                                 .text("线程并发"),
@@ -1320,7 +1454,10 @@ impl VpnApp {
 
                     // 3. 复选开关
                     if ui
-                        .checkbox(&mut self.settings.speedtest_download, "批量测速时探测真实下载带宽速率（消耗流量）")
+                        .checkbox(
+                            &mut self.settings.speedtest_download,
+                            "批量测速时探测真实下载带宽速率（消耗流量）",
+                        )
                         .on_hover_text("全量批量测速时对延迟达标节点拉取真实测试文件，探测吞吐速率")
                         .changed()
                     {
@@ -1328,7 +1465,10 @@ impl VpnApp {
                     }
 
                     if ui
-                        .checkbox(&mut self.settings.speedtest_tcp_ping_only, "快速 TCP Ping 预筛模式（仅测端口连通，跳过内核握手）")
+                        .checkbox(
+                            &mut self.settings.speedtest_tcp_ping_only,
+                            "快速 TCP Ping 预筛模式（仅测端口连通，跳过内核握手）",
+                        )
                         .on_hover_text("仅进行纯 TCP 握手测速，极大节省系统资源与时间")
                         .changed()
                     {
@@ -1336,7 +1476,10 @@ impl VpnApp {
                     }
 
                     if ui
-                        .checkbox(&mut self.settings.speedtest_dedup_egress, "自动合并相同真实出口 IP 节点（出口去重）")
+                        .checkbox(
+                            &mut self.settings.speedtest_dedup_egress,
+                            "自动合并相同真实出口 IP 节点（出口去重）",
+                        )
                         .on_hover_text("测速后识别具有相同出口 IP 的重复节点")
                         .changed()
                     {

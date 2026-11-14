@@ -42,7 +42,9 @@ impl KernelValidator {
         std::fs::create_dir_all(&temp_dir)?;
 
         let config_file_name = match kernel {
-            KernelKind::Mihomo | KernelKind::Shoes | KernelKind::Meow | KernelKind::VpCore => "config.yaml",
+            KernelKind::Mihomo | KernelKind::Shoes | KernelKind::Meow | KernelKind::VpCore => {
+                "config.yaml"
+            }
             _ => "config.json",
         };
         let config_path = temp_dir.join(config_file_name);
@@ -84,10 +86,7 @@ impl KernelValidator {
                 };
                 cmd.current_dir(&effective_asset_dir);
                 cmd.env("XRAY_LOCATION_ASSET", &effective_asset_dir);
-                cmd.arg("run")
-                    .arg("-test")
-                    .arg("-c")
-                    .arg(&config_path);
+                cmd.arg("run").arg("-test").arg("-c").arg(&config_path);
             }
             KernelKind::Shoes => {
                 cmd.arg("check").arg(&config_path);
@@ -109,9 +108,7 @@ impl KernelValidator {
             KernelKind::VpCore => {
                 let vpcore_home = managed_kernel_root().join(KernelKind::VpCore.directory_name());
                 crate::geo::populate_vpcore_work_dir(&vpcore_home, &temp_dir);
-                cmd.arg("validate")
-                    .arg("-c")
-                    .arg(&config_path);
+                cmd.arg("validate").arg("-c").arg(&config_path);
             }
         }
 

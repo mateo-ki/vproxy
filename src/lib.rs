@@ -201,10 +201,7 @@ mod data_root_tests {
             None,
             Some(Path::new("/home/me")),
         );
-        assert_eq!(
-            got,
-            Path::new("/home/me/.local/share/vproxy").to_path_buf()
-        );
+        assert_eq!(got, Path::new("/home/me/.local/share/vproxy").to_path_buf());
 
         // 相对值不当 XDG 配置：那样会拼出一个跟着工作目录跑的假绝对路径。
         let got = data_root_from(
@@ -213,10 +210,7 @@ mod data_root_tests {
             Some(Path::new("relative")),
             Some(Path::new("/home/me")),
         );
-        assert_eq!(
-            got,
-            Path::new("/home/me/.local/share/vproxy").to_path_buf()
-        );
+        assert_eq!(got, Path::new("/home/me/.local/share/vproxy").to_path_buf());
 
         let got = data_root_from(false, Path::new("/usr/bin"), None, None);
         assert_eq!(got, Path::new("/usr/bin/data").to_path_buf());

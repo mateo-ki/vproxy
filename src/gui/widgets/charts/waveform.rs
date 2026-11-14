@@ -57,11 +57,17 @@ pub fn render_traffic_waveform_card(
             Stroke::new(1.8_f32, line_color),
         );
         // 右端点指示发光光标
-        painter.circle_filled(egui::pos2(rect.max.x - 4.0, baseline), 3.5, line_color.gamma_multiply(0.3));
+        painter.circle_filled(
+            egui::pos2(rect.max.x - 4.0, baseline),
+            3.5,
+            line_color.gamma_multiply(0.3),
+        );
         painter.circle_filled(egui::pos2(rect.max.x - 4.0, baseline), 2.0, line_color);
 
         if hovered {
-            response.on_hover_text("实时流量监视器 · 待机 (0.0 KB/s)\n启动内核后将实时绘制平滑吞吐波形");
+            response.on_hover_text(
+                "实时流量监视器 · 待机 (0.0 KB/s)\n启动内核后将实时绘制平滑吞吐波形",
+            );
         }
         return;
     }
@@ -171,4 +177,3 @@ pub fn render_traffic_waveform_card(
         }
     }
 }
-

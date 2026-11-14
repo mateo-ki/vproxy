@@ -1,9 +1,9 @@
-use std::path::{Path, PathBuf};
 use crate::gui::icons::{icon_label, Icon};
 use crate::gui::theme;
 use crate::gui::widgets::{card_frame, format_bytes, primary_btn, status_badge};
 use crate::gui::VpnApp;
 use eframe::egui::{self, RichText, Ui};
+use std::path::{Path, PathBuf};
 
 /// 可清理文件的业务分类
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -681,7 +681,8 @@ mod tests {
 
     #[test]
     fn scan_exe_dir_protects_current_and_catches_old() {
-        let test_dir = std::env::temp_dir().join(format!("vpn_cleanup_test_{}", std::process::id()));
+        let test_dir =
+            std::env::temp_dir().join(format!("vpn_cleanup_test_{}", std::process::id()));
         let _ = std::fs::create_dir_all(&test_dir);
 
         let current_exe = test_dir.join("vproxy.exe");
@@ -703,13 +704,28 @@ mod tests {
         scan_exe_dir(&test_dir, &current_exe, &mut found);
 
         // 验证当前主程序和活跃主日志绝对未被判定为待清理
-        assert!(!found.iter().any(|i| i.path == current_exe), "当前运行的 exe 绝不能被扫描进入清理列表");
-        assert!(!found.iter().any(|i| i.path == live_log), "活跃的当前 startup.log 绝不能被扫描进入清理列表");
+        assert!(
+            !found.iter().any(|i| i.path == current_exe),
+            "当前运行的 exe 绝不能被扫描进入清理列表"
+        );
+        assert!(
+            !found.iter().any(|i| i.path == live_log),
+            "活跃的当前 startup.log 绝不能被扫描进入清理列表"
+        );
 
         // 验证旧文件全部被扫描到
-        assert!(found.iter().any(|i| i.path == old_exe), "历史程序镜像 .old 应当被识别");
-        assert!(found.iter().any(|i| i.path == tmp_installer), "安装程序临时文件 is-*.tmp 应当被识别");
-        assert!(found.iter().any(|i| i.path == rotated_log), "已轮转的历史日志 *.log.1 应当被识别");
+        assert!(
+            found.iter().any(|i| i.path == old_exe),
+            "历史程序镜像 .old 应当被识别"
+        );
+        assert!(
+            found.iter().any(|i| i.path == tmp_installer),
+            "安装程序临时文件 is-*.tmp 应当被识别"
+        );
+        assert!(
+            found.iter().any(|i| i.path == rotated_log),
+            "已轮转的历史日志 *.log.1 应当被识别"
+        );
 
         // 验证删除执行
         let to_remove: Vec<PathBuf> = found.iter().map(|i| i.path.clone()).collect();

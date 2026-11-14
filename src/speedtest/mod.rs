@@ -73,7 +73,6 @@ pub struct SpeedTestOptions {
     pub tcp_ping_only: bool,
 }
 
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SpeedTestPhase {
     TcpPrefilter,
@@ -415,10 +414,7 @@ mod tests {
     /// 节点用 TEST-NET 地址：TCP 必连失败但立即返回，不碰真实网络。
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn test_all_sources_completes_on_many_nodes() {
-        let path = std::env::temp_dir().join(format!(
-            "vproxy-scale-{}.db",
-            uuid::Uuid::new_v4()
-        ));
+        let path = std::env::temp_dir().join(format!("vproxy-scale-{}.db", uuid::Uuid::new_v4()));
         let db = Database::connect(path.to_str().unwrap()).await.unwrap();
         let now = chrono::Utc::now();
         let nodes: Vec<Node> = (0..2000)
@@ -460,7 +456,15 @@ mod tests {
 
     #[test]
     fn udp_proxy_protocols_skip_tcp_prefilter() {
-        for protocol in ["hysteria", "hysteria2", "hy2", "tuic", "wireguard", "wg", "masque"] {
+        for protocol in [
+            "hysteria",
+            "hysteria2",
+            "hy2",
+            "tuic",
+            "wireguard",
+            "wg",
+            "masque",
+        ] {
             assert!(pipeline::requires_proxy_without_tcp(protocol), "{protocol}");
         }
         for protocol in ["vless", "vmess", "trojan", "ss"] {
@@ -645,9 +649,14 @@ mod tests {
             created_at: now,
             updated_at: now,
         };
-        let key_a = pipeline::node_physical_egress_key(&node_a, Some("104.16.88.99".parse().unwrap()));
-        let key_b = pipeline::node_physical_egress_key(&node_b, Some("104.16.88.99".parse().unwrap()));
-        assert_ne!(key_a, key_b, "CDN Anycast 节点的聚类特征必须区分 SNI、路径与凭证");
+        let key_a =
+            pipeline::node_physical_egress_key(&node_a, Some("104.16.88.99".parse().unwrap()));
+        let key_b =
+            pipeline::node_physical_egress_key(&node_b, Some("104.16.88.99".parse().unwrap()));
+        assert_ne!(
+            key_a, key_b,
+            "CDN Anycast 节点的聚类特征必须区分 SNI、路径与凭证"
+        );
     }
 
     #[test]

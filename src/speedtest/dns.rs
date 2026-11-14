@@ -78,31 +78,29 @@ pub async fn resolve_targets_parallel(
             };
 
             let target = format!("{host}:80");
-            let mut res = match tokio::time::timeout(
-                dns_timeout,
-                tokio::net::lookup_host(target.as_str()),
-            )
-            .await
-            {
-                Ok(Ok(iter)) => {
-                    let mut ips: Vec<IpAddr> = iter.map(|sa| sa.ip()).collect();
-                    ips.sort_by_key(|ip| if ip.is_ipv4() { 0u8 } else { 1u8 });
-                    ips.dedup();
-                    let had_ips = !ips.is_empty();
-                    ips.retain(|ip| !is_suspected_polluted_ip(ip));
-                    if ips.is_empty() {
-                        if had_ips {
-                            Err("DNS 疑似被污染（返回保留/虚假地址）".to_string())
+            let mut res =
+                match tokio::time::timeout(dns_timeout, tokio::net::lookup_host(target.as_str()))
+                    .await
+                {
+                    Ok(Ok(iter)) => {
+                        let mut ips: Vec<IpAddr> = iter.map(|sa| sa.ip()).collect();
+                        ips.sort_by_key(|ip| if ip.is_ipv4() { 0u8 } else { 1u8 });
+                        ips.dedup();
+                        let had_ips = !ips.is_empty();
+                        ips.retain(|ip| !is_suspected_polluted_ip(ip));
+                        if ips.is_empty() {
+                            if had_ips {
+                                Err("DNS 疑似被污染（返回保留/虚假地址）".to_string())
+                            } else {
+                                Err("DNS 解析结果为空".to_string())
+                            }
                         } else {
-                            Err("DNS 解析结果为空".to_string())
+                            Ok(ips)
                         }
-                    } else {
-                        Ok(ips)
                     }
-                }
-                Ok(Err(err)) => Err(format!("dns error: {err}")),
-                Err(_) => Err("dns timeout".into()),
-            };
+                    Ok(Err(err)) => Err(format!("dns error: {err}")),
+                    Err(_) => Err("dns timeout".into()),
+                };
 
             // 针对偶发 UDP 丢包导致的超时，做一次 800ms 的快速重试，多捞回有效节点
             if res.is_err() {
@@ -169,11 +167,25 @@ mod tests {
             ("8.8.8.8".to_string(), 853),
             ("1.1.1.1".to_string(), 8443),
         ];
-        let res = resolve_targets_parallel(targets, limit, Duration::from_millis(500), None::<fn(usize, usize)>).await;
+        let res = resolve_targets_parallel(
+            targets,
+            limit,
+            Duration::from_millis(500),
+            None::<fn(usize, usize)>,
+        )
+        .await;
         assert_eq!(res.len(), 3);
-        let a = res.get(&("1.1.1.1".to_string(), 443)).unwrap().as_ref().unwrap();
+        let a = res
+            .get(&("1.1.1.1".to_string(), 443))
+            .unwrap()
+            .as_ref()
+            .unwrap();
         assert_eq!(a[0], "1.1.1.1:443".parse().unwrap());
-        let b = res.get(&("1.1.1.1".to_string(), 8443)).unwrap().as_ref().unwrap();
+        let b = res
+            .get(&("1.1.1.1".to_string(), 8443))
+            .unwrap()
+            .as_ref()
+            .unwrap();
         assert_eq!(b[0], "1.1.1.1:8443".parse().unwrap());
     }
 
@@ -187,7 +199,8 @@ mod tests {
         assert!(is_suspected_polluted_ip(&"203.0.113.1".parse().unwrap()));
         assert!(is_suspected_polluted_ip(&"243.185.187.39".parse().unwrap()));
         assert!(!is_suspected_polluted_ip(&"104.16.88.99".parse().unwrap()));
-        assert!(!is_suspected_polluted_ip(&"141.98.101.182".parse().unwrap()));
+        assert!(!is_suspected_polluted_ip(
+            &"141.98.101.182".parse().unwrap()
+        ));
     }
 }
-

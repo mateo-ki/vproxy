@@ -26,9 +26,7 @@ pub fn enabled_from_value(value: Option<&str>) -> bool {
 /// 读一次才能保证"半诊断"状态不可能出现。
 pub fn enabled() -> bool {
     static CACHED: OnceLock<bool> = OnceLock::new();
-    *CACHED.get_or_init(|| {
-        enabled_from_value(std::env::var(FLAG).ok().as_deref())
-    })
+    *CACHED.get_or_init(|| enabled_from_value(std::env::var(FLAG).ok().as_deref()))
 }
 
 /// 诊断实例的工作目录：`%TEMP%\vproxy-diag-<pid>`。启动时把 cwd 切到这里，

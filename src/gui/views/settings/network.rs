@@ -169,9 +169,11 @@ impl VpnApp {
             });
             ui.add_space(2.0);
             ui.label(
-                RichText::new("热重载 GeoIP / GeoSite 路由规则数据库，以及管理供外部调用的 RESTful API。")
-                    .small()
-                    .color(theme::muted()),
+                RichText::new(
+                    "热重载 GeoIP / GeoSite 路由规则数据库，以及管理供外部调用的 RESTful API。",
+                )
+                .small()
+                .color(theme::muted()),
             );
             ui.add_space(8.0);
 
@@ -189,10 +191,7 @@ impl VpnApp {
             ui.horizontal(|ui| {
                 let running = self.proxy_status.state == ProxyState::Running;
                 if ui
-                    .add_enabled(
-                        !self.geo_updating,
-                        egui::Button::new("在线更新 Geo 数据库"),
-                    )
+                    .add_enabled(!self.geo_updating, egui::Button::new("在线更新 Geo 数据库"))
                     .on_hover_text(if running {
                         "向当前代理内核发送指令，在线拉取并热重载最新的 Geo 规则数据库"
                     } else {
@@ -204,9 +203,17 @@ impl VpnApp {
                 }
                 if self.geo_updating {
                     ui.spinner();
-                    ui.label(RichText::new("正在高速下载更新 Geo 规则...").small().color(theme::accent()));
+                    ui.label(
+                        RichText::new("正在高速下载更新 Geo 规则...")
+                            .small()
+                            .color(theme::accent()),
+                    );
                 } else if !running {
-                    ui.label(RichText::new("（直连极速 CDN，无需开启代理）").small().color(theme::muted()));
+                    ui.label(
+                        RichText::new("（直连极速 CDN，无需开启代理）")
+                            .small()
+                            .color(theme::muted()),
+                    );
                 }
             });
 
@@ -250,7 +257,10 @@ impl VpnApp {
             });
             ui.add_space(4.0);
             if ui
-                .checkbox(&mut self.edit_http_server_enabled, "软件启动时自动开启 HTTP API 服务")
+                .checkbox(
+                    &mut self.edit_http_server_enabled,
+                    "软件启动时自动开启 HTTP API 服务",
+                )
                 .on_hover_text("若平时不需要外部接口调用，可取消勾选以节约系统资源")
                 .changed()
             {
@@ -262,6 +272,4 @@ impl VpnApp {
             self.save_settings();
         }
     }
-
-
 }

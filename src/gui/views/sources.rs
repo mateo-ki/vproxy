@@ -3,8 +3,8 @@ use crate::gui::theme;
 use crate::gui::types::{SourceStatusFilter, SourcesPanel};
 use crate::gui::view_models::nodes_vm::{NodeCardAction, NodesViewModel};
 use crate::gui::widgets::{
-    card_frame, header_cell, primary_btn, render_fetch_ticks,
-    section_title, source_status_failed, status_badge,
+    card_frame, header_cell, primary_btn, render_fetch_ticks, section_title, source_status_failed,
+    status_badge,
 };
 use crate::gui::VpnApp;
 use eframe::egui::{self, Color32, CornerRadius, Frame, Margin, RichText, Stroke, Ui};
@@ -17,13 +17,19 @@ impl VpnApp {
 
         ui.horizontal(|ui| {
             if ui
-                .selectable_label(self.sources_panel == SourcesPanel::List, self.tr("订阅列表"))
+                .selectable_label(
+                    self.sources_panel == SourcesPanel::List,
+                    self.tr("订阅列表"),
+                )
                 .clicked()
             {
                 self.sources_panel = SourcesPanel::List;
             }
             if ui
-                .selectable_label(self.sources_panel == SourcesPanel::Results, self.tr("订阅拉取结果"))
+                .selectable_label(
+                    self.sources_panel == SourcesPanel::Results,
+                    self.tr("订阅拉取结果"),
+                )
                 .clicked()
             {
                 self.sources_panel = SourcesPanel::Results;
@@ -54,7 +60,11 @@ impl VpnApp {
 
         // 第 1 行：新建 拉取全部 代理拉取全部 导入订阅 导出订阅 清空全部
         ui.horizontal(|ui| {
-            if ui.add(primary_btn(self.tr("新建"))).on_hover_text("新增订阅源配置").clicked() {
+            if ui
+                .add(primary_btn(self.tr("新建")))
+                .on_hover_text("新增订阅源配置")
+                .clicked()
+            {
                 self.open_create_form();
             }
             if ui
@@ -170,11 +180,7 @@ impl VpnApp {
             .sources
             .iter()
             .filter(|source| {
-                source_passes_filter(
-                    source,
-                    &self.source_name_filter,
-                    self.source_status_filter,
-                )
+                source_passes_filter(source, &self.source_name_filter, self.source_status_filter)
             })
             .cloned()
             .collect();
@@ -782,8 +788,10 @@ impl VpnApp {
         card_frame().show(ui, |ui| {
             if self.fetch_results.is_empty() {
                 ui.label(
-                    RichText::new("暂无拉取结果（添加订阅并点击「拉取全部」后将在此显示拉取与解析明细）")
-                        .color(theme::muted()),
+                    RichText::new(
+                        "暂无拉取结果（添加订阅并点击「拉取全部」后将在此显示拉取与解析明细）",
+                    )
+                    .color(theme::muted()),
                 );
                 return;
             }
@@ -1340,7 +1348,11 @@ impl VpnApp {
                         .suffix(" 页"),
                 )
                 .on_hover_text("搜索结果每页 10 条，按最近更新排序，每个勾选的查询词各扫这么多页");
-                ui.label(RichText::new("（建议 5~20 页）").small().color(theme::muted()));
+                ui.label(
+                    RichText::new("（建议 5~20 页）")
+                        .small()
+                        .color(theme::muted()),
+                );
             });
 
             ui.add_space(8.0);
@@ -1351,7 +1363,9 @@ impl VpnApp {
                 ui.label(RichText::new("历史记录重置：").strong());
                 if ui
                     .add_enabled(!self.busy, egui::Button::new("重置 Gist 历史"))
-                    .on_hover_text("清空已扫描过的 Gist 记录黑名单，允许重新发现和拉取曾经删除过的 Gist 节点")
+                    .on_hover_text(
+                        "清空已扫描过的 Gist 记录黑名单，允许重新发现和拉取曾经删除过的 Gist 节点",
+                    )
                     .clicked()
                 {
                     self.reset_seen_gists();
@@ -1454,7 +1468,10 @@ impl VpnApp {
                     let (color_alive, stroke_alive) = if is_alive {
                         (theme::accent_bg(), Stroke::new(1.0_f32, theme::accent()))
                     } else {
-                        (theme::sidebar(), Stroke::new(1.0_f32, theme::border_subtle()))
+                        (
+                            theme::sidebar(),
+                            Stroke::new(1.0_f32, theme::border_subtle()),
+                        )
                     };
                     if ui
                         .add(
@@ -1525,8 +1542,7 @@ impl VpnApp {
                             ui.add_space(30.0);
                             if self.source_modal_loading {
                                 ui.label(
-                                    RichText::new("正在加载节点...")
-                                        .color(theme::text_secondary()),
+                                    RichText::new("正在加载节点...").color(theme::text_secondary()),
                                 );
                             } else {
                                 ui.label(
@@ -1593,15 +1609,18 @@ fn render_bar_chart(
         Color32::from_rgba_unmultiplied(255, 255, 255, 35)
     };
     painter.rect_filled(rect, CornerRadius::same(3), track_bg);
-    painter.rect_stroke(rect, CornerRadius::same(3), Stroke::new(0.6_f32, border_col), egui::StrokeKind::Inside);
+    painter.rect_stroke(
+        rect,
+        CornerRadius::same(3),
+        Stroke::new(0.6_f32, border_col),
+        egui::StrokeKind::Inside,
+    );
 
     let clamped = ratio.clamp(0.0, 1.0);
     if clamped > 0.0 {
         let fill_w = (rect.width() * clamped).max(3.0);
-        let fill_rect = egui::Rect::from_min_max(
-            rect.min,
-            egui::pos2(rect.min.x + fill_w, rect.max.y),
-        );
+        let fill_rect =
+            egui::Rect::from_min_max(rect.min, egui::pos2(rect.min.x + fill_w, rect.max.y));
         painter.rect_filled(fill_rect, CornerRadius::same(3), color);
         if fill_w >= 4.0 && height >= 6.0 {
             let highlight_rect = egui::Rect::from_min_max(
@@ -1660,7 +1679,11 @@ mod source_filter_tests {
     fn test_name_filter_is_a_case_insensitive_substring() {
         let s = source("Solara 订阅", true, Some("ok"), 12);
         assert!(source_passes_filter(&s, "solara", SourceStatusFilter::All));
-        assert!(source_passes_filter(&s, "  订阅  ", SourceStatusFilter::All));
+        assert!(source_passes_filter(
+            &s,
+            "  订阅  ",
+            SourceStatusFilter::All
+        ));
         assert!(!source_passes_filter(&s, "v2ray", SourceStatusFilter::All));
         // 名称留空 = 名称这一维不过滤（状态那一维照旧要过，两维是"与"）
         assert!(source_passes_filter(&s, "   ", SourceStatusFilter::All));
@@ -1687,7 +1710,11 @@ mod source_filter_tests {
             "",
             SourceStatusFilter::Failed
         ));
-        assert!(source_passes_filter(&failed, "", SourceStatusFilter::NoNodes));
+        assert!(source_passes_filter(
+            &failed,
+            "",
+            SourceStatusFilter::NoNodes
+        ));
         assert!(source_passes_filter(&off, "", SourceStatusFilter::Disabled));
         assert!(source_passes_filter(&off, "", SourceStatusFilter::NoNodes));
         assert!(!source_passes_filter(&off, "", SourceStatusFilter::Failed));
@@ -1702,7 +1729,11 @@ mod source_filter_tests {
     fn test_name_and_status_are_anded() {
         let a = source("AI 订阅", true, Some("ok"), 4);
         let b = source("AI 备用", false, Some("boom"), 0);
-        assert!(source_passes_filter(&b, "ai 备用", SourceStatusFilter::Failed));
+        assert!(source_passes_filter(
+            &b,
+            "ai 备用",
+            SourceStatusFilter::Failed
+        ));
         assert!(!source_passes_filter(&b, "ai", SourceStatusFilter::Enabled));
         assert!(!source_passes_filter(&a, "ai", SourceStatusFilter::NoNodes));
     }
@@ -1722,11 +1753,9 @@ mod source_filter_tests {
         let mut panel = Rect::NOTHING;
         let mut row_right = 0.0_f32;
         let _ = crate::gui::run_test_ui(&ctx, input, |ui| {
-            Panel::left("sidebar")
-                .exact_size(220.0)
-                .show(ui, |ui| {
-                    let _ = ui.label("导航");
-                });
+            Panel::left("sidebar").exact_size(220.0).show(ui, |ui| {
+                let _ = ui.label("导航");
+            });
             CentralPanel::default()
                 .frame(eframe::egui::Frame::NONE.inner_margin(Margin::symmetric(18, 14)))
                 .show(ui, |ui| {

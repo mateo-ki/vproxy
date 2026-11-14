@@ -1,9 +1,11 @@
 use crate::gui::icons::{icon_label, Icon};
 use crate::gui::theme;
-use crate::gui::types::{ActiveConnectionInfo, ConnectionsTab, DnsRecord, QuickRuleModalState, QuickRuleType};
+use crate::gui::types::{
+    ActiveConnectionInfo, ConnectionsTab, DnsRecord, QuickRuleModalState, QuickRuleType,
+};
 use crate::gui::widgets::{
-    card_frame, danger_btn, format_bytes, header_cell,
-    macos_segmented_tabs, panel_frame, primary_btn,
+    card_frame, danger_btn, format_bytes, header_cell, macos_segmented_tabs, panel_frame,
+    primary_btn,
 };
 use crate::gui::VpnApp;
 use crate::proxy::{DnsEnhancedMode, ProxyState};
@@ -16,7 +18,9 @@ fn is_unmatched_rule(rule: &str) -> bool {
         return true;
     }
     let b = r.as_bytes();
-    if b.len() >= 5 && (b[..5].eq_ignore_ascii_case(b"MATCH") || b[..5].eq_ignore_ascii_case(b"FINAL")) {
+    if b.len() >= 5
+        && (b[..5].eq_ignore_ascii_case(b"MATCH") || b[..5].eq_ignore_ascii_case(b"FINAL"))
+    {
         return true;
     }
     false
@@ -33,7 +37,9 @@ fn contains_ignore_case(haystack: &str, needle: &str) -> bool {
     if haystack.is_ascii() && needle.is_ascii() {
         let n_bytes = needle.as_bytes();
         let h_bytes = haystack.as_bytes();
-        return h_bytes.windows(n_bytes.len()).any(|w| w.eq_ignore_ascii_case(n_bytes));
+        return h_bytes
+            .windows(n_bytes.len())
+            .any(|w| w.eq_ignore_ascii_case(n_bytes));
     }
     haystack.to_lowercase().contains(&needle.to_lowercase())
 }
@@ -43,12 +49,25 @@ fn infer_domain_suffix(host: &str) -> String {
     let host = host.trim();
     let parts: Vec<&str> = host.split('.').collect();
     // 纯 IP 地址直接原样返回
-    if parts.iter().all(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_digit())) {
+    if parts
+        .iter()
+        .all(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_digit()))
+    {
         return host.to_string();
     }
     if parts.len() >= 2 {
-        if parts.len() >= 3 && matches!(parts[parts.len() - 2], "com" | "edu" | "gov" | "org" | "net") {
-            format!("{}.{}.{}", parts[parts.len() - 3], parts[parts.len() - 2], parts[parts.len() - 1])
+        if parts.len() >= 3
+            && matches!(
+                parts[parts.len() - 2],
+                "com" | "edu" | "gov" | "org" | "net"
+            )
+        {
+            format!(
+                "{}.{}.{}",
+                parts[parts.len() - 3],
+                parts[parts.len() - 2],
+                parts[parts.len() - 1]
+            )
         } else {
             format!("{}.{}", parts[parts.len() - 2], parts[parts.len() - 1])
         }
@@ -61,7 +80,10 @@ fn infer_domain_suffix(host: &str) -> String {
 fn extract_ip_from_dest(dest: &str) -> String {
     let dest = dest.trim();
     if let Some(idx) = dest.rfind(':') {
-        dest[..idx].trim_start_matches('[').trim_end_matches(']').to_string()
+        dest[..idx]
+            .trim_start_matches('[')
+            .trim_end_matches(']')
+            .to_string()
     } else {
         dest.to_string()
     }
@@ -99,7 +121,11 @@ impl VpnApp {
                 proxy_bytes += total_traffic;
             }
 
-            let proc_name = if c.process.is_empty() { "未知进程" } else { c.process.as_str() };
+            let proc_name = if c.process.is_empty() {
+                "未知进程"
+            } else {
+                c.process.as_str()
+            };
             let entry = process_map.entry(proc_name).or_insert((0, 0, 0, 0, 0));
             entry.0 += c.upload;
             entry.1 += c.download;
@@ -1238,10 +1264,18 @@ impl VpnApp {
             self.quick_rule_modal = None;
         } else if save_rule {
             let matcher = match state.rule_type {
-                QuickRuleType::DomainSuffix => crate::proxy::RuleMatcher::DomainSuffix(state.payload.trim().to_string()),
-                QuickRuleType::Domain => crate::proxy::RuleMatcher::Domain(state.payload.trim().to_string()),
-                QuickRuleType::IpCidr => crate::proxy::RuleMatcher::IpCidr(state.payload.trim().to_string()),
-                QuickRuleType::ProcessName => crate::proxy::RuleMatcher::ProcessName(state.payload.trim().to_string()),
+                QuickRuleType::DomainSuffix => {
+                    crate::proxy::RuleMatcher::DomainSuffix(state.payload.trim().to_string())
+                }
+                QuickRuleType::Domain => {
+                    crate::proxy::RuleMatcher::Domain(state.payload.trim().to_string())
+                }
+                QuickRuleType::IpCidr => {
+                    crate::proxy::RuleMatcher::IpCidr(state.payload.trim().to_string())
+                }
+                QuickRuleType::ProcessName => {
+                    crate::proxy::RuleMatcher::ProcessName(state.payload.trim().to_string())
+                }
             };
             let new_rule = crate::proxy::TrafficRule {
                 matcher,
@@ -1289,7 +1323,10 @@ mod tests {
     #[test]
     fn test_extract_ip_from_dest() {
         assert_eq!(extract_ip_from_dest("104.21.5.12:443"), "104.21.5.12");
-        assert_eq!(extract_ip_from_dest("[2606:4700::6815:50c]:443"), "2606:4700::6815:50c");
+        assert_eq!(
+            extract_ip_from_dest("[2606:4700::6815:50c]:443"),
+            "2606:4700::6815:50c"
+        );
         assert_eq!(extract_ip_from_dest("1.1.1.1"), "1.1.1.1");
     }
 
@@ -1305,4 +1342,3 @@ mod tests {
         assert!(contains_ignore_case("微信.exe", "微信"));
     }
 }
-

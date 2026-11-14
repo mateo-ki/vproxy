@@ -34,10 +34,7 @@ impl LatencySpectrumStats {
 }
 
 /// 渲染节点全库延迟分布阶梯频谱指示条 (Latency Spectrum Bar)
-pub fn render_latency_spectrum(
-    ui: &mut Ui,
-    stats: &LatencySpectrumStats,
-) {
+pub fn render_latency_spectrum(ui: &mut Ui, stats: &LatencySpectrumStats) {
     if stats.total == 0 {
         return;
     }
@@ -53,10 +50,22 @@ pub fn render_latency_spectrum(
 
     // 方案二：莫兰迪低饱和延迟阶梯色系（柔和护眼 · 语义保留，彻底替代刺眼荧光大红大绿）
     let tiers: [(&str, usize, Color32); 5] = [
-        ("极速 <200ms", stats.ultra_fast, Color32::from_rgb(82, 121, 111)),  // 莫兰迪鼠尾草绿 #52796F
-        ("良好 200-400ms", stats.fast, Color32::from_rgb(122, 154, 139)),   // 莫兰迪柔和橄榄 #7A9A8B
-        ("中等 400-800ms", stats.medium, Color32::from_rgb(198, 138, 76)),  // 莫兰迪暖沙琥珀 #C68A4C
-        ("迟缓 >800ms", stats.slow, Color32::from_rgb(158, 90, 84)),       // 莫兰迪陶土玫瑰粉褐 #9E5A54 替代大红
+        (
+            "极速 <200ms",
+            stats.ultra_fast,
+            Color32::from_rgb(82, 121, 111),
+        ), // 莫兰迪鼠尾草绿 #52796F
+        (
+            "良好 200-400ms",
+            stats.fast,
+            Color32::from_rgb(122, 154, 139),
+        ), // 莫兰迪柔和橄榄 #7A9A8B
+        (
+            "中等 400-800ms",
+            stats.medium,
+            Color32::from_rgb(198, 138, 76),
+        ), // 莫兰迪暖沙琥珀 #C68A4C
+        ("迟缓 >800ms", stats.slow, Color32::from_rgb(158, 90, 84)), // 莫兰迪陶土玫瑰粉褐 #9E5A54 替代大红
         ("未测速", stats.untested, theme::border_subtle()),
     ];
 
@@ -75,9 +84,19 @@ pub fn render_latency_spectrum(
         let cr = if current_x <= rect.min.x + 0.5 && current_x + seg_w >= rect.max.x - 0.5 {
             CornerRadius::same(4)
         } else if current_x <= rect.min.x + 0.5 {
-            CornerRadius { nw: 4, sw: 4, ne: 0, se: 0 }
+            CornerRadius {
+                nw: 4,
+                sw: 4,
+                ne: 0,
+                se: 0,
+            }
         } else if current_x + seg_w >= rect.max.x - 1.0 {
-            CornerRadius { nw: 0, sw: 0, ne: 4, se: 4 }
+            CornerRadius {
+                nw: 0,
+                sw: 0,
+                ne: 4,
+                se: 4,
+            }
         } else {
             CornerRadius::same(0)
         };
@@ -90,4 +109,3 @@ pub fn render_latency_spectrum(
 
     response.on_hover_text(format!("全网延迟阶梯频谱分布：\n{}", tooltips.join("\n")));
 }
-

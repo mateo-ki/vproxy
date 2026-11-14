@@ -5,14 +5,14 @@ pub mod ir;
 pub mod manager;
 pub mod mihomo;
 pub mod rule_io;
+pub mod script_override;
 pub mod shoes;
 pub mod sing_box;
-pub mod types;
 pub mod tracer;
+pub mod types;
 pub mod validator;
 pub mod xray;
 pub mod yaml_override;
-pub mod script_override;
 
 #[cfg(test)]
 mod tests;

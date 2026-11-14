@@ -3,7 +3,6 @@ use crate::gui::theme;
 use crate::gui::types::Tab;
 use eframe::egui::{self, Color32, CornerRadius, Frame, Margin, RichText, Sense, Stroke, Ui, Vec2};
 
-
 pub fn card_frame() -> Frame {
     Frame::NONE
         .fill(theme::panel())
@@ -47,12 +46,7 @@ pub fn section_title(ui: &mut Ui, title: &str, subtitle: &str) {
         );
         ui.add_space(4.0);
         ui.add(
-            egui::Label::new(
-                RichText::new(subtitle)
-                    .size(11.5)
-                    .color(theme::muted()),
-            )
-            .truncate(),
+            egui::Label::new(RichText::new(subtitle).size(11.5).color(theme::muted())).truncate(),
         );
     });
     ui.add_space(8.0);
@@ -83,11 +77,7 @@ pub fn nav_item_icon_only(
             theme::accent(),
         )
     } else {
-        (
-            Color32::TRANSPARENT,
-            Stroke::NONE,
-            theme::icon_secondary(),
-        )
+        (Color32::TRANSPARENT, Stroke::NONE, theme::icon_secondary())
     };
 
     let painter = ui.painter_at(rect);
@@ -315,12 +305,7 @@ pub fn macos_segmented_tabs<T: PartialEq + Copy>(
                         ui.horizontal(|ui| {
                             icon_label(ui, icon, 13.0, icon_color);
                             ui.add_space(4.0);
-                            ui.label(
-                                RichText::new(label)
-                                    .strong()
-                                    .size(12.0)
-                                    .color(text_color),
-                            );
+                            ui.label(RichText::new(label).strong().size(12.0).color(text_color));
                         });
                     })
                     .response
@@ -334,7 +319,6 @@ pub fn macos_segmented_tabs<T: PartialEq + Copy>(
         });
     });
 }
-
 
 /// 默认收起那种小标题（关于页的「本机路径」、分流规则的「自定义规则」都用它）。
 /// 和 `section_title` 的区别：那是页面级大标题，这是"点开才看"的条目，得比正文轻一档。
@@ -353,4 +337,3 @@ pub fn header_cell(ui: &mut Ui, text: &str) {
             .small(),
     );
 }
-

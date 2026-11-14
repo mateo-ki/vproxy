@@ -126,7 +126,9 @@ pub fn tr<'a>(lang: Language, key: &'a str) -> &'a str {
             "切换至日间亮色模式" => "Switch to Light Mode",
             "切换至夜间深色模式" => "Switch to Dark Mode",
             "界面外观" => "Appearance",
-            "改动即时生效并自动保存，下次启动沿用。" => "Changes take effect immediately and are saved automatically.",
+            "改动即时生效并自动保存，下次启动沿用。" => {
+                "Changes take effect immediately and are saved automatically."
+            }
             "界面语言 (Interface Language)" => "Interface Language",
             "窗口大小" => "Window Dimensions",
             "窗口大小配置" => "Window Dimensions",
@@ -144,12 +146,18 @@ pub fn tr<'a>(lang: Language, key: &'a str) -> &'a str {
             "托盘常驻" => "Keep in Tray",
             "直接退出" => "Exit App",
             "点击主窗口关闭按钮 (X) 时：" => "When Close Button (X) is clicked:",
-            "最小化到系统托盘 (推荐：后台保持代理与定时自动化运行)" => "Minimize to System Tray (Recommended: keep proxy and background tasks running)",
-            "直接退出程序 (停止所有网络连接并彻底退出软件)" => "Exit Directly (Terminate all connections and shut down)",
+            "最小化到系统托盘 (推荐：后台保持代理与定时自动化运行)" => {
+                "Minimize to System Tray (Recommended: keep proxy and background tasks running)"
+            }
+            "直接退出程序 (停止所有网络连接并彻底退出软件)" => {
+                "Exit Directly (Terminate all connections and shut down)"
+            }
             "订阅源定时同步" => "Subscription Schedule",
             "自动同步已开启" => "Auto-Sync Enabled",
             "已关闭" => "Disabled",
-            "启用后台定时自动拉取全部有效订阅源" => "Enable periodic background fetch for all active sources",
+            "启用后台定时自动拉取全部有效订阅源" => {
+                "Enable periodic background fetch for all active sources"
+            }
             "⏱️ 同步周期" => "⏱️ Sync Interval",
             "节点故障自愈与代理守护" => "Failover & Watchdog",
             "自动切换已开启" => "Auto-Failover Enabled",
@@ -217,16 +225,24 @@ pub fn tr<'a>(lang: Language, key: &'a str) -> &'a str {
             "导入本地 YAML / 订阅配置文件" => "Import Local YAML / Config File",
             "本地配置文件路径:" => "File Path:",
             "浏览..." => "Browse...",
-            "同时作为订阅源收录（便于后续自动更新与管理）" => "Save as local subscription source for easy tracking",
+            "同时作为订阅源收录（便于后续自动更新与管理）" => {
+                "Save as local subscription source for easy tracking"
+            }
             "订阅源命名 (选填):" => "Source Name (optional):",
             "解析并导入" => "Parse & Import",
             "Linux 平铺/非 GNOME 桌面环境代理指引" => "Linux Non-GNOME Proxy Guidance",
-            "📋 复制终端代理环境变量 (export ...)" => "📋 Copy Terminal Export Commands",
+            "📋 复制终端代理环境变量 (export ...)" => {
+                "📋 Copy Terminal Export Commands"
+            }
             "📋 复制取消代理命令 (unset ...)" => "📋 Copy Unset Commands",
-            "⚠️ 缺少 CAP_NET_ADMIN (点击复制授权命令)" => "⚠️ Missing CAP_NET_ADMIN (Click to Copy)",
+            "⚠️ 缺少 CAP_NET_ADMIN (点击复制授权命令)" => {
+                "⚠️ Missing CAP_NET_ADMIN (Click to Copy)"
+            }
             "✓ Linux CAP_NET_ADMIN 权限就绪" => "✓ Linux CAP_NET_ADMIN Ready",
             "✓ GNOME gsettings 环境就绪" => "✓ GNOME gsettings Ready",
-            "ℹ️ 非 GNOME 环境 (无 gsettings 全局代理)" => "ℹ️ Non-GNOME Desktop (No global gsettings)",
+            "ℹ️ 非 GNOME 环境 (无 gsettings 全局代理)" => {
+                "ℹ️ Non-GNOME Desktop (No global gsettings)"
+            }
             _ => key,
         },
         Language::ZhTw => match key {
@@ -310,7 +326,9 @@ pub fn tr<'a>(lang: Language, key: &'a str) -> &'a str {
             "切换至日间亮色模式" => "切換至淺色模式",
             "切换至夜间深色模式" => "切換至深色模式",
             "界面外观" => "介面外觀",
-            "改动即时生效并自动保存，下次启动沿用。" => "變更即時生效並自動儲存，下次啟動沿用。",
+            "改动即时生效并自动保存，下次启动沿用。" => {
+                "變更即時生效並自動儲存，下次啟動沿用。"
+            }
             "界面语言 (Interface Language)" => "介面語言 (Interface Language)",
             "窗口大小" => "視窗大小",
             "窗口大小配置" => "視窗大小設定",
@@ -328,12 +346,18 @@ pub fn tr<'a>(lang: Language, key: &'a str) -> &'a str {
             "托盘常驻" => "常駐系統匣",
             "直接退出" => "直接結束",
             "点击主窗口关闭按钮 (X) 时：" => "點擊主視窗關閉按鈕 (X) 時：",
-            "最小化到系统托盘 (推荐：后台保持代理与定时自动化运行)" => "最小化至系統匣 (建議：背景保持代理與定時自動化執行)",
-            "直接退出程序 (停止所有网络连接并彻底退出软件)" => "直接結束程式 (停止所有網路連線並完全結束軟體)",
+            "最小化到系统托盘 (推荐：后台保持代理与定时自动化运行)" => {
+                "最小化至系統匣 (建議：背景保持代理與定時自動化執行)"
+            }
+            "直接退出程序 (停止所有网络连接并彻底退出软件)" => {
+                "直接結束程式 (停止所有網路連線並完全結束軟體)"
+            }
             "订阅源定时同步" => "訂閱源定時同步",
             "自动同步已开启" => "自動同步已開啟",
             "已关闭" => "已關閉",
-            "启用后台定时自动拉取全部有效订阅源" => "啟用背景定時自動擷取全部有效訂閱源",
+            "启用后台定时自动拉取全部有效订阅源" => {
+                "啟用背景定時自動擷取全部有效訂閱源"
+            }
             "⏱️ 同步周期" => "⏱️ 同步週期",
             "节点故障自愈与代理守护" => "節點故障自癒與代理守護",
             "自动切换已开启" => "自動切換已開啟",
@@ -401,16 +425,26 @@ pub fn tr<'a>(lang: Language, key: &'a str) -> &'a str {
             "导入本地 YAML / 订阅配置文件" => "匯入本地 YAML / 訂閱設定檔",
             "本地配置文件路径:" => "本地設定檔路徑：",
             "浏览..." => "瀏覽...",
-            "同时作为订阅源收录（便于后续自动更新与管理）" => "同時收錄為訂閱源（便於日後自動更新與管理）",
+            "同时作为订阅源收录（便于后续自动更新与管理）" => {
+                "同時收錄為訂閱源（便於日後自動更新與管理）"
+            }
             "订阅源命名 (选填):" => "訂閱源名稱（選填）：",
             "解析并导入" => "解析並匯入",
-            "Linux 平铺/非 GNOME 桌面环境代理指引" => "Linux 平鋪/非 GNOME 桌面環境代理指引",
-            "📋 复制终端代理环境变量 (export ...)" => "📋 複製終端機代理環境變數 (export ...)",
+            "Linux 平铺/非 GNOME 桌面环境代理指引" => {
+                "Linux 平鋪/非 GNOME 桌面環境代理指引"
+            }
+            "📋 复制终端代理环境变量 (export ...)" => {
+                "📋 複製終端機代理環境變數 (export ...)"
+            }
             "📋 复制取消代理命令 (unset ...)" => "📋 複製取消代理命令 (unset ...)",
-            "⚠️ 缺少 CAP_NET_ADMIN (点击复制授权命令)" => "⚠️ 缺少 CAP_NET_ADMIN (點擊複製授權命令)",
+            "⚠️ 缺少 CAP_NET_ADMIN (点击复制授权命令)" => {
+                "⚠️ 缺少 CAP_NET_ADMIN (點擊複製授權命令)"
+            }
             "✓ Linux CAP_NET_ADMIN 权限就绪" => "✓ Linux CAP_NET_ADMIN 權限就緒",
             "✓ GNOME gsettings 环境就绪" => "✓ GNOME gsettings 環境就緒",
-            "ℹ️ 非 GNOME 环境 (无 gsettings 全局代理)" => "ℹ️ 非 GNOME 環境 (無 gsettings 全域代理)",
+            "ℹ️ 非 GNOME 环境 (无 gsettings 全局代理)" => {
+                "ℹ️ 非 GNOME 環境 (無 gsettings 全域代理)"
+            }
             _ => key,
         },
         Language::Ja => match key {
@@ -475,7 +509,9 @@ pub fn tr<'a>(lang: Language, key: &'a str) -> &'a str {
             "重置历史" => "履歴リセット",
             "深度整理内存" => "メモリ解放",
             "Windows 防火墙放行" => "Windows ファイアウォール許可",
-            "软件启动时自动加入防火墙放行规则" => "起動時にファイアウォール規則を自動追加",
+            "软件启动时自动加入防火墙放行规则" => {
+                "起動時にファイアウォール規則を自動追加"
+            }
             "立即写入防火墙规则" => "今すぐ規則を追加",
             "显示高级设置" => "詳細設定を表示",
             "监控图表" => "チャート",
@@ -494,7 +530,9 @@ pub fn tr<'a>(lang: Language, key: &'a str) -> &'a str {
             "切换至日间亮色模式" => "ライトモードに切替",
             "切换至夜间深色模式" => "ダークモードに切替",
             "界面外观" => "外観",
-            "改动即时生效并自动保存，下次启动沿用。" => "変更は即座に適用され、自動保存されます。",
+            "改动即时生效并自动保存，下次启动沿用。" => {
+                "変更は即座に適用され、自動保存されます。"
+            }
             "界面语言 (Interface Language)" => "表示言語 (Interface Language)",
             "窗口大小" => "ウィンドウサイズ",
             "窗口大小配置" => "ウィンドウサイズ設定",
@@ -511,13 +549,21 @@ pub fn tr<'a>(lang: Language, key: &'a str) -> &'a str {
             "桌面窗口与运行模式" => "デスクトップウィンドウと実行モード",
             "托盘常驻" => "トレイ常駐",
             "直接退出" => "直接終了",
-            "点击主窗口关闭按钮 (X) 时：" => "ウィンドウの閉じるボタン (X) をクリックした時：",
-            "最小化到系统托盘 (推荐：后台保持代理与定时自动化运行)" => "システムトレイに最小化 (推奨：バックグラウンドで動作継続)",
-            "直接退出程序 (停止所有网络连接并彻底退出软件)" => "プログラムを終了 (接続を切断して完全に終了)",
+            "点击主窗口关闭按钮 (X) 时：" => {
+                "ウィンドウの閉じるボタン (X) をクリックした時："
+            }
+            "最小化到系统托盘 (推荐：后台保持代理与定时自动化运行)" => {
+                "システムトレイに最小化 (推奨：バックグラウンドで動作継続)"
+            }
+            "直接退出程序 (停止所有网络连接并彻底退出软件)" => {
+                "プログラムを終了 (接続を切断して完全に終了)"
+            }
             "订阅源定时同步" => "サブスクリプション自動更新",
             "自动同步已开启" => "自動更新有効",
             "已关闭" => "無効",
-            "启用后台定时自动拉取全部有效订阅源" => "有効な全ソースを定期的に自動取得する",
+            "启用后台定时自动拉取全部有效订阅源" => {
+                "有効な全ソースを定期的に自動取得する"
+            }
             "⏱️ 同步周期" => "⏱️ 更新間隔",
             "节点故障自愈与代理守护" => "ノードフェイルオーバーと監視",
             "自动切换已开启" => "自動切替有効",
@@ -581,20 +627,34 @@ pub fn tr<'a>(lang: Language, key: &'a str) -> &'a str {
             "安装更新" => "更新をインストール",
             "预发版" => "プレリリース",
             "稳定版" => "安定版",
-            "📁 导入本地 YAML / 配置文件..." => "📁 ローカル YAML / 設定ファイルをインポート...",
+            "📁 导入本地 YAML / 配置文件..." => {
+                "📁 ローカル YAML / 設定ファイルをインポート..."
+            }
             "导入本地 YAML / 订阅配置文件" => "ローカル YAML / 設定ファイルをインポート",
             "本地配置文件路径:" => "ファイルパス:",
             "浏览..." => "参照...",
-            "同时作为订阅源收录（便于后续自动更新与管理）" => "サブスクリプションとして登録（自動更新・管理用）",
+            "同时作为订阅源收录（便于后续自动更新与管理）" => {
+                "サブスクリプションとして登録（自動更新・管理用）"
+            }
             "订阅源命名 (选填):" => "ソース名 (任意):",
             "解析并导入" => "解析してインポート",
-            "Linux 平铺/非 GNOME 桌面环境代理指引" => "Linux タイリング/非GNOME 環境プロキシ案内",
-            "📋 复制终端代理环境变量 (export ...)" => "📋 ターミナル環境変数をコピー (export ...)",
-            "📋 复制取消代理命令 (unset ...)" => "📋 プロキシ解除コマンドをコピー (unset ...)",
-            "⚠️ 缺少 CAP_NET_ADMIN (点击复制授权命令)" => "⚠️ CAP_NET_ADMIN 権限不足 (クリックで権限付与コマンドをコピー)",
+            "Linux 平铺/非 GNOME 桌面环境代理指引" => {
+                "Linux タイリング/非GNOME 環境プロキシ案内"
+            }
+            "📋 复制终端代理环境变量 (export ...)" => {
+                "📋 ターミナル環境変数をコピー (export ...)"
+            }
+            "📋 复制取消代理命令 (unset ...)" => {
+                "📋 プロキシ解除コマンドをコピー (unset ...)"
+            }
+            "⚠️ 缺少 CAP_NET_ADMIN (点击复制授权命令)" => {
+                "⚠️ CAP_NET_ADMIN 権限不足 (クリックで権限付与コマンドをコピー)"
+            }
             "✓ Linux CAP_NET_ADMIN 权限就绪" => "✓ Linux CAP_NET_ADMIN 権限準備完了",
             "✓ GNOME gsettings 环境就绪" => "✓ GNOME gsettings 準備完了",
-            "ℹ️ 非 GNOME 环境 (无 gsettings 全局代理)" => "ℹ️ 非GNOMEデスクトップ (gsettings 未対応)",
+            "ℹ️ 非 GNOME 环境 (无 gsettings 全局代理)" => {
+                "ℹ️ 非GNOMEデスクトップ (gsettings 未対応)"
+            }
             _ => key,
         },
     }

@@ -293,6 +293,4 @@ impl VpnApp {
             self.save_settings();
         }
     }
-
-
 }

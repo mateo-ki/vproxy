@@ -1,12 +1,8 @@
 use super::CLASH_VERGE_RECOMMENDED_OVERRIDE;
 use crate::gui::icons::{icon_label, Icon};
 use crate::gui::theme;
-use crate::gui::types::{
-    GroupsTab, KernelGroup, OverrideEditorTab,
-};
-use crate::gui::widgets::{
-    card_frame, macos_segmented_tabs, primary_btn,
-};
+use crate::gui::types::{GroupsTab, KernelGroup, OverrideEditorTab};
+use crate::gui::widgets::{card_frame, macos_segmented_tabs, primary_btn};
 use crate::gui::VpnApp;
 use crate::models::NodeSummary;
 use crate::proxy::ProxyState;
@@ -71,7 +67,10 @@ mod editor_tests {
                 false,
                 vec![egui::Event::Text("during-save".into())],
             );
-            assert_eq!(text, original, "saving must not accept edits that a response would erase");
+            assert_eq!(
+                text, original,
+                "saving must not accept edits that a response would erase"
+            );
 
             let editor = editor_frame(&ctx, &mut text, true, Vec::new());
             ctx.memory_mut(|memory| memory.request_focus(editor));
@@ -81,7 +80,10 @@ mod editor_tests {
                 true,
                 vec![egui::Event::Text("after-save".into())],
             );
-            assert!(text.contains("after-save"), "the editor must become editable again");
+            assert!(
+                text.contains("after-save"),
+                "the editor must become editable again"
+            );
         }
     }
 }
@@ -758,7 +760,6 @@ impl VpnApp {
             }
         }
     }
-
 }
 
 pub fn is_universal_proxy_group(name: &str) -> bool {
@@ -820,10 +821,18 @@ fn node_matches_group_depth(
     // 1. 若内核正在运行且上报了该策略组成员列表：优先按真实内核成员匹配（最权威真实）
     if let Some(group) = kernel_groups.iter().find(|g| g.name == group_name) {
         if !group.members.is_empty() {
-            if group.members.iter().any(|m| m == &node.name || m == &node.server) {
+            if group
+                .members
+                .iter()
+                .any(|m| m == &node.name || m == &node.server)
+            {
                 return true;
             }
-            if group.members.iter().any(|m| m == "PROXY" || m == "全部" || m.eq_ignore_ascii_case("all")) {
+            if group
+                .members
+                .iter()
+                .any(|m| m == "PROXY" || m == "全部" || m.eq_ignore_ascii_case("all"))
+            {
                 return true;
             }
             // 嵌套策略组展开（例如 AI分组 的 members 包含 "美国节点"）
@@ -841,9 +850,10 @@ fn node_matches_group_depth(
             // 对于通用功能性策略组（如 自动选择、故障转移、负载均衡、全球直连、漏网之鱼），
             // 如果成员里没有具体配置节点（例如只填了 DIRECT、REJECT 或不存在的组），为保障用户体验兜底展示全部节点
             if is_universal_proxy_group(group_name) {
-                let has_actual_node = group.members.iter().any(|m| {
-                    m != "DIRECT" && m != "REJECT" && m != "PASS"
-                });
+                let has_actual_node = group
+                    .members
+                    .iter()
+                    .any(|m| m != "DIRECT" && m != "REJECT" && m != "PASS");
                 if !has_actual_node {
                     return true;
                 }
@@ -923,8 +933,10 @@ fn node_matches_group_depth(
                 || node.name.contains("德");
         }
         "AI分组" | "AI" => {
-            return matches!(country.as_str(), "US" | "JP" | "SG" | "TW" | "KR" | "GB" | "DE")
-                || lower_name.contains("ai")
+            return matches!(
+                country.as_str(),
+                "US" | "JP" | "SG" | "TW" | "KR" | "GB" | "DE"
+            ) || lower_name.contains("ai")
                 || lower_name.contains("openai")
                 || lower_name.contains("chatgpt")
                 || lower_name.contains("claude")
@@ -943,8 +955,9 @@ fn node_matches_group_depth(
                 || lower_name.contains("telegram")
                 || lower_name.contains("tg");
         }
-        "多线并发下载" | "下载" | "普通代理" | "自动选择" | "自动选路" | "故障转移" | "负载均衡"
-        | "节点选择" | "漏网之鱼" | "兜底分流" | "全球直连" | "直连" => {
+        "多线并发下载" | "下载" | "普通代理" | "自动选择" | "自动选路" | "故障转移"
+        | "负载均衡" | "节点选择" | "漏网之鱼" | "兜底分流" | "全球直连" | "直连" =>
+        {
             return true;
         }
         _ => {}

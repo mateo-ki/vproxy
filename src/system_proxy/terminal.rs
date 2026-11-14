@@ -106,7 +106,10 @@ fn read_env_value(name: &str) -> Option<String> {
 
         let u16_slice =
             std::slice::from_raw_parts(buf.as_ptr() as *const u16, (actual_len as usize) / 2);
-        let end = u16_slice.iter().position(|&c| c == 0).unwrap_or(u16_slice.len());
+        let end = u16_slice
+            .iter()
+            .position(|&c| c == 0)
+            .unwrap_or(u16_slice.len());
         Some(String::from_utf16_lossy(&u16_slice[..end]))
     }
 }
@@ -136,7 +139,9 @@ fn write_env_value(name: &str, value: &str) -> Result<()> {
             std::ptr::null_mut(),
         );
         if status != 0 {
-            return Err(anyhow!("无法打开注册表 HKCU\\Environment (错误码: {status})"));
+            return Err(anyhow!(
+                "无法打开注册表 HKCU\\Environment (错误码: {status})"
+            ));
         }
 
         let write_status = RegSetValueExW(
@@ -203,12 +208,7 @@ fn broadcast_environment_change() {
         .chain(std::iter::once(0))
         .collect();
     unsafe {
-        SendNotifyMessageW(
-            HWND_BROADCAST,
-            WM_SETTINGCHANGE,
-            0,
-            param.as_ptr() as isize,
-        );
+        SendNotifyMessageW(HWND_BROADCAST, WM_SETTINGCHANGE, 0, param.as_ptr() as isize);
     }
 }
 

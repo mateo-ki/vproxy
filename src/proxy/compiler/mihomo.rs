@@ -340,7 +340,11 @@ impl BackendCompiler for MihomoCompiler {
         } else {
             false
         };
-        if plan.outbounds.url_test || has_override_groups || plan.outbounds.chain_proxy_enabled || plan.routing_mode == RoutingMode::Chain {
+        if plan.outbounds.url_test
+            || has_override_groups
+            || plan.outbounds.chain_proxy_enabled
+            || plan.routing_mode == RoutingMode::Chain
+        {
             let limit = plan.outbounds.url_test_size.max(2) as usize;
             for candidate in &plan.outbounds.url_test_nodes {
                 if candidate_proxies.len() >= limit {
@@ -369,7 +373,8 @@ impl BackendCompiler for MihomoCompiler {
         }
 
         // 链式代理节点注册与 dialer-proxy 代理构造 (彻底替代已废弃的 type: relay 组)
-        let is_chain_requested = plan.outbounds.chain_proxy_enabled || plan.routing_mode == RoutingMode::Chain;
+        let is_chain_requested =
+            plan.outbounds.chain_proxy_enabled || plan.routing_mode == RoutingMode::Chain;
         let mut chain_entry_name: Option<String> = None;
         let mut chain_exit_name: Option<String> = None;
         let mut chain_exit_obj: Option<Value> = None;
@@ -380,22 +385,40 @@ impl BackendCompiler for MihomoCompiler {
                 let is_distinct = if entry_node.id != exit_node.id {
                     true
                 } else {
-                    entry_node.name != exit_node.name || entry_node.server != exit_node.server || entry_node.port != exit_node.port
+                    entry_node.name != exit_node.name
+                        || entry_node.server != exit_node.server
+                        || entry_node.port != exit_node.port
                 };
                 if is_distinct {
-                    let entry_clash = crate::export::nodes_to_clash_proxies(std::slice::from_ref(entry_node));
-                    let exit_clash = crate::export::nodes_to_clash_proxies(std::slice::from_ref(exit_node));
-                    if let (Some(mut e_obj), Some(mut x_obj)) = (entry_clash.into_iter().next(), exit_clash.into_iter().next()) {
+                    let entry_clash =
+                        crate::export::nodes_to_clash_proxies(std::slice::from_ref(entry_node));
+                    let exit_clash =
+                        crate::export::nodes_to_clash_proxies(std::slice::from_ref(exit_node));
+                    if let (Some(mut e_obj), Some(mut x_obj)) = (
+                        entry_clash.into_iter().next(),
+                        exit_clash.into_iter().next(),
+                    ) {
                         // 注册 entry (若 candidate_proxies 中已存在同节点或同名，直接复用既有名称，不生成冗余后缀副本)
-                        let e_existing = candidate_proxies.iter().find(|p| {
-                            (p.get("server") == e_obj.get("server") && p.get("port") == e_obj.get("port") && p.get("type") == e_obj.get("type"))
-                                || p.get("name").and_then(Value::as_str) == Some(&entry_node.name)
-                        }).and_then(|p| p.get("name").and_then(Value::as_str)).map(str::to_string);
+                        let e_existing = candidate_proxies
+                            .iter()
+                            .find(|p| {
+                                (p.get("server") == e_obj.get("server")
+                                    && p.get("port") == e_obj.get("port")
+                                    && p.get("type") == e_obj.get("type"))
+                                    || p.get("name").and_then(Value::as_str)
+                                        == Some(&entry_node.name)
+                            })
+                            .and_then(|p| p.get("name").and_then(Value::as_str))
+                            .map(str::to_string);
 
                         if let Some(existing_name) = e_existing {
                             chain_entry_name = Some(existing_name);
                         } else {
-                            let e_raw = e_obj.get("name").and_then(Value::as_str).unwrap_or(&entry_node.name).to_string();
+                            let e_raw = e_obj
+                                .get("name")
+                                .and_then(Value::as_str)
+                                .unwrap_or(&entry_node.name)
+                                .to_string();
                             let mut e_name = e_raw.clone();
                             let mut idx = 2;
                             while !used_names.insert(e_name.clone()) {
@@ -410,17 +433,31 @@ impl BackendCompiler for MihomoCompiler {
                         }
 
                         // 注册 exit (若 candidate_proxies 中已存在同节点或同名，直接复用)
-                        let x_existing = candidate_proxies.iter().find(|p| {
-                            (p.get("server") == x_obj.get("server") && p.get("port") == x_obj.get("port") && p.get("type") == x_obj.get("type"))
-                                || p.get("name").and_then(Value::as_str) == Some(&exit_node.name)
-                        }).cloned();
+                        let x_existing = candidate_proxies
+                            .iter()
+                            .find(|p| {
+                                (p.get("server") == x_obj.get("server")
+                                    && p.get("port") == x_obj.get("port")
+                                    && p.get("type") == x_obj.get("type"))
+                                    || p.get("name").and_then(Value::as_str)
+                                        == Some(&exit_node.name)
+                            })
+                            .cloned();
 
                         if let Some(existing_val) = x_existing {
-                            let x_name = existing_val.get("name").and_then(Value::as_str).unwrap_or(&exit_node.name).to_string();
+                            let x_name = existing_val
+                                .get("name")
+                                .and_then(Value::as_str)
+                                .unwrap_or(&exit_node.name)
+                                .to_string();
                             chain_exit_obj = Some(existing_val);
                             chain_exit_name = Some(x_name);
                         } else {
-                            let x_raw = x_obj.get("name").and_then(Value::as_str).unwrap_or(&exit_node.name).to_string();
+                            let x_raw = x_obj
+                                .get("name")
+                                .and_then(Value::as_str)
+                                .unwrap_or(&exit_node.name)
+                                .to_string();
                             let mut x_name = x_raw.clone();
                             let mut idx = 2;
                             while !used_names.insert(x_name.clone()) {
@@ -444,18 +481,28 @@ impl BackendCompiler for MihomoCompiler {
                 let opt_exit = plan.outbounds.chain_exit_node_name.as_deref();
                 match (opt_entry, opt_exit) {
                     (Some(e), Some(x)) if e != x => {
-                        let e_found = candidate_proxies.iter().find(|p| p.get("name").and_then(Value::as_str) == Some(e));
-                        let x_found = candidate_proxies.iter().find(|p| p.get("name").and_then(Value::as_str) == Some(x));
+                        let e_found = candidate_proxies
+                            .iter()
+                            .find(|p| p.get("name").and_then(Value::as_str) == Some(e));
+                        let x_found = candidate_proxies
+                            .iter()
+                            .find(|p| p.get("name").and_then(Value::as_str) == Some(x));
                         if let (Some(_), Some(x_p)) = (e_found, x_found) {
                             chain_entry_name = Some(e.to_string());
                             chain_exit_name = Some(x.to_string());
                             chain_exit_obj = Some(x_p.clone());
                         }
                     }
-                    (None, None) if plan.routing_mode == RoutingMode::Chain && candidate_proxies.len() >= 2 => {
+                    (None, None)
+                        if plan.routing_mode == RoutingMode::Chain
+                            && candidate_proxies.len() >= 2 =>
+                    {
                         let e_p = &candidate_proxies[1];
                         let x_p = &candidate_proxies[0];
-                        if let (Some(e), Some(x)) = (e_p.get("name").and_then(Value::as_str), x_p.get("name").and_then(Value::as_str)) {
+                        if let (Some(e), Some(x)) = (
+                            e_p.get("name").and_then(Value::as_str),
+                            x_p.get("name").and_then(Value::as_str),
+                        ) {
                             chain_entry_name = Some(e.to_string());
                             chain_exit_name = Some(x.to_string());
                             chain_exit_obj = Some(x_p.clone());
@@ -466,7 +513,11 @@ impl BackendCompiler for MihomoCompiler {
             }
 
             // 3. 成功定位双节点：构造并插入「链式代理」proxy 实体 (使用 dialer-proxy 连接前置节点)
-            if let (Some(ref e_name), Some(ref x_name), Some(mut x_val)) = (chain_entry_name.as_ref(), chain_exit_name.as_ref(), chain_exit_obj) {
+            if let (Some(ref e_name), Some(ref x_name), Some(mut x_val)) = (
+                chain_entry_name.as_ref(),
+                chain_exit_name.as_ref(),
+                chain_exit_obj,
+            ) {
                 if e_name != x_name {
                     if let Some(x_obj) = x_val.as_object_mut() {
                         x_obj.insert("name".into(), Value::String("链式代理".into()));
@@ -550,14 +601,17 @@ impl BackendCompiler for MihomoCompiler {
                         || obj.contains_key("public-key")
                         || matches!(
                             p_type,
-                            "vless" | "vmess" | "trojan" | "hysteria" | "hysteria2" | "tuic" | "ssr"
+                            "vless"
+                                | "vmess"
+                                | "trojan"
+                                | "hysteria"
+                                | "hysteria2"
+                                | "tuic"
+                                | "ssr"
                         );
                     if is_tls
                         && (!obj.contains_key("client-fingerprint")
-                            || obj
-                                .get("client-fingerprint")
-                                .and_then(Value::as_str)
-                                == Some(""))
+                            || obj.get("client-fingerprint").and_then(Value::as_str) == Some(""))
                     {
                         obj.insert("client-fingerprint".into(), fp_val.clone());
                     }
@@ -804,14 +858,20 @@ impl BackendCompiler for MihomoCompiler {
 
         let mut proxy_groups = if url_test_active {
             let (group_type, extra_fields) = match plan.outbounds.auto_strategy {
-                AutoRoutingStrategy::UrlTest => ("url-test", json!({
-                    "tolerance": URL_TEST_TOLERANCE_MS,
-                    "max-failed": 3,
-                })),
+                AutoRoutingStrategy::UrlTest => (
+                    "url-test",
+                    json!({
+                        "tolerance": URL_TEST_TOLERANCE_MS,
+                        "max-failed": 3,
+                    }),
+                ),
                 AutoRoutingStrategy::Fallback => ("fallback", json!({})),
-                AutoRoutingStrategy::LoadBalance => ("load-balance", json!({
-                    "strategy": "consistent-hashing",
-                })),
+                AutoRoutingStrategy::LoadBalance => (
+                    "load-balance",
+                    json!({
+                        "strategy": "consistent-hashing",
+                    }),
+                ),
             };
             let auto_proxies: Vec<String> = candidate_names
                 .iter()
@@ -882,7 +942,10 @@ impl BackendCompiler for MihomoCompiler {
 
         if plan.outbounds.smart_routing {
             let mut final_groups = Vec::new();
-            if let Some(proxy_idx) = proxy_groups.iter().position(|g| g.get("name") == Some(&json!("PROXY"))) {
+            if let Some(proxy_idx) = proxy_groups
+                .iter()
+                .position(|g| g.get("name") == Some(&json!("PROXY")))
+            {
                 final_groups.push(proxy_groups.remove(proxy_idx));
             }
             final_groups.extend(smart_groups);
@@ -894,7 +957,9 @@ impl BackendCompiler for MihomoCompiler {
         if let Some(ref sub_groups_text) = plan.outbounds.subscription_groups_yaml {
             if !sub_groups_text.trim().is_empty() {
                 if let Ok(sub_groups_val) = serde_yaml::from_str::<Value>(sub_groups_text) {
-                    let user_groups: Option<Vec<Value>> = if let Some(arr) = sub_groups_val.get("proxy-groups").and_then(Value::as_array) {
+                    let user_groups: Option<Vec<Value>> = if let Some(arr) =
+                        sub_groups_val.get("proxy-groups").and_then(Value::as_array)
+                    {
                         Some(arr.clone())
                     } else if let Some(arr) = sub_groups_val.as_array() {
                         Some(arr.clone())
@@ -949,12 +1014,17 @@ impl BackendCompiler for MihomoCompiler {
                                 } else {
                                     // 检查原 proxies 成员，保留依然存在于 candidate_names、其他策略组名、或 DIRECT/REJECT 中的成员
                                     let mut effective_proxies = Vec::new();
-                                    if let Some(arr) = g_obj.get("proxies").and_then(Value::as_array) {
+                                    if let Some(arr) =
+                                        g_obj.get("proxies").and_then(Value::as_array)
+                                    {
                                         for p in arr {
                                             if let Some(s) = p.as_str() {
                                                 if candidate_names.contains(&s.to_string())
                                                     || sub_group_names.iter().any(|gn| gn == s)
-                                                    || matches!(s, "DIRECT" | "REJECT" | "PASS" | "GLOBAL")
+                                                    || matches!(
+                                                        s,
+                                                        "DIRECT" | "REJECT" | "PASS" | "GLOBAL"
+                                                    )
                                                 {
                                                     effective_proxies.push(s.to_string());
                                                 }
@@ -962,11 +1032,18 @@ impl BackendCompiler for MihomoCompiler {
                                         }
                                     }
                                     // 如果原订阅中的代理名在当前聚合节点池中没有同名节点，按地区或全量智能注水，避免空策略组
-                                    if !effective_proxies.iter().any(|p| candidate_names.contains(p)) {
-                                        let region_match = if let Some(reg) = classify_regional_candidate(&g_name) {
+                                    if !effective_proxies
+                                        .iter()
+                                        .any(|p| candidate_names.contains(p))
+                                    {
+                                        let region_match = if let Some(reg) =
+                                            classify_regional_candidate(&g_name)
+                                        {
                                             candidate_names
                                                 .iter()
-                                                .filter(|n| classify_regional_candidate(n) == Some(reg))
+                                                .filter(|n| {
+                                                    classify_regional_candidate(n) == Some(reg)
+                                                })
                                                 .cloned()
                                                 .collect::<Vec<_>>()
                                         } else {
@@ -975,7 +1052,8 @@ impl BackendCompiler for MihomoCompiler {
                                         if !region_match.is_empty() {
                                             effective_proxies.extend(region_match);
                                         } else if !candidate_names.is_empty() {
-                                            effective_proxies.extend(candidate_names.iter().cloned());
+                                            effective_proxies
+                                                .extend(candidate_names.iter().cloned());
                                         } else {
                                             effective_proxies.push("DIRECT".to_string());
                                         }
@@ -1015,7 +1093,11 @@ impl BackendCompiler for MihomoCompiler {
                 IRAction::Direct => "DIRECT".to_string(),
                 IRAction::Proxy(None) => "PROXY".to_string(),
                 IRAction::Proxy(Some(name)) => {
-                    if candidate_names.contains(name) || proxy_groups.iter().any(|g| g.get("name") == Some(&json!(name))) {
+                    if candidate_names.contains(name)
+                        || proxy_groups
+                            .iter()
+                            .any(|g| g.get("name") == Some(&json!(name)))
+                    {
                         name.clone()
                     } else {
                         "PROXY".to_string()
@@ -1040,7 +1122,11 @@ impl BackendCompiler for MihomoCompiler {
                     IRMatcher::DomainKeyword(k) => format!("DOMAIN-KEYWORD,{k},{target}"),
                     IRMatcher::DomainRegex(r) => format!("DOMAIN-REGEX,{r},{target}"),
                     IRMatcher::IpCidr(c) => {
-                        let prefix = if c.contains(':') { "IP-CIDR6" } else { "IP-CIDR" };
+                        let prefix = if c.contains(':') {
+                            "IP-CIDR6"
+                        } else {
+                            "IP-CIDR"
+                        };
                         if ir_rule.no_resolve || crate::hostutil::is_private_cidr(c) {
                             format!("{prefix},{c},{target},no-resolve")
                         } else {
@@ -1082,18 +1168,10 @@ impl BackendCompiler for MihomoCompiler {
                             "proxy" | "proxy-list" => {
                                 Some(format!("GEOSITE,geolocation-!cn,{target}"))
                             }
-                            "gfw" | "gfwlist" => {
-                                Some(format!("GEOSITE,gfw,{target}"))
-                            }
-                            "cncidr" => {
-                                Some(format!("GEOIP,CN,{target}"))
-                            }
-                            "telegramcidr" => {
-                                Some(format!("GEOIP,telegram,{target}"))
-                            }
-                            "lancidr" | "private" => {
-                                Some(format!("GEOSITE,private,{target}"))
-                            }
+                            "gfw" | "gfwlist" => Some(format!("GEOSITE,gfw,{target}")),
+                            "cncidr" => Some(format!("GEOIP,CN,{target}")),
+                            "telegramcidr" => Some(format!("GEOIP,telegram,{target}")),
+                            "lancidr" | "private" => Some(format!("GEOSITE,private,{target}")),
                             other => {
                                 if crate::geo::has_geosite_category(other) {
                                     Some(format!("GEOSITE,{other},{target}"))
@@ -1109,10 +1187,13 @@ impl BackendCompiler for MihomoCompiler {
                         rule_str
                     }
                     IRMatcher::Network(proto) => {
-                        format!("NETWORK,{},{target}", match proto {
-                            crate::proxy::NetworkProtocol::Tcp => "tcp",
-                            crate::proxy::NetworkProtocol::Udp => "udp",
-                        })
+                        format!(
+                            "NETWORK,{},{target}",
+                            match proto {
+                                crate::proxy::NetworkProtocol::Tcp => "tcp",
+                                crate::proxy::NetworkProtocol::Udp => "udp",
+                            }
+                        )
                     }
                     IRMatcher::Inbound(tag) => {
                         if let Some(port) = tag.strip_prefix("inbound-") {
@@ -1131,7 +1212,9 @@ impl BackendCompiler for MihomoCompiler {
         if let Some(ref override_text) = plan.outbounds.override_yaml {
             if !override_text.trim().is_empty() {
                 if let Ok(override_val) = serde_yaml::from_str::<Value>(override_text) {
-                    let user_groups: Option<Vec<Value>> = if let Some(arr) = override_val.get("proxy-groups").and_then(Value::as_array) {
+                    let user_groups: Option<Vec<Value>> = if let Some(arr) =
+                        override_val.get("proxy-groups").and_then(Value::as_array)
+                    {
                         Some(arr.clone())
                     } else if let Some(arr) = override_val.as_array() {
                         Some(arr.clone())
@@ -1142,9 +1225,19 @@ impl BackendCompiler for MihomoCompiler {
                     if let Some(groups) = user_groups {
                         for mut g in groups {
                             if let Some(g_obj) = g.as_object_mut() {
-                                let g_name = g_obj.get("name").and_then(Value::as_str).unwrap_or_default().to_string();
-                                let filter_regex = g_obj.get("filter").and_then(Value::as_str).and_then(|pat| regex::Regex::new(pat).ok());
-                                let exclude_regex = g_obj.get("exclude-filter").and_then(Value::as_str).and_then(|pat| regex::Regex::new(pat).ok());
+                                let g_name = g_obj
+                                    .get("name")
+                                    .and_then(Value::as_str)
+                                    .unwrap_or_default()
+                                    .to_string();
+                                let filter_regex = g_obj
+                                    .get("filter")
+                                    .and_then(Value::as_str)
+                                    .and_then(|pat| regex::Regex::new(pat).ok());
+                                let exclude_regex = g_obj
+                                    .get("exclude-filter")
+                                    .and_then(Value::as_str)
+                                    .and_then(|pat| regex::Regex::new(pat).ok());
 
                                 if filter_regex.is_some() || exclude_regex.is_some() {
                                     let mut matched_proxies = Vec::new();
@@ -1169,7 +1262,10 @@ impl BackendCompiler for MihomoCompiler {
                                         }
                                     }
                                     g_obj.insert("proxies".to_string(), json!(matched_proxies));
-                                } else if g_obj.get("proxies").is_none() && g_obj.get("include-all").and_then(Value::as_bool) != Some(true) {
+                                } else if g_obj.get("proxies").is_none()
+                                    && g_obj.get("include-all").and_then(Value::as_bool)
+                                        != Some(true)
+                                {
                                     if !candidate_names.is_empty() {
                                         g_obj.insert("proxies".to_string(), json!(candidate_names));
                                     } else {
@@ -1193,11 +1289,15 @@ impl BackendCompiler for MihomoCompiler {
                                 if parts.len() >= 2 {
                                     let rule_type = parts[0].to_ascii_uppercase();
                                     let payload = parts[1];
-                                    if rule_type == "GEOSITE" && !crate::geo::has_geosite_category(payload) {
+                                    if rule_type == "GEOSITE"
+                                        && !crate::geo::has_geosite_category(payload)
+                                    {
                                         tracing::warn!(category = %payload, "自定义规则中的 GEOSITE 分类在本地不存在，已自动跳过");
                                         continue;
                                     }
-                                    if rule_type == "GEOIP" && !crate::geo::has_geoip_category(payload) {
+                                    if rule_type == "GEOIP"
+                                        && !crate::geo::has_geoip_category(payload)
+                                    {
                                         tracing::warn!(country = %payload, "自定义规则中的 GEOIP 分类在本地不存在，已自动跳过");
                                         continue;
                                     }
@@ -1356,8 +1456,9 @@ impl BackendCompiler for MihomoCompiler {
         // Clash Party 规范 YAML 深度覆写（支持简单值覆盖、对象递归、! 强制覆盖、+key 前插、key+ 后追加与 <> 转义）
         if let Some(ref override_text) = plan.outbounds.override_yaml {
             if !override_text.trim().is_empty() {
-                let mut patch = serde_yaml::from_str::<Value>(override_text)
-                    .context("Mihomo YAML 覆写解析失败（请在「代理 → 策略组 → 配置」检查 YAML 覆写）")?;
+                let mut patch = serde_yaml::from_str::<Value>(override_text).context(
+                    "Mihomo YAML 覆写解析失败（请在「代理 → 策略组 → 配置」检查 YAML 覆写）",
+                )?;
                 if let Some(groups) = patch.as_array() {
                     if !groups.iter().all(Value::is_object) {
                         return Err(anyhow!("Mihomo YAML 覆写的策略组数组只能包含对象"));
@@ -1385,7 +1486,9 @@ impl BackendCompiler for MihomoCompiler {
         if let Some(ref script_text) = plan.outbounds.override_script {
             if !script_text.trim().is_empty() {
                 crate::proxy::script_override::apply_script_override(&mut config, script_text)
-                    .context("Mihomo Rhai 覆写失败（请在「代理 → 策略组 → 配置」修复或清空 Rhai 覆写脚本）")?;
+                    .context(
+                    "Mihomo Rhai 覆写失败（请在「代理 → 策略组 → 配置」修复或清空 Rhai 覆写脚本）",
+                )?;
                 if !config.is_object() {
                     return Err(anyhow!("Mihomo Rhai 覆写必须返回配置对象"));
                 }

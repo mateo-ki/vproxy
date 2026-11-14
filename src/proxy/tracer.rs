@@ -81,7 +81,7 @@ pub fn parse_target(target: &str) -> (String, u16) {
         .trim_start_matches("https://")
         .trim_start_matches("http://")
         .trim_end_matches('/');
-    
+
     // 如果带 path，去掉 path
     let addr_part = if let Some(idx) = trimmed.find('/') {
         &trimmed[..idx]
@@ -427,10 +427,15 @@ pub fn simulate_route_trace(
     // 环节 2：实测协议嗅探与主机提取解析耗时
     let sniff_start = std::time::Instant::now();
     let (host, port) = parse_target(target_input);
-    let proto = if protocol.trim().is_empty() { "TCP" } else { protocol.trim() };
+    let proto = if protocol.trim().is_empty() {
+        "TCP"
+    } else {
+        protocol.trim()
+    };
     let inbound_port = if mixed_port > 0 { mixed_port } else { 7890 };
 
-    let inbound_session = format!("Inbound(mixed:{inbound_port}) -> {proto} -> 目标: {host}:{port}");
+    let inbound_session =
+        format!("Inbound(mixed:{inbound_port}) -> {proto} -> 目标: {host}:{port}");
     let protocol_sniffing = infer_sniffing(&host, port, proto);
     let sniffing_ms = (sniff_start.elapsed().as_micros() as f64 / 1000.0).max(0.12);
 
@@ -451,8 +456,9 @@ pub fn simulate_route_trace(
     // 环节 3：实测逐条规则比对全过程真实 CPU 运算耗时
     let rule_start = std::time::Instant::now();
     for rule in &effective_rules {
-        let match_status = evaluate_matcher(&rule.matcher, &lower_host, parsed_ip.as_ref(), port, proto);
-        
+        let match_status =
+            evaluate_matcher(&rule.matcher, &lower_host, parsed_ip.as_ref(), port, proto);
+
         match match_status {
             RuleMatchStatus::Hit(reason) => {
                 let rule_text = format_matcher_display(&rule.matcher);
@@ -507,7 +513,10 @@ pub fn simulate_route_trace(
 
     // 环节 5：终结点决策实测延迟
     let endpoint_ms = match final_action {
-        RuleAction::Proxy => node.and_then(|n| n.latency_ms).map(|ms| ms as f64).unwrap_or(42.0),
+        RuleAction::Proxy => node
+            .and_then(|n| n.latency_ms)
+            .map(|ms| ms as f64)
+            .unwrap_or(42.0),
         RuleAction::Direct => 1.5,
         RuleAction::Reject => 0.1,
     };
@@ -558,7 +567,8 @@ pub fn simulate_route_trace(
         kernel_elapsed_us: None,
         dns_resolved_ips: None,
         group_pick_reason: None,
-    }.format_text(true, false);
+    }
+    .format_text(true, false);
 
     RouteTraceReport {
         target: target_input.to_string(),
@@ -629,7 +639,9 @@ impl RouteTraceReport {
                     raw.push_str(&format!("    ├─ {rule_tag}{pad}-> MISMATCH\n"));
                 }
                 let folded_count = total.saturating_sub(3);
-                raw.push_str(&format!("    │  ... ▾ [已折叠中间 {folded_count} 条未命中规则] ...\n"));
+                raw.push_str(&format!(
+                    "    │  ... ▾ [已折叠中间 {folded_count} 条未命中规则] ...\n"
+                ));
                 if let Some(last) = self.rule_records.last() {
                     let rule_tag = format!("[Rule {}] {}", last.index, last.rule_text);
                     let width = 41;
@@ -664,7 +676,9 @@ impl RouteTraceReport {
                             raw.push_str(&format!("    {branch} {rule_tag}{pad}-> MISMATCH\n"));
                         }
                         RuleMatchStatus::Hit(reason) => {
-                            raw.push_str(&format!("    {branch} {rule_tag}{pad}-> HIT ({reason})\n"));
+                            raw.push_str(&format!(
+                                "    {branch} {rule_tag}{pad}-> HIT ({reason})\n"
+                            ));
                         }
                     }
                 }
@@ -701,13 +715,15 @@ pub async fn probe_live_target(
 
         // 构造标准 DNS A 记录查询报文 (查询 baidu.com)
         let dns_query: [u8; 27] = [
-            0x12, 0x34, 0x01, 0x00, 0x00, 0x01, 0x00, 0x00,
-            0x00, 0x00, 0x00, 0x00, 0x05, b'b', b'a', b'i',
-            b'd', b'u', 0x03, b'c', b'o', b'm', 0x00, 0x00,
-            0x01, 0x00, 0x01,
+            0x12, 0x34, 0x01, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x05, b'b',
+            b'a', b'i', b'd', b'u', 0x03, b'c', b'o', b'm', 0x00, 0x00, 0x01, 0x00, 0x01,
         ];
 
-        let bind_addr = if host.contains(':') { "[::]:0" } else { "0.0.0.0:0" };
+        let bind_addr = if host.contains(':') {
+            "[::]:0"
+        } else {
+            "0.0.0.0:0"
+        };
         if let Ok(socket) = tokio::net::UdpSocket::bind(bind_addr).await {
             if socket.send_to(&dns_query, &target_addr).await.is_ok() {
                 let mut buf = [0u8; 512];
@@ -719,7 +735,12 @@ pub async fn probe_live_target(
                 if let Ok(Ok((len, _))) = recv {
                     if len >= 12 {
                         let elapsed_ms = dns_start.elapsed().as_millis();
-                        return Ok((elapsed_ms, 200, "DNS NOERROR (解析正常)".to_string(), inbound_ms));
+                        return Ok((
+                            elapsed_ms,
+                            200,
+                            "DNS NOERROR (解析正常)".to_string(),
+                            inbound_ms,
+                        ));
                     }
                 }
             }
@@ -734,14 +755,18 @@ pub async fn probe_live_target(
         .await
         {
             let elapsed_ms = tcp_start.elapsed().as_millis();
-            return Ok((elapsed_ms, 200, "DNS TCP Connect OK".to_string(), inbound_ms));
+            return Ok((
+                elapsed_ms,
+                200,
+                "DNS TCP Connect OK".to_string(),
+                inbound_ms,
+            ));
         }
 
         return Err("DNS 查询与端口连接均无响应".to_string());
     }
 
-    let proxy = reqwest::Proxy::all(&proxy_url)
-        .map_err(|e| format!("配置本地代理失败: {e}"))?;
+    let proxy = reqwest::Proxy::all(&proxy_url).map_err(|e| format!("配置本地代理失败: {e}"))?;
 
     let client = reqwest::Client::builder()
         .proxy(proxy)
@@ -907,7 +932,11 @@ impl VpCoreRouteTrace {
         let inbound_port = self.session.inbound_port.unwrap_or(7890);
         let inbound_session = format!(
             "Inbound({}:{}) -> {} -> 目标: {}:{}",
-            if self.session.inbound.is_empty() { "mixed" } else { &self.session.inbound },
+            if self.session.inbound.is_empty() {
+                "mixed"
+            } else {
+                &self.session.inbound
+            },
             inbound_port,
             proto,
             host,
@@ -1122,7 +1151,10 @@ pub async fn fetch_vpcore_explain(
         .map_err(|e| format!("请求内核 explain API 失败: {e}"))?;
 
     if !resp.status().is_success() {
-        return Err(format!("内核 explain API 返回状态码 HTTP {}", resp.status()));
+        return Err(format!(
+            "内核 explain API 返回状态码 HTTP {}",
+            resp.status()
+        ));
     }
 
     let trace: VpCoreRouteTrace = resp
@@ -1169,7 +1201,10 @@ mod tests {
         assert_eq!(report.rule_records.len(), 3);
         assert_eq!(report.rule_records[0].status, RuleMatchStatus::Mismatch);
         assert_eq!(report.rule_records[1].status, RuleMatchStatus::Mismatch);
-        assert!(matches!(report.rule_records[2].status, RuleMatchStatus::Hit(_)));
+        assert!(matches!(
+            report.rule_records[2].status,
+            RuleMatchStatus::Hit(_)
+        ));
         assert_eq!(
             report.routing_action,
             "Forward -> 策略组 [🎯 PROXY] (url-test)"
@@ -1180,15 +1215,25 @@ mod tests {
         );
 
         println!("--- Generated Report ---\n{}", report.raw_text);
-        assert!(report.raw_text.contains("[+] 入站会话: Inbound(mixed:7890) -> TCP -> 目标: github.com:443"));
-        assert!(report.raw_text.contains("[+] 协议嗅探: TLS ClientHello -> SNI: github.com"));
+        assert!(report
+            .raw_text
+            .contains("[+] 入站会话: Inbound(mixed:7890) -> TCP -> 目标: github.com:443"));
+        assert!(report
+            .raw_text
+            .contains("[+] 协议嗅探: TLS ClientHello -> SNI: github.com"));
         assert!(report.raw_text.contains("[Rule 1] DOMAIN-KEYWORD, google"));
         assert!(report.raw_text.contains("MISMATCH"));
-        assert!(report.raw_text.contains("[Rule 2] GEOSITE, category-ads-all"));
+        assert!(report
+            .raw_text
+            .contains("[Rule 2] GEOSITE, category-ads-all"));
         assert!(report.raw_text.contains("[Rule 3] RULE-SET, gfwlist (mrs)"));
         assert!(report.raw_text.contains("HIT (Matched suffix: github.com)"));
-        assert!(report.raw_text.contains("[+] 路由动作: Forward -> 策略组 [🎯 PROXY] (url-test)"));
-        assert!(report.raw_text.contains("[+] 终结点决策: [HK-01-Reality] (延迟: 42ms, 状态: 活跃)"));
+        assert!(report
+            .raw_text
+            .contains("[+] 路由动作: Forward -> 策略组 [🎯 PROXY] (url-test)"));
+        assert!(report
+            .raw_text
+            .contains("[+] 终结点决策: [HK-01-Reality] (延迟: 42ms, 状态: 活跃)"));
     }
 
     #[test]
@@ -1205,15 +1250,8 @@ mod tests {
         );
         assert!(report_ad.routing_action.contains("REJECT"));
 
-        let report_bili = simulate_route_trace(
-            "bilibili.com:443",
-            "TCP",
-            7890,
-            &rules,
-            None,
-            None,
-            false,
-        );
+        let report_bili =
+            simulate_route_trace("bilibili.com:443", "TCP", 7890, &rules, None, None, false);
         assert!(report_bili.routing_action.contains("DIRECT"));
     }
 
@@ -1231,15 +1269,8 @@ mod tests {
             action: RuleAction::Proxy,
         });
 
-        let report = simulate_route_trace(
-            "sub.target.com:443",
-            "TCP",
-            7890,
-            &rules,
-            None,
-            None,
-            false,
-        );
+        let report =
+            simulate_route_trace("sub.target.com:443", "TCP", 7890, &rules, None, None, false);
 
         // 20 mismatch + 1 hit = 21 items
         assert_eq!(report.rule_records.len(), 21);
@@ -1327,7 +1358,8 @@ mod tests {
             "elapsed_us": 65
         }"#;
 
-        let trace: VpCoreRouteTrace = serde_json::from_str(json_data).expect("反序列化 vpcore explain JSON 应成功");
+        let trace: VpCoreRouteTrace =
+            serde_json::from_str(json_data).expect("反序列化 vpcore explain JSON 应成功");
         assert_eq!(trace.destination.host, "github.com");
         assert_eq!(trace.rule_match.evaluated_count, 3);
         assert_eq!(trace.rule_match.total_rules, 9718);
@@ -1339,6 +1371,8 @@ mod tests {
         assert_eq!(report.total_rules, Some(9718));
         assert_eq!(report.kernel_elapsed_us, Some(65));
         assert!(report.routing_action.contains("lowest latency (42ms)"));
-        assert!(report.rule_records[0].rule_text.contains("RULE-SET,gfwlist,PROXY"));
+        assert!(report.rule_records[0]
+            .rule_text
+            .contains("RULE-SET,gfwlist,PROXY"));
     }
 }

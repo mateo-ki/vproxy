@@ -1,7 +1,5 @@
 use crate::gui::theme;
-use crate::gui::widgets::{
-    primary_btn, status_badge,
-};
+use crate::gui::widgets::{primary_btn, status_badge};
 use crate::gui::VpnApp;
 use crate::proxy::recommended_traffic_rules;
 use eframe::egui::{self, Color32, CornerRadius, Frame, Margin, RichText, Stroke, Ui, Vec2};
@@ -267,7 +265,6 @@ impl VpnApp {
             None => {}
         }
     }
-
 }
 
 /// 「导入格式示范」弹框里点出来的动作。

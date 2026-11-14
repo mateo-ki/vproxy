@@ -1,8 +1,8 @@
 #![allow(dead_code)]
 use super::{build_mihomo_config, MihomoConfigOptions};
 use crate::kernel::{managed_kernel_root, KernelKind};
-use crate::proxy::compiler::BackendCompiler;
 use crate::models::Node;
+use crate::proxy::compiler::BackendCompiler;
 use crate::proxy::sing_box::build_sing_box_config;
 use crate::proxy::xray::build_xray_config;
 use crate::proxy::ProxyWorkDir;
@@ -157,7 +157,9 @@ impl KernelAdapter for MeowAdapter {
 
     fn build_config(&self, node: &Node, options: MihomoConfigOptions) -> Result<Value> {
         let plan = crate::proxy::ir::lower_options_to_ir(&options, Some(node));
-        crate::proxy::compiler::MeowCompiler.compile(&plan)?.as_json_value()
+        crate::proxy::compiler::MeowCompiler
+            .compile(&plan)?
+            .as_json_value()
     }
 
     fn serialize_config(&self, config: &Value) -> Result<String> {
@@ -387,9 +389,7 @@ impl KernelAdapter for ShoesAdapter {
     }
 
     fn configure_command(&self, command: &mut Command, work_dir: &ProxyWorkDir) {
-        command
-            .arg("--no-reload")
-            .arg(work_dir.config_path());
+        command.arg("--no-reload").arg(work_dir.config_path());
     }
 
     fn validation_args(&self, work_dir: &ProxyWorkDir) -> Option<Vec<std::ffi::OsString>> {
@@ -452,7 +452,9 @@ impl KernelAdapter for VpCoreAdapter {
 
     fn build_config(&self, node: &Node, options: MihomoConfigOptions) -> Result<Value> {
         let plan = crate::proxy::ir::lower_options_to_ir(&options, Some(node));
-        crate::proxy::compiler::VpCoreCompiler.compile(&plan)?.as_json_value()
+        crate::proxy::compiler::VpCoreCompiler
+            .compile(&plan)?
+            .as_json_value()
     }
 
     fn serialize_config(&self, config: &Value) -> Result<String> {

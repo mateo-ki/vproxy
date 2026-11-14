@@ -53,8 +53,8 @@ mod imp {
         K32GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS,
     };
     use windows_sys::Win32::System::Threading::{
-        GetCurrentProcess, GetProcessIoCounters, GetProcessTimes, OpenProcess,
-        PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_VM_READ, IO_COUNTERS,
+        GetCurrentProcess, GetProcessIoCounters, GetProcessTimes, OpenProcess, IO_COUNTERS,
+        PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_VM_READ,
     };
 
     fn filetime_u64(t: FILETIME) -> u64 {
@@ -63,11 +63,12 @@ mod imp {
 
     pub fn raw_sample() -> Option<RawSample> {
         let handle = unsafe { GetCurrentProcess() };
-        let zero = FILETIME { dwHighDateTime: 0, dwLowDateTime: 0 };
+        let zero = FILETIME {
+            dwHighDateTime: 0,
+            dwLowDateTime: 0,
+        };
         let (mut creation, mut exit, mut kernel, mut user) = (zero, zero, zero, zero);
-        if unsafe {
-            GetProcessTimes(handle, &mut creation, &mut exit, &mut kernel, &mut user)
-        } == 0
+        if unsafe { GetProcessTimes(handle, &mut creation, &mut exit, &mut kernel, &mut user) } == 0
         {
             return None;
         }
@@ -91,13 +92,24 @@ mod imp {
     }
 
     pub fn sample_pid(pid: u32) -> Option<RawSample> {
-        let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_READ, FALSE, pid) };
+        let handle = unsafe {
+            OpenProcess(
+                PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_READ,
+                FALSE,
+                pid,
+            )
+        };
         if handle.is_null() {
             return None;
         }
-        let zero = FILETIME { dwHighDateTime: 0, dwLowDateTime: 0 };
+        let zero = FILETIME {
+            dwHighDateTime: 0,
+            dwLowDateTime: 0,
+        };
         let (mut creation, mut exit, mut kernel, mut user) = (zero, zero, zero, zero);
-        let times_ok = unsafe { GetProcessTimes(handle, &mut creation, &mut exit, &mut kernel, &mut user) } != 0;
+        let times_ok =
+            unsafe { GetProcessTimes(handle, &mut creation, &mut exit, &mut kernel, &mut user) }
+                != 0;
         let mut io: IO_COUNTERS = unsafe { std::mem::zeroed() };
         let io_ok = unsafe { GetProcessIoCounters(handle, &mut io) } != 0;
         unsafe { CloseHandle(handle) };
@@ -112,7 +124,13 @@ mod imp {
     }
 
     pub fn working_set_mb_pid(pid: u32) -> f32 {
-        let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_READ, FALSE, pid) };
+        let handle = unsafe {
+            OpenProcess(
+                PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_READ,
+                FALSE,
+                pid,
+            )
+        };
         if handle.is_null() {
             return 0.0;
         }
@@ -220,4 +238,3 @@ mod tests {
         assert!(mem >= 0.0, "内存工作集不应为负数: {mem}");
     }
 }
-

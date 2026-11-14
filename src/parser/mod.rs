@@ -47,9 +47,7 @@ pub fn extract_subscription_rules(content: &str) -> Vec<crate::proxy::TrafficRul
 }
 
 /// Extract raw rules and proxy-groups YAML from subscription content (plain or base64).
-pub fn extract_subscription_rules_and_groups(
-    content: &str,
-) -> (Option<String>, Option<String>) {
+pub fn extract_subscription_rules_and_groups(content: &str) -> (Option<String>, Option<String>) {
     let content = normalize_subscription_text(content);
     let content = content.trim();
     if content.is_empty() {
@@ -650,13 +648,20 @@ fn has_bracketed_or_prefixed(text: &str, tok: &str) -> bool {
             } else {
                 None
             };
-            let prev_bracket = prev.map_or(true, |b| matches!(b, b'[' | b'(' | b'-' | b'_' | b' ' | b'|'));
+            let prev_bracket = prev.map_or(true, |b| {
+                matches!(b, b'[' | b'(' | b'-' | b'_' | b' ' | b'|')
+            });
             let next_is_digit = next.map_or(false, |b| b.is_ascii_digit());
-            let next_is_delim = next.map_or(true, |b| matches!(b, b']' | b')' | b'-' | b'_' | b' ' | b'|'));
+            let next_is_delim = next.map_or(true, |b| {
+                matches!(b, b']' | b')' | b'-' | b'_' | b' ' | b'|')
+            });
             let has_strict_delimiter = prev.is_some_and(|b| matches!(b, b'[' | b'(' | b'-' | b'_'))
                 || next.is_some_and(|b| matches!(b, b']' | b')' | b'-' | b'_'));
 
-            if prev_bracket && (next_is_digit || has_strict_delimiter) && (next_is_digit || next_is_delim) {
+            if prev_bracket
+                && (next_is_digit || has_strict_delimiter)
+                && (next_is_digit || next_is_delim)
+            {
                 return true;
             }
         }
@@ -740,7 +745,8 @@ static RE_DOMAIN: Lazy<Regex> = Lazy::new(|| {
     .unwrap()
 });
 static RE_SCHEME: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"(?i)\b(?:vless|vmess|trojan|ss|ssr|hysteria2?|tuic|wireguard|wg|socks5?)://\S*").unwrap()
+    Regex::new(r"(?i)\b(?:vless|vmess|trojan|ss|ssr|hysteria2?|tuic|wireguard|wg|socks5?)://\S*")
+        .unwrap()
 });
 static RE_BRACKETS: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"(?i)\[[^\]]*(?:tg|群|官网|关注|推广|发布|频道|订阅|购买|永久|最新|防封|免翻|剩余|到期|流量)[^\]]*\]|【[^】]*(?:tg|群|官网|关注|推广|发布|频道|订阅|购买|永久|最新|防封|免翻|剩余|到期|流量)[^】]*】|\([^\)]*(?:tg|群|官网|关注|推广|发布|频道|订阅|购买|永久|最新|防封|免翻|剩余|到期|流量)[^\)]*\)").unwrap()
@@ -885,7 +891,10 @@ mod tests {
     #[test]
     fn guess_country_fixes_vmiss_and_trojan_false_positives() {
         // Emoji 国旗精准提取
-        assert_eq!(guess_country("🇺🇸【北美洲】美国04原生丨直连【2x】"), Some("US".into()));
+        assert_eq!(
+            guess_country("🇺🇸【北美洲】美国04原生丨直连【2x】"),
+            Some("US".into())
+        );
         assert_eq!(guess_country("🇭🇰 香港 BGP 01"), Some("HK".into()));
         assert_eq!(guess_country("🇯🇵 东京专线"), Some("JP".into()));
         assert_eq!(guess_country("🇸🇬 新加坡优化"), Some("SG".into()));
@@ -899,7 +908,10 @@ mod tests {
         assert_eq!(guess_country("VMiss - US - Trojan"), Some("US".into()));
         assert_eq!(guess_country("VMiss LAX Trojan"), Some("US".into()));
         assert_eq!(guess_country("VMiss SJC Trojan"), Some("US".into()));
-        assert_eq!(guess_country("VMiss - San Jose - Trojan"), Some("US".into()));
+        assert_eq!(
+            guess_country("VMiss - San Jose - Trojan"),
+            Some("US".into())
+        );
         assert_eq!(guess_country("VMiss-Seattle-Trojan"), Some("US".into()));
 
         // 杜绝单词子串误判：trojan 中的 tr 绝不能误判为土耳其 TR！
@@ -989,7 +1001,10 @@ mod tests {
     fn fingerprint_differs_by_transport_and_reality_params() {
         let base = |mut extra: serde_json::Value| {
             let obj = extra.as_object_mut().unwrap();
-            obj.insert("uuid".into(), serde_json::json!("11111111-1111-1111-1111-111111111111"));
+            obj.insert(
+                "uuid".into(),
+                serde_json::json!("11111111-1111-1111-1111-111111111111"),
+            );
             make_node("vless", "n", "1.2.3.4", 443, "raw", extra, None)
         };
         let plain = base(serde_json::json!({"network":"ws"}));
@@ -997,8 +1012,10 @@ mod tests {
         let ws_path2 = base(serde_json::json!({"network":"ws","path":"/bbb"}));
         let sni = base(serde_json::json!({"network":"tcp","sni":"a.com"}));
         let sni2 = base(serde_json::json!({"network":"tcp","sni":"b.com"}));
-        let reality = base(serde_json::json!({"network":"tcp","reality-opts":{"public-key":"pk1"}}));
-        let reality2 = base(serde_json::json!({"network":"tcp","reality-opts":{"public-key":"pk2"}}));
+        let reality =
+            base(serde_json::json!({"network":"tcp","reality-opts":{"public-key":"pk1"}}));
+        let reality2 =
+            base(serde_json::json!({"network":"tcp","reality-opts":{"public-key":"pk2"}}));
 
         assert_ne!(node_fingerprint(&plain), node_fingerprint(&ws_path));
         assert_ne!(node_fingerprint(&ws_path), node_fingerprint(&ws_path2));

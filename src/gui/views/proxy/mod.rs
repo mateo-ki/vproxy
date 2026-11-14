@@ -23,7 +23,6 @@ pub use network::clean_kernel_version;
 #[allow(unused_imports)]
 pub(crate) use rules::{RULES_ACTIONS_WIDTH, RULES_TABS_MIN_WIDTH};
 
-
 use crate::gui::theme;
 use crate::gui::widgets::{danger_btn, primary_btn};
 use crate::gui::VpnApp;
@@ -38,14 +37,11 @@ fn status_btn(text: &str) -> egui::Button<'_> {
         .stroke(Stroke::new(1.0_f32, theme::border()))
 }
 
-
-
 impl VpnApp {
     pub(crate) fn ui_proxy(&mut self, ui: &mut Ui) {
         ui.add_space(4.0);
         self.ui_proxy_charts(ui);
     }
-
 
     pub(crate) fn ui_proxy_control_buttons(&mut self, ui: &mut Ui) {
         let running = matches!(
@@ -82,7 +78,10 @@ impl VpnApp {
                     "状态还停在「{}」，等它跑完或者失败才能按",
                     self.proxy_status.message
                 ))
-            } else if self.selected_proxy_node_id.is_none() && self.focused_node_id.is_none() && self.proxy_config.url_test {
+            } else if self.selected_proxy_node_id.is_none()
+                && self.focused_node_id.is_none()
+                && self.proxy_config.url_test
+            {
                 start.on_hover_text("点击以当前策略组自动选优启动")
             } else {
                 start
@@ -121,11 +120,12 @@ impl VpnApp {
 
         if ui
             .add(status_btn("网络检测"))
-            .on_hover_text("全面体检：检测软件、内核与系统网络状态，支持一键修复死回环DNS/死代理/端口冲突")
+            .on_hover_text(
+                "全面体检：检测软件、内核与系统网络状态，支持一键修复死回环DNS/死代理/端口冲突",
+            )
             .clicked()
         {
             self.open_network_doctor();
         }
     }
-
 }

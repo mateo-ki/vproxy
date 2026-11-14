@@ -1,15 +1,17 @@
 use crate::gui::icons::{icon_label, Icon};
 use crate::gui::theme;
-use crate::gui::widgets::{
-    panel_frame, section_title,
-};
+use crate::gui::widgets::{panel_frame, section_title};
 use crate::gui::VpnApp;
 use crate::proxy::ProxyMode;
 use eframe::egui::{self, CornerRadius, Frame, Margin, RichText, Stroke, Ui};
 
 impl VpnApp {
     pub(crate) fn ui_proxy_security(&mut self, ui: &mut Ui) {
-        section_title(ui, self.tr("隐私安全"), "uTLS 指纹伪装 · WebRTC 防泄漏 · 隐私追踪拦截 · 端口跳跃");
+        section_title(
+            ui,
+            self.tr("隐私安全"),
+            "uTLS 指纹伪装 · WebRTC 防泄漏 · 隐私追踪拦截 · 端口跳跃",
+        );
 
         let mut changed = false;
 
@@ -379,5 +381,4 @@ impl VpnApp {
             self.save_proxy_config();
         }
     }
-
 }

@@ -183,5 +183,4 @@ impl VpnApp {
             self.update_kernel_from(kind, source, path, true);
         }
     }
-
 }

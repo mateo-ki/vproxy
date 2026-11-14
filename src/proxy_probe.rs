@@ -14,9 +14,7 @@ use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
 use uuid::Uuid;
 
-pub use crate::constants::network::{
-    PROXY_CONNECTIVITY_FALLBACK_URL, PROXY_CONNECTIVITY_TEST_URL,
-};
+pub use crate::constants::network::{PROXY_CONNECTIVITY_FALLBACK_URL, PROXY_CONNECTIVITY_TEST_URL};
 /// Concurrent delay probes through the single shared Mihomo instance. Each probe is a
 /// TLS request to generate_204 through a real proxy. Kept moderate: too many concurrent
 /// real-proxy connections saturate consumer NICs/routers.

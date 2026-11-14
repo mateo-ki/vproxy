@@ -66,10 +66,7 @@ impl BackendCompiler for ShoesCompiler {
             } else {
                 plan.inbounds.controller_secret.clone()
             };
-            clash_api.insert(
-                Value::String("secret".into()),
-                Value::String(secret),
-            );
+            clash_api.insert(Value::String("secret".into()), Value::String(secret));
             clash_api.insert(
                 Value::String("cors_origins".into()),
                 Value::Sequence(vec![Value::String("*".into())]),
@@ -88,15 +85,9 @@ impl BackendCompiler for ShoesCompiler {
 
         // 附加直接连接选项
         let mut direct_client = Mapping::new();
-        direct_client.insert(
-            Value::String("name".into()),
-            Value::String("direct".into()),
-        );
+        direct_client.insert(Value::String("name".into()), Value::String("direct".into()));
         let mut direct_proto = Mapping::new();
-        direct_proto.insert(
-            Value::String("type".into()),
-            Value::String("direct".into()),
-        );
+        direct_proto.insert(Value::String("type".into()), Value::String("direct".into()));
         direct_client.insert(
             Value::String("protocol".into()),
             Value::Mapping(direct_proto),
@@ -141,10 +132,7 @@ impl BackendCompiler for ShoesCompiler {
             )),
         );
         let mut mixed_proto = Mapping::new();
-        mixed_proto.insert(
-            Value::String("type".into()),
-            Value::String("mixed".into()),
-        );
+        mixed_proto.insert(Value::String("type".into()), Value::String("mixed".into()));
         mixed_proto.insert(Value::String("udp_enabled".into()), Value::Bool(true));
         local_server.insert(
             Value::String("protocol".into()),
@@ -167,21 +155,18 @@ impl BackendCompiler for ShoesCompiler {
                 Value::String("fe80::/10".into()),
             ]),
         );
-        local_rule.insert(
-            Value::String("no_resolve".into()),
-            Value::Bool(true),
-        );
+        local_rule.insert(Value::String("no_resolve".into()), Value::Bool(true));
         local_rule.insert(
             Value::String("action".into()),
             Value::String("allow".into()),
         );
         let mut direct_chain = Mapping::new();
         let mut chain_proto = Mapping::new();
-        chain_proto.insert(
-            Value::String("type".into()),
-            Value::String("direct".into()),
+        chain_proto.insert(Value::String("type".into()), Value::String("direct".into()));
+        direct_chain.insert(
+            Value::String("protocol".into()),
+            Value::Mapping(chain_proto),
         );
-        direct_chain.insert(Value::String("protocol".into()), Value::Mapping(chain_proto));
         local_rule.insert(
             Value::String("client_chain".into()),
             Value::Mapping(direct_chain),
@@ -208,11 +193,11 @@ impl BackendCompiler for ShoesCompiler {
                 );
                 let mut direct_chain = Mapping::new();
                 let mut chain_proto = Mapping::new();
-                chain_proto.insert(
-                    Value::String("type".into()),
-                    Value::String("direct".into()),
+                chain_proto.insert(Value::String("type".into()), Value::String("direct".into()));
+                direct_chain.insert(
+                    Value::String("protocol".into()),
+                    Value::Mapping(chain_proto),
                 );
-                direct_chain.insert(Value::String("protocol".into()), Value::Mapping(chain_proto));
                 rule.insert(
                     Value::String("client_chain".into()),
                     Value::Mapping(direct_chain),
@@ -274,10 +259,7 @@ impl BackendCompiler for ShoesCompiler {
                 )),
             );
             let mut proto = Mapping::new();
-            proto.insert(
-                Value::String("type".into()),
-                Value::String("mixed".into()),
-            );
+            proto.insert(Value::String("type".into()), Value::String("mixed".into()));
             proto.insert(Value::String("udp_enabled".into()), Value::Bool(true));
             port_server.insert(Value::String("protocol".into()), Value::Mapping(proto));
 
@@ -489,11 +471,11 @@ fn translate_ir_rule(rule: &crate::proxy::ir::IRRule) -> Vec<Value> {
                 );
                 let mut direct_chain = Mapping::new();
                 let mut chain_proto = Mapping::new();
-                chain_proto.insert(
-                    Value::String("type".into()),
-                    Value::String("direct".into()),
+                chain_proto.insert(Value::String("type".into()), Value::String("direct".into()));
+                direct_chain.insert(
+                    Value::String("protocol".into()),
+                    Value::Mapping(chain_proto),
                 );
-                direct_chain.insert(Value::String("protocol".into()), Value::Mapping(chain_proto));
                 shoes_rule.insert(
                     Value::String("client_chain".into()),
                     Value::Mapping(direct_chain),
@@ -556,25 +538,21 @@ fn build_protocol_layer(node: &Node, client_fingerprint: Option<&str>) -> Result
             Ok(Value::Mapping(proto))
         }
         "snell" => {
-            let cipher = string_from_cfg(&cfg, &["cipher"])
-                .unwrap_or_else(|| "aes-128-gcm".into());
+            let cipher = string_from_cfg(&cfg, &["cipher"]).unwrap_or_else(|| "aes-128-gcm".into());
             let password = string_from_cfg(&cfg, &["password"])
                 .ok_or_else(|| anyhow!("Snell 缺少 password"))?;
             let mut proto = Mapping::new();
-            proto.insert(
-                Value::String("type".into()),
-                Value::String("snell".into()),
-            );
+            proto.insert(Value::String("type".into()), Value::String("snell".into()));
             proto.insert(Value::String("cipher".into()), Value::String(cipher));
             proto.insert(Value::String("password".into()), Value::String(password));
             proto.insert(Value::String("udp_enabled".into()), Value::Bool(true));
             Ok(Value::Mapping(proto))
         }
         "vmess" => {
-            let user_id = string_from_cfg(&cfg, &["uuid", "id"])
-                .ok_or_else(|| anyhow!("VMess 缺少 uuid"))?;
-            let raw_cipher = string_from_cfg(&cfg, &["cipher", "security"])
-                .unwrap_or_else(|| "auto".into());
+            let user_id =
+                string_from_cfg(&cfg, &["uuid", "id"]).ok_or_else(|| anyhow!("VMess 缺少 uuid"))?;
+            let raw_cipher =
+                string_from_cfg(&cfg, &["cipher", "security"]).unwrap_or_else(|| "auto".into());
             let cipher = if raw_cipher == "auto" || raw_cipher.is_empty() {
                 "aes-128-gcm"
             } else {
@@ -582,28 +560,19 @@ fn build_protocol_layer(node: &Node, client_fingerprint: Option<&str>) -> Result
             };
 
             let mut vmess_proto = Mapping::new();
-            vmess_proto.insert(
-                Value::String("type".into()),
-                Value::String("vmess".into()),
-            );
-            vmess_proto.insert(
-                Value::String("cipher".into()),
-                Value::String(cipher.into()),
-            );
+            vmess_proto.insert(Value::String("type".into()), Value::String("vmess".into()));
+            vmess_proto.insert(Value::String("cipher".into()), Value::String(cipher.into()));
             vmess_proto.insert(Value::String("user_id".into()), Value::String(user_id));
             vmess_proto.insert(Value::String("udp_enabled".into()), Value::Bool(true));
 
             wrap_transport(vmess_proto, &cfg, &node.server, client_fingerprint)
         }
         "vless" => {
-            let user_id = string_from_cfg(&cfg, &["uuid", "id"])
-                .ok_or_else(|| anyhow!("VLESS 缺少 uuid"))?;
+            let user_id =
+                string_from_cfg(&cfg, &["uuid", "id"]).ok_or_else(|| anyhow!("VLESS 缺少 uuid"))?;
 
             let mut vless_proto = Mapping::new();
-            vless_proto.insert(
-                Value::String("type".into()),
-                Value::String("vless".into()),
-            );
+            vless_proto.insert(Value::String("type".into()), Value::String("vless".into()));
             vless_proto.insert(Value::String("user_id".into()), Value::String(user_id));
             vless_proto.insert(Value::String("udp_enabled".into()), Value::Bool(true));
 
@@ -614,10 +583,7 @@ fn build_protocol_layer(node: &Node, client_fingerprint: Option<&str>) -> Result
                 .ok_or_else(|| anyhow!("Trojan 缺少 password"))?;
 
             let mut trojan_proto = Mapping::new();
-            trojan_proto.insert(
-                Value::String("type".into()),
-                Value::String("trojan".into()),
-            );
+            trojan_proto.insert(Value::String("type".into()), Value::String("trojan".into()));
             trojan_proto.insert(Value::String("password".into()), Value::String(password));
 
             let security = string_from_cfg(&cfg, &["security"]).unwrap_or_else(|| "tls".into());
@@ -625,14 +591,16 @@ fn build_protocol_layer(node: &Node, client_fingerprint: Option<&str>) -> Result
             if security != "none" {
                 cfg_with_sec.insert("security".into(), serde_json::Value::String("tls".into()));
             }
-            wrap_transport(trojan_proto, &cfg_with_sec, &node.server, client_fingerprint)
+            wrap_transport(
+                trojan_proto,
+                &cfg_with_sec,
+                &node.server,
+                client_fingerprint,
+            )
         }
         "http" | "https" => {
             let mut http_proto = Mapping::new();
-            http_proto.insert(
-                Value::String("type".into()),
-                Value::String("http".into()),
-            );
+            http_proto.insert(Value::String("type".into()), Value::String("http".into()));
             if let Some(user) = string_from_cfg(&cfg, &["username", "user"]) {
                 http_proto.insert(Value::String("username".into()), Value::String(user));
             }
@@ -642,17 +610,11 @@ fn build_protocol_layer(node: &Node, client_fingerprint: Option<&str>) -> Result
 
             if protocol == "https" {
                 let mut tls_proto = Mapping::new();
-                tls_proto.insert(
-                    Value::String("type".into()),
-                    Value::String("tls".into()),
-                );
+                tls_proto.insert(Value::String("type".into()), Value::String("tls".into()));
                 let sni = string_from_cfg(&cfg, &["sni", "servername"])
                     .unwrap_or_else(|| node.server.clone());
                 tls_proto.insert(Value::String("sni_hostname".into()), Value::String(sni));
-                tls_proto.insert(
-                    Value::String("protocol".into()),
-                    Value::Mapping(http_proto),
-                );
+                tls_proto.insert(Value::String("protocol".into()), Value::Mapping(http_proto));
                 Ok(Value::Mapping(tls_proto))
             } else {
                 Ok(Value::Mapping(http_proto))
@@ -660,10 +622,7 @@ fn build_protocol_layer(node: &Node, client_fingerprint: Option<&str>) -> Result
         }
         "socks" | "socks5" => {
             let mut socks_proto = Mapping::new();
-            socks_proto.insert(
-                Value::String("type".into()),
-                Value::String("socks".into()),
-            );
+            socks_proto.insert(Value::String("type".into()), Value::String("socks".into()));
             if let Some(user) = string_from_cfg(&cfg, &["username", "user"]) {
                 socks_proto.insert(Value::String("username".into()), Value::String(user));
             }
@@ -676,10 +635,7 @@ fn build_protocol_layer(node: &Node, client_fingerprint: Option<&str>) -> Result
             let password = string_from_cfg(&cfg, &["password"])
                 .ok_or_else(|| anyhow!("AnyTLS 缺少 password"))?;
             let mut proto = Mapping::new();
-            proto.insert(
-                Value::String("type".into()),
-                Value::String("anytls".into()),
-            );
+            proto.insert(Value::String("type".into()), Value::String("anytls".into()));
             proto.insert(Value::String("password".into()), Value::String(password));
             proto.insert(Value::String("udp_enabled".into()), Value::Bool(true));
             Ok(Value::Mapping(proto))
@@ -702,10 +658,7 @@ fn build_protocol_layer(node: &Node, client_fingerprint: Option<&str>) -> Result
             naive_proto.insert(Value::String("padding".into()), Value::Bool(true));
 
             let mut tls_proto = Mapping::new();
-            tls_proto.insert(
-                Value::String("type".into()),
-                Value::String("tls".into()),
-            );
+            tls_proto.insert(Value::String("type".into()), Value::String("tls".into()));
             tls_proto.insert(Value::String("sni_hostname".into()), Value::String(sni));
             tls_proto.insert(
                 Value::String("protocol".into()),
@@ -788,10 +741,7 @@ fn wrap_transport(
 
         let mut ws_map = Mapping::new();
         ws_map.insert(Value::String("type".into()), Value::String("ws".into()));
-        ws_map.insert(
-            Value::String("matching_path".into()),
-            Value::String(path),
-        );
+        ws_map.insert(Value::String("matching_path".into()), Value::String(path));
 
         let mut headers = Mapping::new();
         headers.insert(Value::String("Host".into()), Value::String(host));
@@ -855,13 +805,13 @@ fn wrap_transport(
             .unwrap_or(false);
 
         let mut tls_map = Mapping::new();
-        tls_map.insert(
-            Value::String("type".into()),
-            Value::String("tls".into()),
-        );
+        tls_map.insert(Value::String("type".into()), Value::String("tls".into()));
         tls_map.insert(Value::String("sni_hostname".into()), Value::String(sni));
         tls_map.insert(Value::String("vision".into()), Value::Bool(vision));
-        if let Some(val) = cfg.get("skip-cert-verify").or_else(|| cfg.get("allowInsecure")) {
+        if let Some(val) = cfg
+            .get("skip-cert-verify")
+            .or_else(|| cfg.get("allowInsecure"))
+        {
             if let Some(b) = val.as_bool() {
                 if b {
                     tls_map.insert(Value::String("verify".into()), Value::Bool(false));

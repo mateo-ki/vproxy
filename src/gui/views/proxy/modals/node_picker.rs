@@ -1,8 +1,6 @@
 use crate::gui::icons::{icon_label, Icon};
 use crate::gui::theme;
-use crate::gui::widgets::{
-    protocol_pill, render_country_code_badge, sanitize_node_name,
-};
+use crate::gui::widgets::{protocol_pill, render_country_code_badge, sanitize_node_name};
 use crate::gui::VpnApp;
 use eframe::egui::{self, RichText};
 
@@ -100,11 +98,15 @@ impl VpnApp {
                                     node.name, node.server, node.port
                                 ));
 
-                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                    if ui.button("选择").clicked() {
-                                        picked_node = Some((node.id.clone(), node.name.clone()));
-                                    }
-                                });
+                                ui.with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| {
+                                        if ui.button("选择").clicked() {
+                                            picked_node =
+                                                Some((node.id.clone(), node.name.clone()));
+                                        }
+                                    },
+                                );
                             });
                             ui.separator();
                         }
@@ -112,9 +114,7 @@ impl VpnApp {
                         if count == 0 {
                             ui.vertical_centered(|ui| {
                                 ui.add_space(30.0);
-                                ui.label(
-                                    RichText::new("没有找到匹配的节点").color(theme::muted()),
-                                );
+                                ui.label(RichText::new("没有找到匹配的节点").color(theme::muted()));
                             });
                         }
                     });
@@ -167,5 +167,4 @@ impl VpnApp {
             self.node_picker_target_index = None;
         }
     }
-
 }

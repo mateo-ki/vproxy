@@ -246,7 +246,9 @@ async fn probe_batch(
                                 _ => {
                                     // 交叉复验：Google 失败后回退测试 Cloudflare 204
                                     match client.get(PROXY_CONNECTIVITY_FALLBACK_URL).send().await {
-                                        Ok(resp) if resp.status() == reqwest::StatusCode::NO_CONTENT => {
+                                        Ok(resp)
+                                            if resp.status() == reqwest::StatusCode::NO_CONTENT =>
+                                        {
                                             Ok("Cloudflare")
                                         }
                                         Ok(resp) => Err(format!("HTTP {}", resp.status())),
@@ -428,8 +430,8 @@ mod tests {
             }],
             ..MihomoConfigOptions::default()
         };
-        let config =
-            build_xray_config(&node("trojan", json!({"password":"p"})), options).expect("build config success");
+        let config = build_xray_config(&node("trojan", json!({"password":"p"})), options)
+            .expect("build config success");
         let rules = config["routing"]["rules"].as_array().expect("rules array");
         assert!(!rules.iter().any(|r| r.to_string().contains("app.exe")));
     }
@@ -460,8 +462,7 @@ mod tests {
             },
         )
         .unwrap();
-        let directory =
-            std::env::temp_dir().join(format!("vproxy-xray-check-{}", Uuid::new_v4()));
+        let directory = std::env::temp_dir().join(format!("vproxy-xray-check-{}", Uuid::new_v4()));
         tokio::fs::create_dir_all(&directory).await.unwrap();
         let path = directory.join("config.json");
         tokio::fs::write(&path, serde_json::to_vec_pretty(&config).unwrap())

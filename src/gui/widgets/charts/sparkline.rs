@@ -87,8 +87,6 @@ pub fn render_fetch_ticks(ui: &mut Ui, rows: Option<&Vec<crate::db::telemetry::F
     ));
 }
 
-
-
 /// 表头里的迷你流量图：下载实线、上传虚线，两条共用一个量程 —— 各用各的量程会让
 /// 300 B/s 的上传画得和 30 KB/s 的下载一样高，那是假象。32px 高塞不下坐标和文字，
 /// 读数走 hover；累计值在窗口底部状态栏本来就有。
@@ -221,10 +219,8 @@ pub fn render_signal_bars_with_status(
     for i in 0..4 {
         let x = rect.min.x + i as f32 * (bar_w + bar_gap);
         let h = heights[i];
-        let bar_rect = egui::Rect::from_min_max(
-            egui::pos2(x, baseline - h),
-            egui::pos2(x + bar_w, baseline),
-        );
+        let bar_rect =
+            egui::Rect::from_min_max(egui::pos2(x, baseline - h), egui::pos2(x + bar_w, baseline));
         let fill = if i < active_bars {
             bar_color
         } else {
@@ -233,4 +229,3 @@ pub fn render_signal_bars_with_status(
         painter.rect_filled(bar_rect, CornerRadius::same(1), fill);
     }
 }
-

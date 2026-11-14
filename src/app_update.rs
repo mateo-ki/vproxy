@@ -63,7 +63,10 @@ impl PackageKind {
             Self::Rpm => format!("sudo rpm -Uvh {file}"),
             Self::AppImage => {
                 if let Some(orig) = std::env::var_os("APPIMAGE").map(PathBuf::from) {
-                    format!("chmod +x {file} && 直接运行新版或替换原文件：{}", orig.display())
+                    format!(
+                        "chmod +x {file} && 直接运行新版或替换原文件：{}",
+                        orig.display()
+                    )
                 } else {
                     format!("chmod +x {file} && {file}")
                 }
@@ -781,9 +784,9 @@ pub async fn list_releases(
                     items.push(ReleaseItem {
                         tag: release.tag_name.clone(),
                         name: release.name.unwrap_or_else(|| release.tag_name.clone()),
-                        published_at: release.published_at.map(|d| {
-                            d.split('T').next().unwrap_or(&d).to_string()
-                        }),
+                        published_at: release
+                            .published_at
+                            .map(|d| d.split('T').next().unwrap_or(&d).to_string()),
                         prerelease: release.prerelease,
                         html_url: release.html_url.unwrap_or_else(|| {
                             format!(
@@ -802,9 +805,7 @@ pub async fn list_releases(
                 }
                 return Ok(items);
             }
-            Err(error) => {
-                failures.push(format!("{}: 解析 JSON 失败: {error}", transport.label))
-            }
+            Err(error) => failures.push(format!("{}: 解析 JSON 失败: {error}", transport.label)),
         }
     }
 
@@ -857,12 +858,18 @@ pub async fn fetch_releases_from_atom(
                 if !items.is_empty() {
                     return Ok(items);
                 }
-                failures.push(format!("{}: Atom Feed 中未包含有效 Release 条目", transport.label));
+                failures.push(format!(
+                    "{}: Atom Feed 中未包含有效 Release 条目",
+                    transport.label
+                ));
             }
             Err(err) => failures.push(format!("{}: 读取 Atom 文本失败: {err}", transport.label)),
         }
     }
-    bail!("通过 Atom 备用源获取 Releases 失败：{}", failures.join("；"))
+    bail!(
+        "通过 Atom 备用源获取 Releases 失败：{}",
+        failures.join("；")
+    )
 }
 
 fn extract_xml_tag_content(xml: &str, tag: &str) -> Option<String> {
@@ -942,17 +949,18 @@ fn parse_atom_releases(xml: &str, current: &str) -> Vec<ReleaseItem> {
         }
 
         let name = extract_xml_tag_content(entry_xml, "title").unwrap_or_else(|| tag.clone());
-        let published_at = extract_xml_tag_content(entry_xml, "updated").map(|d| {
-            d.split('T').next().unwrap_or(&d).to_string()
-        });
-        let html_url = extract_link_href(entry_xml).unwrap_or_else(|| {
-            format!("https://github.com/{REPOSITORY}/releases/tag/{tag}")
-        });
+        let published_at = extract_xml_tag_content(entry_xml, "updated")
+            .map(|d| d.split('T').next().unwrap_or(&d).to_string());
+        let html_url = extract_link_href(entry_xml)
+            .unwrap_or_else(|| format!("https://github.com/{REPOSITORY}/releases/tag/{tag}"));
         let body = extract_xml_tag_content(entry_xml, "content");
         let tag_clean = tag.trim_start_matches('v');
         let current_clean = current.trim_start_matches('v');
         let is_current = tag_clean == current_clean;
-        let prerelease = tag.contains('-') || tag.contains("alpha") || tag.contains("beta") || tag.contains("rc");
+        let prerelease = tag.contains('-')
+            || tag.contains("alpha")
+            || tag.contains("beta")
+            || tag.contains("rc");
 
         let candidate_assets = synthesize_candidate_assets(&tag);
         let picked = pick_installer_asset(&candidate_assets, &tag);
@@ -992,7 +1000,10 @@ fn summarize(release: ReleaseJson, current: &str, channel: UpdateChannel) -> App
         .unwrap_or("本机可用的");
     let message = if asset.is_none() {
         if cfg!(target_os = "macos") {
-            format!("macOS 暂不支持应用内安装更新，请从官方发布页下载 VProxy.app（Release {}）", release.tag_name)
+            format!(
+                "macOS 暂不支持应用内安装更新，请从官方发布页下载 VProxy.app（Release {}）",
+                release.tag_name
+            )
         } else {
             format!(
                 "{} Release {} 里没有 {wanted}资产",
@@ -1112,7 +1123,9 @@ where
         .await
         {
             Ok(()) => {
-                let actual_size = std::fs::metadata(&target).map(|m| m.len()).unwrap_or(asset.size);
+                let actual_size = std::fs::metadata(&target)
+                    .map(|m| m.len())
+                    .unwrap_or(asset.size);
                 crate::startup_log(&format!(
                     "[更新] 安装包已下载并校验: {}（{} 字节，通道 {label}）",
                     target.display(),
@@ -1331,7 +1344,8 @@ mod tests {
         assert!(!summary.update_available);
         assert!(summary.asset.is_none());
         assert!(summary.message.contains("macOS 暂不支持应用内安装更新"));
-        let directory = std::env::temp_dir().join(format!("vproxy-mac-update-{}", uuid::Uuid::new_v4()));
+        let directory =
+            std::env::temp_dir().join(format!("vproxy-mac-update-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir(&directory).unwrap();
         let package = directory.join("vproxy.deb");
         std::fs::write(&package, b"test package").unwrap();
@@ -1530,10 +1544,17 @@ ID-LIKE=\"debian\"
         // 名字对不上 tag（比如 tag 打错、资产手工传过）时退到后缀匹配的最后一个。
         let loose = vec![asset("vproxy-0.9.0-windows-x64-setup.exe", None)];
         assert_eq!(
-            pick_one_kind(&loose, PackageKind::WindowsSetup, "1.2.2").unwrap().name,
+            pick_one_kind(&loose, PackageKind::WindowsSetup, "1.2.2")
+                .unwrap()
+                .name,
             "vproxy-0.9.0-windows-x64-setup.exe"
         );
-        assert!(pick_one_kind(&[asset("sha256.txt", None)], PackageKind::WindowsSetup, "1.2.2").is_none());
+        assert!(pick_one_kind(
+            &[asset("sha256.txt", None)],
+            PackageKind::WindowsSetup,
+            "1.2.2"
+        )
+        .is_none());
 
         // 旧品牌 vpn-parser-* 资产不再受认：即使 Release 里只有旧名安装包也不更新
         // （老客户端靠它们自己那版的匹配逻辑跳到新名资产，完成最后一跳升级）。
@@ -1748,7 +1769,10 @@ ID-LIKE=\"debian\"
         };
         let downgrade_info = downgrade_item.to_release_info("1.8.8");
         assert!(!downgrade_info.update_available);
-        assert!(downgrade_info.can_install(), "历史老版本只要有安装包就允许安装");
+        assert!(
+            downgrade_info.can_install(),
+            "历史老版本只要有安装包就允许安装"
+        );
         assert!(downgrade_info.message.contains("回退/切换至 v1.8.6"));
 
         let current_item = ReleaseItem {
@@ -1904,7 +1928,10 @@ ID-LIKE=\"debian\"
         let plain = describe_rejection(reqwest::StatusCode::FORBIDDEN, false);
         assert!(!plain.contains("限流"), "{plain}");
         assert!(plain.contains("403"), "{plain}");
-        assert_eq!(describe_rejection(reqwest::StatusCode::NOT_FOUND, false), "HTTP 404");
+        assert_eq!(
+            describe_rejection(reqwest::StatusCode::NOT_FOUND, false),
+            "HTTP 404"
+        );
     }
 
     #[test]

@@ -209,15 +209,7 @@ fn create_masque_node(
         config["sni"] = json!(sni_val);
     }
 
-    let mut node = make_node(
-        "masque",
-        name,
-        server,
-        port,
-        &raw_uri,
-        config,
-        source_id,
-    );
+    let mut node = make_node("masque", name, server, port, &raw_uri, config, source_id);
     node.country = Some("US".into());
     node
 }
@@ -301,15 +293,7 @@ pub fn parse_masque_uri(uri: &str, source_id: Option<&str>) -> Option<Node> {
         config["sni"] = json!(s);
     }
 
-    let mut node = make_node(
-        "masque",
-        &name,
-        &host,
-        port,
-        uri.trim(),
-        config,
-        source_id,
-    );
+    let mut node = make_node("masque", &name, &host, port, uri.trim(), config, source_id);
     node.country = Some("US".into());
     Some(node)
 }
@@ -408,9 +392,9 @@ pub fn generate_p256_keypair() -> anyhow::Result<(String, String)> {
     let oid = [0x06, 0x08, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07];
     let mut body = Vec::with_capacity(120);
     body.extend_from_slice(&[0x02, 0x01, 0x01]); // version = 1
-    body.extend_from_slice(&[0x04, 0x20]);       // OCTET STRING (32)
+    body.extend_from_slice(&[0x04, 0x20]); // OCTET STRING (32)
     body.extend_from_slice(raw_priv);
-    body.push(0xa0);                             // [0] namedCurve
+    body.push(0xa0); // [0] namedCurve
     body.push(oid.len() as u8);
     body.extend_from_slice(&oid);
     body.extend_from_slice(&[0xa1, 0x44, 0x03, 0x42, 0x00]); // [1] publicKey BIT STRING
@@ -427,8 +411,7 @@ pub fn generate_p256_keypair() -> anyhow::Result<(String, String)> {
 
 /// 原生向 Cloudflare 注册新 WARP 设备并登记 MASQUE 隧道，生成全部 57 个节点
 pub async fn register_warp_masque_native(proxy_url: Option<&str>) -> anyhow::Result<Vec<Node>> {
-    let mut builder = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(15));
+    let mut builder = reqwest::Client::builder().timeout(std::time::Duration::from_secs(15));
     if let Some(proxy) = proxy_url {
         builder = builder.proxy(reqwest::Proxy::all(proxy)?);
     }
@@ -497,7 +480,9 @@ pub async fn register_warp_masque_native(proxy_url: Option<&str>) -> anyhow::Res
     });
 
     let patch_resp = client
-        .patch(format!("https://api.cloudflareclient.com/v0a4471/reg/{acc_id}"))
+        .patch(format!(
+            "https://api.cloudflareclient.com/v0a4471/reg/{acc_id}"
+        ))
         .header("User-Agent", "WARP for Android")
         .header("CF-Client-Version", "a-6.35-4471")
         .header("Authorization", format!("Bearer {token}"))

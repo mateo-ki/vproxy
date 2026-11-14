@@ -3,7 +3,9 @@ use crate::gui::widgets::{danger_btn, primary_btn};
 use crate::gui::VpnApp;
 use crate::proxy::MihomoConfigOptions;
 use crate::proxy::ProxyRuntimeStatus;
-use eframe::egui::{self, Align, CornerRadius, Frame, Layout, Margin, RichText, ScrollArea, Stroke, Vec2};
+use eframe::egui::{
+    self, Align, CornerRadius, Frame, Layout, Margin, RichText, ScrollArea, Stroke, Vec2,
+};
 use std::time::Duration;
 
 fn status_btn(text: &str) -> egui::Button<'_> {
@@ -68,9 +70,18 @@ pub struct NetworkDoctorReport {
 
 impl NetworkDoctorReport {
     pub fn new(items: Vec<DiagnosticItem>) -> Self {
-        let pass_count = items.iter().filter(|i| i.status == DiagnosticStatus::Pass).count();
-        let warn_count = items.iter().filter(|i| i.status == DiagnosticStatus::Warning).count();
-        let fail_count = items.iter().filter(|i| i.status == DiagnosticStatus::Fail).count();
+        let pass_count = items
+            .iter()
+            .filter(|i| i.status == DiagnosticStatus::Pass)
+            .count();
+        let warn_count = items
+            .iter()
+            .filter(|i| i.status == DiagnosticStatus::Warning)
+            .count();
+        let fail_count = items
+            .iter()
+            .filter(|i| i.status == DiagnosticStatus::Fail)
+            .count();
         let timestamp = chrono::Local::now().format("%H:%M:%S").to_string();
         Self {
             timestamp,
@@ -88,11 +99,17 @@ pub async fn perform_network_diagnosis(
     status: ProxyRuntimeStatus,
 ) -> NetworkDoctorReport {
     let mut items = Vec::new();
-    let is_running = matches!(status.state, crate::proxy::ProxyState::Running | crate::proxy::ProxyState::Degraded);
+    let is_running = matches!(
+        status.state,
+        crate::proxy::ProxyState::Running | crate::proxy::ProxyState::Degraded
+    );
     let mixed_port = options.mixed_port;
     let controller_port = options.controller_port;
     let controller_secret = options.controller_secret.clone();
-    let kernel_name = status.kernel.map(|k| k.display_name().to_string()).unwrap_or_else(|| "代理内核".to_string());
+    let kernel_name = status
+        .kernel
+        .map(|k| k.display_name().to_string())
+        .unwrap_or_else(|| "代理内核".to_string());
 
     // =========================================================================
     // 1. 系统网络层诊断 (System Network Layer)
@@ -108,9 +125,11 @@ pub async fn perform_network_diagnosis(
         let poisoned: Vec<_> = stale_dns
             .into_iter()
             .filter(|item| {
-                item.server_addresses
-                    .iter()
-                    .any(|a| a == "127.0.0.1" || a == "::1" || (!is_running && (a == "198.18.0.1" || a == "198.18.0.2")))
+                item.server_addresses.iter().any(|a| {
+                    a == "127.0.0.1"
+                        || a == "::1"
+                        || (!is_running && (a == "198.18.0.1" || a == "198.18.0.2"))
+                })
             })
             .collect();
 
@@ -216,7 +235,10 @@ pub async fn perform_network_diagnosis(
             .no_proxy()
             .timeout(Duration::from_millis(2000))
             .build()?;
-        let resp = client.get("http://cp.cloudflare.com/generate_204").send().await?;
+        let resp = client
+            .get("http://cp.cloudflare.com/generate_204")
+            .send()
+            .await?;
         Ok::<_, anyhow::Error>(resp.status().is_success() || resp.status().as_u16() == 204)
     })
     .await;
@@ -239,7 +261,8 @@ pub async fn perform_network_diagnosis(
                 category: "系统网络".into(),
                 name: "物理直连公网连通性".into(),
                 status: DiagnosticStatus::Fail,
-                detail: "本地物理直连无法访问公网！可能网卡 DNS 异常、网关失联或网络物理断开。".into(),
+                detail: "本地物理直连无法访问公网！可能网卡 DNS 异常、网关失联或网络物理断开。"
+                    .into(),
                 repairable: true,
                 suggestion: Some("建议先执行 DNS 修复，或检查本地网络连接。".into()),
             });
@@ -307,7 +330,9 @@ pub async fn perform_network_diagnosis(
                 category: "代理内核".into(),
                 name: "本地代理端口响应 (Mixed Port)".into(),
                 status: DiagnosticStatus::Fail,
-                detail: format!("代理端口 127.0.0.1:{mixed_port} 无法连接！内核可能发生异常崩溃或未完成绑定。"),
+                detail: format!(
+                    "代理端口 127.0.0.1:{mixed_port} 无法连接！内核可能发生异常崩溃或未完成绑定。"
+                ),
                 repairable: true,
                 suggestion: Some("点击修复可尝试重启代理服务。".into()),
             });
@@ -318,7 +343,9 @@ pub async fn perform_network_diagnosis(
             category: "代理内核".into(),
             name: "本地代理端口响应 (Mixed Port)".into(),
             status: DiagnosticStatus::Warning,
-            detail: format!("内核已停止，但端口 127.0.0.1:{mixed_port} 仍有进程在监听，可能存在孤儿僵尸内核。"),
+            detail: format!(
+                "内核已停止，但端口 127.0.0.1:{mixed_port} 仍有进程在监听，可能存在孤儿僵尸内核。"
+            ),
             repairable: true,
             suggestion: Some("点击修复将清理所有未受管的孤儿内核。".into()),
         });
@@ -348,7 +375,9 @@ pub async fn perform_network_diagnosis(
             category: "代理内核".into(),
             name: "后台孤儿内核检测".into(),
             status: DiagnosticStatus::Warning,
-            detail: format!("检测到系统存在 {orphan_count} 个未受管的残留内核进程，可能占用代理端口。"),
+            detail: format!(
+                "检测到系统存在 {orphan_count} 个未受管的残留内核进程，可能占用代理端口。"
+            ),
             repairable: true,
             suggestion: Some("点击修复可安全清理孤儿内核进程。".into()),
         });
@@ -397,9 +426,12 @@ pub async fn perform_network_diagnosis(
                         category: "代理内核".into(),
                         name: "TUN 虚拟网卡状态".into(),
                         status: DiagnosticStatus::Fail,
-                        detail: "未能检测到活跃的 TUN 虚拟网卡，可能 Wintun 驱动被拦截或提权失败。".into(),
+                        detail: "未能检测到活跃的 TUN 虚拟网卡，可能 Wintun 驱动被拦截或提权失败。"
+                            .into(),
                         repairable: true,
-                        suggestion: Some("请确保杀毒软件未拦截 Wintun.dll，并重新启动 TUN 模式。".into()),
+                        suggestion: Some(
+                            "请确保杀毒软件未拦截 Wintun.dll，并重新启动 TUN 模式。".into(),
+                        ),
                     });
                 }
             }
@@ -409,10 +441,17 @@ pub async fn perform_network_diagnosis(
                     let out = std::process::Command::new("ip")
                         .args(["link", "show"])
                         .output();
-                    let text = out.map(|o| String::from_utf8_lossy(&o.stdout).to_string()).unwrap_or_default();
+                    let text = out
+                        .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
+                        .unwrap_or_default();
                     let adapters = ["tun0", "meta", "meow", "sing-box"];
-                    adapters.into_iter().find(|&a| text.contains(a)).map(|s| s.to_string())
-                }).await.unwrap_or(None);
+                    adapters
+                        .into_iter()
+                        .find(|&a| text.contains(a))
+                        .map(|s| s.to_string())
+                })
+                .await
+                .unwrap_or(None);
 
                 if let Some(adapter) = check_tun {
                     items.push(DiagnosticItem {
@@ -430,9 +469,13 @@ pub async fn perform_network_diagnosis(
                         category: "代理内核".into(),
                         name: "TUN 虚拟网卡状态".into(),
                         status: DiagnosticStatus::Fail,
-                        detail: "未能检测到活跃的 TUN 虚拟网络设备，可能缺少 root/CAP_NET_ADMIN 权限。".into(),
+                        detail:
+                            "未能检测到活跃的 TUN 虚拟网络设备，可能缺少 root/CAP_NET_ADMIN 权限。"
+                                .into(),
                         repairable: true,
-                        suggestion: Some("请确保以 root 权限运行或赋予内核 cap_net_admin+ep 权能。".into()),
+                        suggestion: Some(
+                            "请确保以 root 权限运行或赋予内核 cap_net_admin+ep 权能。".into(),
+                        ),
                     });
                 }
             }
@@ -497,7 +540,9 @@ pub async fn perform_network_diagnosis(
                 category: "软件环境".into(),
                 name: "内核外部控制器 API".into(),
                 status: DiagnosticStatus::Fail,
-                detail: format!("无法连接本地控制器 API (端口 {controller_port})，界面无法控制规则与分流！"),
+                detail: format!(
+                    "无法连接本地控制器 API (端口 {controller_port})，界面无法控制规则与分流！"
+                ),
                 repairable: true,
                 suggestion: Some("点击修复将重新拉起内核控制器。".into()),
             });
@@ -522,7 +567,10 @@ pub async fn perform_network_diagnosis(
                 .proxy(proxy)
                 .timeout(Duration::from_millis(3000))
                 .build()?;
-            let resp = client.get("http://cp.cloudflare.com/generate_204").send().await?;
+            let resp = client
+                .get("http://cp.cloudflare.com/generate_204")
+                .send()
+                .await?;
             Ok::<_, anyhow::Error>(resp.status().is_success() || resp.status().as_u16() == 204)
         })
         .await;
@@ -561,12 +609,18 @@ pub async fn perform_network_repair(target_id: Option<&str>) -> Result<String, S
     let mut messages = Vec::new();
 
     // 1. 修复 DNS 污染 (若指定或全部)
-    if target_id.is_none() || target_id == Some("sys_dns_poison") || target_id == Some("sys_direct_net") {
+    if target_id.is_none()
+        || target_id == Some("sys_dns_poison")
+        || target_id == Some("sys_direct_net")
+    {
         #[cfg(windows)]
         {
-            match tokio::task::spawn_blocking(crate::platform::restore_all_stale_loopback_dns).await {
+            match tokio::task::spawn_blocking(crate::platform::restore_all_stale_loopback_dns).await
+            {
                 Ok(Ok(count)) => {
-                    messages.push(format!("已成功重置 {count} 个物理网卡的死回环 DNS 设置并刷新系统 DNS 缓存"));
+                    messages.push(format!(
+                        "已成功重置 {count} 个物理网卡的死回环 DNS 设置并刷新系统 DNS 缓存"
+                    ));
                 }
                 Ok(Err(e)) => {
                     messages.push(format!("重置物理网卡 DNS 异常: {e}"));
@@ -587,12 +641,17 @@ pub async fn perform_network_repair(target_id: Option<&str>) -> Result<String, S
     }
 
     // 3. 清理孤儿内核
-    if target_id.is_none() || target_id == Some("kernel_orphan_cores") || target_id == Some("kernel_mixed_port") {
+    if target_id.is_none()
+        || target_id == Some("kernel_orphan_cores")
+        || target_id == Some("kernel_mixed_port")
+    {
         let killed = tokio::task::spawn_blocking(crate::platform::kill_orphan_proxy_cores)
             .await
             .unwrap_or(0);
         if killed > 0 {
-            messages.push(format!("已强制终止 {killed} 个残留的孤儿内核进程，释放被占用的端口"));
+            messages.push(format!(
+                "已强制终止 {killed} 个残留的孤儿内核进程，释放被占用的端口"
+            ));
         }
     }
 
@@ -671,7 +730,9 @@ impl VpnApp {
                             .unwrap_or(false);
 
                         let btn_fix_all = ui.add_enabled(
-                            has_issues && !self.network_doctor_busy && !self.network_doctor_repairing,
+                            has_issues
+                                && !self.network_doctor_busy
+                                && !self.network_doctor_repairing,
                             primary_btn("一键修复全部异常"),
                         );
                         if btn_fix_all.clicked() {
@@ -686,12 +747,17 @@ impl VpnApp {
                 if self.network_doctor_busy {
                     ui.horizontal(|ui| {
                         ui.spinner();
-                        ui.label(RichText::new("正在全面扫描网络配置与连通性...").color(theme::accent()));
+                        ui.label(
+                            RichText::new("正在全面扫描网络配置与连通性...").color(theme::accent()),
+                        );
                     });
                 } else if self.network_doctor_repairing {
                     ui.horizontal(|ui| {
                         ui.spinner();
-                        ui.label(RichText::new("正在执行系统修复并还原健康配置...").color(theme::accent()));
+                        ui.label(
+                            RichText::new("正在执行系统修复并还原健康配置...")
+                                .color(theme::accent()),
+                        );
                     });
                 } else if let Some(msg) = &self.network_doctor_message {
                     Frame::NONE
@@ -700,14 +766,22 @@ impl VpnApp {
                         .corner_radius(CornerRadius::same(6))
                         .inner_margin(Margin::symmetric(10, 6))
                         .show(ui, |ui| {
-                            ui.label(RichText::new(format!("✓ {msg}")).color(theme::success()).small());
+                            ui.label(
+                                RichText::new(format!("✓ {msg}"))
+                                    .color(theme::success())
+                                    .small(),
+                            );
                         });
                 }
 
                 // 统计指标汇总看板
                 if let Some(report) = &self.network_doctor_report {
                     ui.horizontal(|ui| {
-                        ui.label(RichText::new(format!("诊断时间: {}", report.timestamp)).small().color(theme::muted()));
+                        ui.label(
+                            RichText::new(format!("诊断时间: {}", report.timestamp))
+                                .small()
+                                .color(theme::muted()),
+                        );
                         ui.add_space(8.0);
 
                         // 正常指标
@@ -739,11 +813,7 @@ impl VpnApp {
                                     .small(),
                             );
                         } else {
-                            ui.label(
-                                RichText::new("0 处致命异常")
-                                    .color(theme::muted())
-                                    .small(),
-                            );
+                            ui.label(RichText::new("0 处致命异常").color(theme::muted()).small());
                         }
                     });
                 }
@@ -756,14 +826,18 @@ impl VpnApp {
                     .show(ui, |ui| {
                         let Some(report) = &self.network_doctor_report else {
                             if !self.network_doctor_busy {
-                                ui.label(RichText::new("点击右上角「重新检测」开始扫描。").color(theme::muted()));
+                                ui.label(
+                                    RichText::new("点击右上角「重新检测」开始扫描。")
+                                        .color(theme::muted()),
+                                );
                             }
                             return;
                         };
 
                         let categories = ["系统网络", "代理内核", "软件环境"];
                         for cat in categories {
-                            let cat_items: Vec<_> = report.items.iter().filter(|i| i.category == cat).collect();
+                            let cat_items: Vec<_> =
+                                report.items.iter().filter(|i| i.category == cat).collect();
                             if cat_items.is_empty() {
                                 continue;
                             }
@@ -821,16 +895,23 @@ impl VpnApp {
                                             );
 
                                             // 单项修复按钮
-                                            if item.repairable && item.status != DiagnosticStatus::Pass {
-                                                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                                    let btn = ui.add_enabled(
-                                                        !self.network_doctor_busy && !self.network_doctor_repairing,
-                                                        danger_btn("一键修复"),
-                                                    );
-                                                    if btn.clicked() {
-                                                        trigger_repair_one = Some(item.id.clone());
-                                                    }
-                                                });
+                                            if item.repairable
+                                                && item.status != DiagnosticStatus::Pass
+                                            {
+                                                ui.with_layout(
+                                                    Layout::right_to_left(Align::Center),
+                                                    |ui| {
+                                                        let btn = ui.add_enabled(
+                                                            !self.network_doctor_busy
+                                                                && !self.network_doctor_repairing,
+                                                            danger_btn("一键修复"),
+                                                        );
+                                                        if btn.clicked() {
+                                                            trigger_repair_one =
+                                                                Some(item.id.clone());
+                                                        }
+                                                    },
+                                                );
                                             }
                                         });
 

@@ -26,7 +26,10 @@ fn local_file_path_recognizes_windows_and_unix_forms() {
         local_file_path("C:/subs/clash.yaml").as_deref(),
         Some("C:/subs/clash.yaml")
     );
-    assert_eq!(local_file_path("/etc/vpn/sub.txt").as_deref(), Some("/etc/vpn/sub.txt"));
+    assert_eq!(
+        local_file_path("/etc/vpn/sub.txt").as_deref(),
+        Some("/etc/vpn/sub.txt")
+    );
     // macOS / Unix 路径与 URL 解码 (%20)
     assert_eq!(
         local_file_path("file:///Users/name/my%20proxy/clash.yaml").as_deref(),
@@ -46,7 +49,10 @@ fn local_file_path_recognizes_windows_and_unix_forms() {
         Some(r"C:\subs\clash.yaml")
     );
     // 波浪号扩展（若 HOME/USERPROFILE 存在）
-    if std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")).is_some() {
+    if std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .is_some()
+    {
         assert!(local_file_path("~/Downloads/clash.yaml").is_some());
         let res = local_file_path("~/Downloads/clash.yaml").unwrap();
         assert!(!res.starts_with('~'));
@@ -86,16 +92,25 @@ rules:
 
     // 测试带引号
     let quoted = format!("\"{clean_path}\"");
-    assert_eq!(local_file_path(&quoted).as_deref(), Some(clean_path.as_str()));
+    assert_eq!(
+        local_file_path(&quoted).as_deref(),
+        Some(clean_path.as_str())
+    );
 
     // 读取并解析节点
     let content = tokio::fs::read_to_string(&clean_path).await.unwrap();
     let nodes = crate::parser::parse_subscription(&content, Some("local_test_source"));
     assert_eq!(nodes.len(), 2);
-    let hk = nodes.iter().find(|n| n.name == "香港 01 专线").expect("应包含香港节点");
+    let hk = nodes
+        .iter()
+        .find(|n| n.name == "香港 01 专线")
+        .expect("应包含香港节点");
     assert_eq!(hk.server, "1.2.3.4");
     assert_eq!(hk.port, 8388);
-    let jp = nodes.iter().find(|n| n.name == "日本 02 专线").expect("应包含日本节点");
+    let jp = nodes
+        .iter()
+        .find(|n| n.name == "日本 02 专线")
+        .expect("应包含日本节点");
     assert_eq!(jp.server, "5.6.7.8");
     assert_eq!(jp.port, 443);
 

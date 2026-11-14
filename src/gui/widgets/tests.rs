@@ -373,20 +373,18 @@ mod formatter_tests {
             format_connection_rule(Some("GEOSITE"), Some("cn")),
             "GEOSITE(cn)"
         );
-        assert_eq!(
-            format_connection_rule(Some("MATCH"), Some("")),
-            "MATCH"
-        );
-        assert_eq!(
-            format_connection_rule(None, None),
-            "-"
-        );
+        assert_eq!(format_connection_rule(Some("MATCH"), Some("")), "MATCH");
+        assert_eq!(format_connection_rule(None, None), "-");
     }
 
     #[test]
     fn format_connection_target_resolves_chains_and_payload() {
         // 1. Shoes 代理链：过滤 local-mixed
-        let chains = vec!["local-mixed".to_string(), "PROXY".to_string(), "proxy".to_string()];
+        let chains = vec![
+            "local-mixed".to_string(),
+            "PROXY".to_string(),
+            "proxy".to_string(),
+        ];
         assert_eq!(format_connection_target(&chains, None), "PROXY > proxy");
 
         // 2. Shoes 直连链

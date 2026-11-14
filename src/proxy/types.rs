@@ -1,9 +1,9 @@
-use std::path::{Path, PathBuf};
 use crate::kernel::{KernelKind, KernelPreference};
 pub use crate::proxy::config::{DnsConfig, RoutingMode, TrafficRule, TunConfig};
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::path::{Path, PathBuf};
 
 fn default_hop_ports() -> String {
     "20000-40000".to_string()
@@ -370,8 +370,8 @@ pub fn write_elevated_proxy_config_file(options: &MihomoConfigOptions) -> Result
 
 /// 读取并立即安全清理提权交接配置文件。
 pub fn read_elevated_proxy_config_file(path: &Path) -> Result<MihomoConfigOptions> {
-    let bytes = std::fs::read(path)
-        .map_err(|error| anyhow!("读取提权代理配置文件失败: {error}"))?;
+    let bytes =
+        std::fs::read(path).map_err(|error| anyhow!("读取提权代理配置文件失败: {error}"))?;
     // 读取完毕后立即删除，避免临时配置文件留在磁盘上
     let _ = std::fs::remove_file(path);
     let options: MihomoConfigOptions = serde_json::from_slice(&bytes)
@@ -414,7 +414,8 @@ mod elevated_handoff_tests {
         source.url_test_size = 8;
         source.override_yaml = Some("rules:\n  - DOMAIN-SUFFIX,google.com,DIRECT".to_string());
 
-        let file_path = super::write_elevated_proxy_config_file(&source).expect("写配置临时文件失败");
+        let file_path =
+            super::write_elevated_proxy_config_file(&source).expect("写配置临时文件失败");
         assert!(file_path.exists(), "临时配置文件必须真实存在");
 
         let back = super::read_elevated_proxy_config_file(&file_path).expect("读配置临时文件失败");
@@ -465,4 +466,3 @@ mod elevated_handoff_tests {
         );
     }
 }
-

@@ -3,6 +3,13 @@
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
+use anyhow::Result;
+use clap::Parser;
+use std::sync::Arc;
+use tokio::runtime::Runtime;
+use tracing::info;
+use tracing_subscriber::EnvFilter;
+use uuid::Uuid;
 use vproxy::api::AppState;
 use vproxy::collector::Collector;
 use vproxy::db::Database;
@@ -14,13 +21,6 @@ use vproxy::scheduler::Scheduler;
 use vproxy::speedtest::SpeedTester;
 use vproxy::tasks::TaskTracker;
 use vproxy::*;
-use anyhow::Result;
-use clap::Parser;
-use std::sync::Arc;
-use tokio::runtime::Runtime;
-use tracing::info;
-use tracing_subscriber::EnvFilter;
-use uuid::Uuid;
 
 #[derive(Debug, Parser)]
 #[command(
@@ -551,7 +551,8 @@ fn main() -> Result<()> {
     }
     let rt = Arc::new(Runtime::new()?);
     let _rt_guard = rt.enter();
-    let handoff_proxy_options = if let Some(config_file) = cli.elevated_proxy_config_file.as_deref() {
+    let handoff_proxy_options = if let Some(config_file) = cli.elevated_proxy_config_file.as_deref()
+    {
         match vproxy::proxy::read_elevated_proxy_config_file(config_file) {
             Ok(options) => {
                 options.validate()?;
@@ -645,7 +646,8 @@ fn main() -> Result<()> {
     };
     // A still-loaded job can restart after the user disables next-login startup.
     // Exit successfully so launchd does not keep restarting that obsolete entry.
-    if cli.login_startup && (!cfg!(target_os = "macos") || !app_settings.launch_at_startup || diag) {
+    if cli.login_startup && (!cfg!(target_os = "macos") || !app_settings.launch_at_startup || diag)
+    {
         startup_log("登录自动启动已关闭，本次登录入口正常退出");
         return Ok(());
     }
@@ -757,16 +759,15 @@ fn main() -> Result<()> {
     // 「以管理员方式启动软件」必须在**创建任何窗口之前**决策：提权成功则本实例直接退出，
     // 整个过程没有窗口出现过，用户只看到提权实例那一个窗口——否则普通实例先把窗口画出来、
     // 提权后再闪第二个，就是"启动闪一次"的来源。UAC 被取消则本实例以普通权限继续（不再重试）。
-    if cfg!(windows) && app_settings.launch_as_admin
+    if cfg!(windows)
+        && app_settings.launch_as_admin
         && !diag
         && !cli.headless
         && !cli.run_elevated_kernel
         && !elevated_handoff
         && !platform::is_elevated()
     {
-        startup_log(
-            "管理员启动：设置开启且本实例非提权，在窗口创建前请求 runas 接管",
-        );
+        startup_log("管理员启动：设置开启且本实例非提权，在窗口创建前请求 runas 接管");
         match platform::request_elevation(&["--elevated-relaunch".to_string()]) {
             Ok(()) => {
                 startup_log("管理员启动：提权已批准，本实例未显示窗口即退出，由提权实例接管");
@@ -799,9 +800,7 @@ fn main() -> Result<()> {
     if cli.headless || !cfg!(feature = "gui") {
         info!("running in headless mode, press Ctrl+C to exit");
         // 无界面时没有别的地方能看到自动生成的令牌，只在它确实是随机生成的那次打印一次。
-        if cli.api_token.is_none()
-            && std::env::var("VPROXY_API_TOKEN").is_err()
-        {
+        if cli.api_token.is_none() && std::env::var("VPROXY_API_TOKEN").is_err() {
             println!("HTTP API 访问令牌（本次启动随机生成）: {api_token}");
         }
         rt.block_on(async {
@@ -912,9 +911,7 @@ fn main() -> Result<()> {
             renderer,
             ..Default::default()
         };
-        let options = if diag::enabled()
-            && std::env::var_os("VPROXY_DIAG_ONSCREEN").is_none()
-        {
+        let options = if diag::enabled() && std::env::var_os("VPROXY_DIAG_ONSCREEN").is_none() {
             // 诊断壳摆到屏幕外、也不抢焦点：验收要靠 PrintWindow 抓图和 PostMessage
             // 合成点击，都不需要它出现在用户眼前或抢走键盘。
             startup_log("DIAG: 窗口移到屏幕外且不激活，避免打扰当前桌面");
@@ -1128,7 +1125,10 @@ mod tests {
 
     #[test]
     fn login_entry_restores_only_when_enabled_and_selected() {
-        assert_eq!(login_proxy_node_id(true, true, Some("saved-node")), Some("saved-node"));
+        assert_eq!(
+            login_proxy_node_id(true, true, Some("saved-node")),
+            Some("saved-node")
+        );
         assert_eq!(login_proxy_node_id(false, true, Some("saved-node")), None);
         assert_eq!(login_proxy_node_id(true, false, Some("saved-node")), None);
         assert_eq!(login_proxy_node_id(true, true, None), None);
@@ -1141,7 +1141,10 @@ mod tests {
         assert!(cli.login_startup);
         assert!(cli.start_proxy_node.is_none());
         assert!(Cli::try_parse_from(["vproxy", "--login-startup", "--headless"]).is_err());
-        assert!(Cli::try_parse_from(["vproxy", "--login-startup", "--start-proxy-node", "node"]).is_err());
+        assert!(
+            Cli::try_parse_from(["vproxy", "--login-startup", "--start-proxy-node", "node"])
+                .is_err()
+        );
     }
 
     /// 提权交接会把当前进程的命令行原样带上，再追加新的 `--start-proxy-node`，于是同一个
@@ -1262,13 +1265,7 @@ mod tests {
     #[test]
     fn subcommand_ping_parses_properly() {
         use super::Commands;
-        let parsed = Cli::try_parse_from([
-            "vproxy",
-            "ping",
-            "1.1.1.1:443",
-            "--timeout",
-            "1500",
-        ]);
+        let parsed = Cli::try_parse_from(["vproxy", "ping", "1.1.1.1:443", "--timeout", "1500"]);
         assert!(parsed.is_ok());
         let cli = parsed.unwrap();
         match cli.command {
@@ -1283,14 +1280,8 @@ mod tests {
     #[test]
     fn subcommand_export_parses_properly() {
         use super::Commands;
-        let parsed = Cli::try_parse_from([
-            "vproxy",
-            "export",
-            "-i",
-            "ss://test",
-            "--format",
-            "base64",
-        ]);
+        let parsed =
+            Cli::try_parse_from(["vproxy", "export", "-i", "ss://test", "--format", "base64"]);
         assert!(parsed.is_ok());
         let cli = parsed.unwrap();
         match cli.command {

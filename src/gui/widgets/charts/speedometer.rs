@@ -31,7 +31,10 @@ pub fn render_speedometer(
         .map(|i| {
             let t = i as f32 / steps as f32;
             let angle = start_angle + t * sweep;
-            egui::pos2(center.x + radius * angle.cos(), center.y + radius * angle.sin())
+            egui::pos2(
+                center.x + radius * angle.cos(),
+                center.y + radius * angle.sin(),
+            )
         })
         .collect();
     painter.add(egui::Shape::line(
@@ -64,7 +67,10 @@ pub fn render_speedometer(
             .map(|i| {
                 let t = (i as f32 / active_steps as f32) * ratio;
                 let angle = start_angle + t * sweep;
-                egui::pos2(center.x + radius * angle.cos(), center.y + radius * angle.sin())
+                egui::pos2(
+                    center.x + radius * angle.cos(),
+                    center.y + radius * angle.sin(),
+                )
             })
             .collect();
         let glow_color = theme::accent();
@@ -86,16 +92,38 @@ pub fn render_speedometer(
         center.x + (radius - 9.0) * needle_angle.cos(),
         center.y + (radius - 9.0) * needle_angle.sin(),
     );
-    let needle_color = if is_active { theme::accent() } else { theme::muted() };
+    let needle_color = if is_active {
+        theme::accent()
+    } else {
+        theme::muted()
+    };
     painter.line_segment([center, needle_tip], Stroke::new(2.0_f32, needle_color));
     painter.circle_filled(center, 4.0, needle_color);
     painter.circle_filled(center, 2.0, theme::panel());
 
     // 刻度标注 (0 / 100M+)
-    let left_tick = egui::pos2(center.x + (radius + 8.0) * start_angle.cos(), center.y + (radius + 8.0) * start_angle.sin());
-    let right_tick = egui::pos2(center.x + (radius + 8.0) * (start_angle + sweep).cos(), center.y + (radius + 8.0) * (start_angle + sweep).sin());
-    painter.text(left_tick, egui::Align2::RIGHT_CENTER, "0", egui::FontId::proportional(8.5), theme::muted());
-    painter.text(right_tick, egui::Align2::LEFT_CENTER, "100M+", egui::FontId::proportional(8.5), theme::muted());
+    let left_tick = egui::pos2(
+        center.x + (radius + 8.0) * start_angle.cos(),
+        center.y + (radius + 8.0) * start_angle.sin(),
+    );
+    let right_tick = egui::pos2(
+        center.x + (radius + 8.0) * (start_angle + sweep).cos(),
+        center.y + (radius + 8.0) * (start_angle + sweep).sin(),
+    );
+    painter.text(
+        left_tick,
+        egui::Align2::RIGHT_CENTER,
+        "0",
+        egui::FontId::proportional(8.5),
+        theme::muted(),
+    );
+    painter.text(
+        right_tick,
+        egui::Align2::LEFT_CENTER,
+        "100M+",
+        egui::FontId::proportional(8.5),
+        theme::muted(),
+    );
 
     // 仪表盘中心文字读数
     let speed_color = if is_active && down_bytes_per_sec > 0 {
@@ -127,4 +155,3 @@ pub fn render_speedometer(
         format_speed(up_bytes_per_sec)
     ));
 }
-

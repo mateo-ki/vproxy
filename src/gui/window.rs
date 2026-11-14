@@ -127,10 +127,8 @@ impl VpnApp {
                         egui::Stroke::new(0.5, Color32::from_rgb(0xE0, 0x44, 0x3E)),
                     );
                     if lights_hovered {
-                        let stroke = egui::Stroke::new(
-                            1.2,
-                            Color32::from_rgba_premultiplied(70, 0, 0, 180),
-                        );
+                        let stroke =
+                            egui::Stroke::new(1.2, Color32::from_rgba_premultiplied(70, 0, 0, 180));
                         painter.line_segment(
                             [red_c + egui::vec2(-2.5, -2.5), red_c + egui::vec2(2.5, 2.5)],
                             stroke,
@@ -251,19 +249,21 @@ impl VpnApp {
                     );
 
                     // 整条标题栏（除红黄绿区域）均可拖拽
-                    let drag_rect = egui::Rect::from_min_max(
-                        egui::pos2(bar.min.x + 72.0, bar.min.y),
-                        bar.max,
-                    );
+                    let drag_rect =
+                        egui::Rect::from_min_max(egui::pos2(bar.min.x + 72.0, bar.min.y), bar.max);
                     let drag = ui.interact(drag_rect, ui.id().with("titlebar_drag"), Sense::drag());
                     if drag.drag_started() {
                         let now = std::time::Instant::now();
-                        let current_pos = ui.input(|i| i.pointer.interact_pos()).unwrap_or(drag_rect.center());
-                        let is_double_click = if let Some((last_time, last_pos)) = self.last_titlebar_click {
-                            now.duration_since(last_time).as_millis() < 400 && current_pos.distance(last_pos) < 10.0
-                        } else {
-                            false
-                        };
+                        let current_pos = ui
+                            .input(|i| i.pointer.interact_pos())
+                            .unwrap_or(drag_rect.center());
+                        let is_double_click =
+                            if let Some((last_time, last_pos)) = self.last_titlebar_click {
+                                now.duration_since(last_time).as_millis() < 400
+                                    && current_pos.distance(last_pos) < 10.0
+                            } else {
+                                false
+                            };
 
                         if is_double_click {
                             self.last_titlebar_click = None;
@@ -293,12 +293,16 @@ impl VpnApp {
                     let drag = ui.interact(drag_rect, ui.id().with("titlebar_drag"), Sense::drag());
                     if drag.drag_started() {
                         let now = std::time::Instant::now();
-                        let current_pos = ui.input(|i| i.pointer.interact_pos()).unwrap_or(drag_rect.center());
-                        let is_double_click = if let Some((last_time, last_pos)) = self.last_titlebar_click {
-                            now.duration_since(last_time).as_millis() < 400 && current_pos.distance(last_pos) < 10.0
-                        } else {
-                            false
-                        };
+                        let current_pos = ui
+                            .input(|i| i.pointer.interact_pos())
+                            .unwrap_or(drag_rect.center());
+                        let is_double_click =
+                            if let Some((last_time, last_pos)) = self.last_titlebar_click {
+                                now.duration_since(last_time).as_millis() < 400
+                                    && current_pos.distance(last_pos) < 10.0
+                            } else {
+                                false
+                            };
 
                         if is_double_click {
                             self.last_titlebar_click = None;
@@ -546,7 +550,8 @@ mod macos_window_close_tests {
     fn logic_only_native_close_preserves_background_runtime() {
         let mut outcomes = Vec::new();
         for (minimized, occluded) in [(true, false), (false, true)] {
-            let mut app = crate::gui::views::nodes::empty_pool_modal_tests::app_with_an_empty_library();
+            let mut app =
+                crate::gui::views::nodes::empty_pool_modal_tests::app_with_an_empty_library();
             app.settings.close_to_tray = true;
             app.force_quit = false;
             app.frame_count = 6;
@@ -602,7 +607,10 @@ mod macos_window_close_tests {
                 let output = ctx.run_logic(&input, |ctx| {
                     eframe::App::logic(&mut app, ctx, &mut frame);
                 });
-                let commands = output.viewport_commands.get(&egui::ViewportId::ROOT).unwrap();
+                let commands = output
+                    .viewport_commands
+                    .get(&egui::ViewportId::ROOT)
+                    .unwrap();
                 assert_eq!(
                     commands.contains(&egui::ViewportCommand::CancelClose),
                     expected_cancel,

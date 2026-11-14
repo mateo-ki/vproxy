@@ -24,7 +24,9 @@ impl VpnApp {
         }
 
         // 2. 检查鼠标点击是否落在弹窗窗口外部（点击遮罩空白区域立即关闭）
-        if let Some(win_rect) = ctx.memory(|mem| mem.area_rect(egui::Id::new("route_trace_modal_window_v7"))) {
+        if let Some(win_rect) =
+            ctx.memory(|mem| mem.area_rect(egui::Id::new("route_trace_modal_window_v7")))
+        {
             if ctx.input(|i| i.pointer.any_click()) {
                 if let Some(pos) = ctx.input(|i| i.pointer.interact_pos()) {
                     if !win_rect.contains(pos) {
@@ -226,7 +228,7 @@ impl VpnApp {
                             for (target, desc, accent) in presets {
                                 let is_current = self.route_trace_target.trim() == target;
                                 let chip_text = format!("{target} ({desc})");
-                                
+
                                 let chip_resp = if is_current {
                                     Frame::NONE
                                         .fill(Color32::from_rgba_unmultiplied(accent.r(), accent.g(), accent.b(), 26))
@@ -595,7 +597,7 @@ impl VpnApp {
                                                     ui.add_space(1.0);
                                                     let num_color = if is_selected { accent } else { theme::text_secondary() };
                                                     ui.label(RichText::new(step_num).size(10.0).strong().color(num_color));
-                                                    
+
                                                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                                         ui.label(
                                                             RichText::new(step_time.as_str())
@@ -658,7 +660,7 @@ impl VpnApp {
                                             });
                                         ui.add_space(4.0);
                                         ui.label(RichText::new(inspect_title).strong().size(12.5).color(theme::text_primary()));
-                                        
+
                                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                             Frame::NONE
                                                 .fill(Color32::from_rgba_unmultiplied(step_accent.r(), step_accent.g(), step_accent.b(), 26))

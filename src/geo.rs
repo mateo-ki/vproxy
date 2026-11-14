@@ -79,7 +79,11 @@ pub fn geo_state(dir: &Path) -> Vec<(&'static str, Option<u64>)> {
             let min_len = min_bytes_for_file(name);
             let candidate_paths = [
                 dir.join(name),
-                dir.join(if name == "geosite.dat" { "GeoSite.dat" } else { "GeoIP.dat" }),
+                dir.join(if name == "geosite.dat" {
+                    "GeoSite.dat"
+                } else {
+                    "GeoIP.dat"
+                }),
             ];
             let usable = candidate_paths.iter().find_map(|p| {
                 std::fs::metadata(p)
@@ -135,14 +139,20 @@ pub fn sync_geo_to_all_kernels(src_dir: &Path) -> Vec<String> {
     for (name, min_len) in geo_files {
         let candidate_srcs = [
             src_dir.join(name),
-            src_dir.join(if name == "geosite.dat" { "GeoSite.dat" } else { "GeoIP.dat" }),
+            src_dir.join(if name == "geosite.dat" {
+                "GeoSite.dat"
+            } else {
+                "GeoIP.dat"
+            }),
             root.join("mihomo").join(name),
             root.join("meow").join(name),
             root.join("vp_core").join(name),
             root.join("vpcore").join(name),
         ];
         let Some(valid_src) = candidate_srcs.iter().find(|p| {
-            std::fs::metadata(p).map(|m| m.len() >= min_len).unwrap_or(false)
+            std::fs::metadata(p)
+                .map(|m| m.len() >= min_len)
+                .unwrap_or(false)
         }) else {
             continue;
         };
@@ -162,7 +172,10 @@ pub fn sync_geo_to_all_kernels(src_dir: &Path) -> Vec<String> {
                 .unwrap_or(false);
             if !is_same {
                 if let Ok(()) = link_or_copy(valid_src, &dst) {
-                    reports.push(format!("已同步 {name} 至 {}", dst_dir.file_name().unwrap_or_default().to_string_lossy()));
+                    reports.push(format!(
+                        "已同步 {name} 至 {}",
+                        dst_dir.file_name().unwrap_or_default().to_string_lossy()
+                    ));
                 }
             }
         }
@@ -200,7 +213,11 @@ pub async fn ensure_meow_home_geo(home: &Path, proxy_url: Option<&str>) -> Resul
         if needs_copy {
             let candidates = [
                 mihomo.join(name),
-                mihomo.join(if name == "geosite.dat" { "GeoSite.dat" } else { "GeoIP.dat" }),
+                mihomo.join(if name == "geosite.dat" {
+                    "GeoSite.dat"
+                } else {
+                    "GeoIP.dat"
+                }),
             ];
             if let Some(src) = candidates.iter().find(|p| p.exists()) {
                 link_or_copy(src, &dst)?;
@@ -294,14 +311,23 @@ pub async fn ensure_vpcore_geo(home: &Path, proxy_url: Option<&str>) -> Result<S
         ("geoip.dat", MIN_GEOIP_BYTES),
     ] {
         let dst = home.join(name);
-        if !std::fs::metadata(&dst).map(|m| m.len() >= min_len).unwrap_or(false) {
+        if !std::fs::metadata(&dst)
+            .map(|m| m.len() >= min_len)
+            .unwrap_or(false)
+        {
             let candidates = [
                 mihomo.join(name),
-                mihomo.join(if name == "geosite.dat" { "GeoSite.dat" } else { "GeoIP.dat" }),
+                mihomo.join(if name == "geosite.dat" {
+                    "GeoSite.dat"
+                } else {
+                    "GeoIP.dat"
+                }),
                 meow.join(name),
             ];
             if let Some(src) = candidates.iter().find(|p| {
-                std::fs::metadata(p).map(|m| m.len() >= min_len).unwrap_or(false)
+                std::fs::metadata(p)
+                    .map(|m| m.len() >= min_len)
+                    .unwrap_or(false)
             }) {
                 let _ = link_or_copy(src, &dst);
             }
@@ -310,9 +336,15 @@ pub async fn ensure_vpcore_geo(home: &Path, proxy_url: Option<&str>) -> Result<S
 
     // Country.mmdb 也优先从 meow 复用
     let mmdb_dst = home.join("Country.mmdb");
-    if !std::fs::metadata(&mmdb_dst).map(|m| m.len() >= MIN_MMDB_BYTES).unwrap_or(false) {
+    if !std::fs::metadata(&mmdb_dst)
+        .map(|m| m.len() >= MIN_MMDB_BYTES)
+        .unwrap_or(false)
+    {
         let meow_mmdb = meow.join("Country.mmdb");
-        if std::fs::metadata(&meow_mmdb).map(|m| m.len() >= MIN_MMDB_BYTES).unwrap_or(false) {
+        if std::fs::metadata(&meow_mmdb)
+            .map(|m| m.len() >= MIN_MMDB_BYTES)
+            .unwrap_or(false)
+        {
             let _ = link_or_copy(&meow_mmdb, &mmdb_dst);
         }
     }
@@ -706,8 +738,10 @@ mod tests {
 
     #[test]
     fn test_populate_vpcore_work_dir() {
-        let home = std::env::temp_dir().join(format!("vproxy-vpcore-home-{}", uuid::Uuid::new_v4()));
-        let work = std::env::temp_dir().join(format!("vproxy-vpcore-work-{}", uuid::Uuid::new_v4()));
+        let home =
+            std::env::temp_dir().join(format!("vproxy-vpcore-home-{}", uuid::Uuid::new_v4()));
+        let work =
+            std::env::temp_dir().join(format!("vproxy-vpcore-work-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&home).unwrap();
         std::fs::create_dir_all(&work).unwrap();
 
@@ -716,8 +750,14 @@ mod tests {
 
         populate_vpcore_work_dir(&home, &work);
 
-        assert_eq!(std::fs::read(work.join("geosite.dat")).unwrap(), b"fake-geosite");
-        assert_eq!(std::fs::read(work.join("Country.mmdb")).unwrap(), b"fake-country-mmdb");
+        assert_eq!(
+            std::fs::read(work.join("geosite.dat")).unwrap(),
+            b"fake-geosite"
+        );
+        assert_eq!(
+            std::fs::read(work.join("Country.mmdb")).unwrap(),
+            b"fake-country-mmdb"
+        );
 
         let _ = std::fs::remove_dir_all(&home);
         let _ = std::fs::remove_dir_all(&work);
@@ -725,11 +765,16 @@ mod tests {
 
     #[tokio::test]
     async fn test_ensure_vpcore_geo_when_files_ready() {
-        let home = std::env::temp_dir().join(format!("vproxy-vpcore-geo-test-{}", uuid::Uuid::new_v4()));
+        let home =
+            std::env::temp_dir().join(format!("vproxy-vpcore-geo-test-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&home).unwrap();
 
         // 模拟已存在足额大小的 geosite.dat 和 geoip.dat
-        std::fs::write(home.join("geosite.dat"), vec![0x0a; MIN_GEOSITE_BYTES as usize]).unwrap();
+        std::fs::write(
+            home.join("geosite.dat"),
+            vec![0x0a; MIN_GEOSITE_BYTES as usize],
+        )
+        .unwrap();
         std::fs::write(home.join("geoip.dat"), vec![0x0a; MIN_GEOIP_BYTES as usize]).unwrap();
 
         let report = ensure_vpcore_geo(&home, None).await.unwrap();
