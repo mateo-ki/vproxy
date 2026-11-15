@@ -625,7 +625,7 @@ impl VpnApp {
                                     .on_hover_cursor(egui::CursorIcon::PointingHand);
 
                                 // 7. 操作：更多下拉（与右键菜单同一套条目）
-                                let col6_cell = ui.allocate_ui_with_layout(
+                                ui.allocate_ui_with_layout(
                                     egui::vec2(w6, row_h),
                                     egui::Layout::left_to_right(egui::Align::Center),
                                     |ui| {
@@ -646,22 +646,19 @@ impl VpnApp {
                                         });
                                     },
                                 );
-                                let col6_rect = col6_cell.response.rect;
 
-                                // 聚合行范围：包括全部列、列间距空白以及右侧所有横向延伸空白区域
+                                // 聚合行范围：包括全部列、列间距空白以及右侧所有横向延伸空白区域。
+                                // 注意不含操作列：「更多」按钮自己处理点击，整行交互区若覆盖它，
+                                // 后注册的整行 interact 会盖在按钮上层吃掉点击（egui 后注册者在最上），下拉永远弹不开
                                 let row_cells_rect = col0_rect
                                     .union(col1_rect)
                                     .union(col2_rect)
                                     .union(col3_rect)
                                     .union(col4_rect)
-                                    .union(col5_rect)
-                                    .union(col6_rect);
+                                    .union(col5_rect);
 
-                                let full_row_max_x = row_cells_rect
-                                    .max
-                                    .x
-                                    .max(row_cells_rect.min.x + content_w + total_spacing)
-                                    .max(ui.max_rect().max.x);
+                                // 整行交互区右缘止于操作列左侧，把「更多」按钮让出来
+                                let full_row_max_x = col5_rect.max.x;
 
                                 let full_row_rect = egui::Rect::from_min_max(
                                     row_cells_rect.min,
