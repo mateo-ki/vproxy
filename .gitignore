@@ -13,6 +13,9 @@
 /scripts/*
 !/scripts/build_linux_packages.sh
 !/scripts/build_linux_packages.ps1
+# 提交门禁钩子（无本地路径，随仓库分发；core.hooksPath 指向 scripts/githooks）
+!/scripts/githooks/
+!/scripts/githooks/pre-commit
 /.cache/
 
 # Logs
