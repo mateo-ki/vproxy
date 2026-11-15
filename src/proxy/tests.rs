@@ -1277,7 +1277,7 @@ async fn macos_standard_child_with_controller() -> (
         runtime.status.mode = ProxyMode::System;
         runtime.status.kernel = Some(KernelKind::Mihomo);
         runtime.status.local_proxy_ready = true;
-        runtime.child = Some(crate::proxy::manager::ProxyChild::Standard(child));
+        runtime.child = Some(crate::proxy::manager::ProxyChild::Standard(Box::new(child)));
         runtime.work_dir = Some(work_dir);
         runtime.current_node = Some(selected);
     }
