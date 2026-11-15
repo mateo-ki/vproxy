@@ -41,5 +41,5 @@ pub const MEOW_TAG: &str = "v0.26.1";
 /// 锁定版本必须同步跟上，否则新配置喂给旧内核必挂。
 pub const SHOES_TAG: &str = "v0.3.5";
 
-/// 默认内置锁定的 VP-Core 资产版本
-pub const VPCORE_TAG: &str = "v1.6.2";
+/// 默认内置锁定的 VP-Core 资产版本（兜底下载用；随每次 VP-Core 发版同步更新）
+pub const VPCORE_TAG: &str = "v1.7.8";

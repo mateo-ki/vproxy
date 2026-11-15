@@ -539,6 +539,15 @@ impl KernelUpdater {
                 release.tag_name,
                 cache_hint
             )
+        } else if release.from_cache || release.fallback {
+            // 在线检查失败时拿缓存/兜底凑数，绝不能谎报"已是最新"——离线信息可能
+            // 早已过期（本次事故：缓存 v1.7.7 → 用户装完官方 1.7.7 还以为更新坏了）。
+            // 如实告知不可靠，引导用户重试在线检查。
+            format!(
+                "{} 在线检查失败（GitHub API 限流/网络受限），以下依据离线信息 {tag}，可能过期——请稍后重试「检查更新」",
+                info.kind.display_name(),
+                tag = release.tag_name,
+            )
         } else {
             format!("{} 已是最新版本{}", info.kind.display_name(), cache_hint)
         };
@@ -1319,21 +1328,24 @@ fn fallback_release(kind: KernelKind) -> Option<GithubRelease> {
     }
 
     if kind == KernelKind::VpCore {
+        // 实测（2026-11-16，v1.7.8 官方 Release，SHA256SUMS.txt + ghfast 实下复核）：
+        // Windows zip 8,537,398 字节；Linux musl 8,171,110；macOS darwin 7,111,177。
+        // VPCORE_TAG 随每次 VP-Core 发版同步 bump，否则兜底会装回旧版（v1.6.2 装了半年）。
         let (name, digest, size) = match KernelPlatform::current() {
             KernelPlatform::Windows => (
                 format!("vpcore-{VPCORE_TAG}-x86_64-pc-windows-msvc.zip"),
-                "sha256:ffcbfed7b1bfc14d2c222e35736be638800bfa606cec1426f3a27ab74a59dd77",
-                7_261_792_u64,
+                "sha256:c33d8c32dba9838935fb01bb6ba072c23f8292458bccf1062d67a641b9b541c1",
+                8_537_398_u64,
             ),
             KernelPlatform::Linux => (
                 format!("vpcore-{VPCORE_TAG}-x86_64-unknown-linux-musl.tar.gz"),
-                "sha256:e1c619e6a1d565128150b975c1f8d99dcd89ab5e32b6b6a1021dbc93268fcce1",
-                7_037_106_u64,
+                "sha256:9e28cafde11161d2622b88e9ba5bf48e762ce76287f96c627384f3c15b8f02f9",
+                8_171_110_u64,
             ),
             KernelPlatform::MacOS => (
                 format!("vpcore-{VPCORE_TAG}-aarch64-apple-darwin.tar.gz"),
-                "sha256:38a143e1e67fa236bee30ea380cc33ba238eefa7a66b446467d14d389c50fb59",
-                6_072_454_u64,
+                "sha256:d6a697c82c4d9f2c865bb1a3c2cf2fa105712b39aaa1584613822c38ed36ef1d",
+                7_111_177_u64,
             ),
         };
         return Some(GithubRelease {
