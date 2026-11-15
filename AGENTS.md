@@ -24,6 +24,8 @@ pre-commit 钩子（core.hooksPath=scripts/githooks）机械强制。本地必�
 - 本机 python/pip 损坏（SRE module mismatch），不要依赖 python 写参考实现
 - clippy 的机器建议也会改错值：`rgb(0x12_13_16)` 被建议成 `0x1213_i16`（不同值）——`cargo clippy --fix` 之后必须逐文件 review diff，颜色/数值字面量重点核对
 - mihomo 测试配置：hysteria2 监听器用 `users: {user: pass}` 映射（password 字段被忽略，404 是这个原因）；snell 监听器默认 version 4
+- 手动替换 data/kernels 下的内核 exe 与 GUI 的安装记录会打架：GUI 再执行安装会按其记录的版本覆盖回来（本次 1.7.8 部署被用户随后的更新装回 1.7.7）——手动换内核后告知用户重启代理；**别和 GUI 安装流程并发操作同一文件**
+- 更新检查依赖 api.github.com，限流/被掐时走离线缓存或兜底常量——兜底常量（VPCORE_TAG 等）随每次上游发版同步 bump，否则兜底会装回旧版
 
 ## 提交纪律
 
