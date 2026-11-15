@@ -87,6 +87,15 @@ pub fn parse_uri(uri: &str, source_id: Option<&str>) -> Option<Node> {
     None
 }
 
+/// query 里宽松读取 insecure 开关（1/true 视为真；兼容各客户端的别名写法）
+fn query_insecure(q: &std::collections::HashMap<String, String>) -> bool {
+    ["insecure", "allowInsecure", "allow_insecure", "skip-cert-verify", "skip_cert_verify"]
+        .iter()
+        .find_map(|k| q.get(*k))
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false)
+}
+
 /// ss://uuid@host:port?type=ws&security=tls... is often a mislabeled vless link.
 fn try_parse_mislabeled_ss_as_vless(uri: &str, source_id: Option<&str>) -> Option<Node> {
     let rest = uri.trim_start_matches("ss://").trim_start_matches("SS://");
@@ -286,7 +295,7 @@ fn vless_node(
     name: &str,
     q: std::collections::HashMap<String, String>,
 ) -> Node {
-    let config = json!({
+    let mut config = json!({
         "type": "vless",
         "server": host,
         "port": port,
@@ -307,9 +316,31 @@ fn vless_node(
         // ECH（Encrypted Client Hello）请求：`<HTTPS(type65) 查询名>+<DoH URL>`
         // 或裸查询名；导出时转成内核的 ech-opts。
         "ech": q.get("ech").cloned().unwrap_or_default(),
-        // 查询参数来自订阅链接本身，不能让它关掉证书校验。
-        "allowInsecure": json!(false),
+        // 自签证书服务端（家宽/自建）依赖链接里的 insecure 开关，如实解析（UI 可见）
+        "allowInsecure": json!(query_insecure(&q)),
     });
+    // 标准 clash 字段补齐：security→tls 布尔；network=ws 时 path/host 归位 ws-opts
+    // （顶层 host/path 是旧版写法，mihomo 兼容但部分内核不认）
+    if let Some(obj) = config.as_object_mut() {
+        let security = q.get("security").cloned().unwrap_or_default();
+        obj.insert(
+            "tls".into(),
+            json!(matches!(security.as_str(), "tls" | "reality")),
+        );
+        let network = q.get("type").cloned().unwrap_or_default();
+        let ws_host = q.get("host").cloned().unwrap_or_default();
+        let ws_path = q.get("path").cloned().unwrap_or_default();
+        if network == "ws" && (!ws_host.is_empty() || !ws_path.is_empty()) {
+            let mut ws_opts = serde_json::Map::new();
+            if !ws_path.is_empty() {
+                ws_opts.insert("path".into(), json!(ws_path));
+            }
+            if !ws_host.is_empty() {
+                ws_opts.insert("headers".into(), json!({ "Host": ws_host }));
+            }
+            obj.insert("ws-opts".into(), serde_json::Value::Object(ws_opts));
+        }
+    }
     make_node("vless", name, host, port, uri, config, source_id)
 }
 
@@ -346,7 +377,7 @@ fn trojan_node(
     name: &str,
     q: std::collections::HashMap<String, String>,
 ) -> Node {
-    let config = json!({
+    let mut config = json!({
         "type": "trojan",
         "server": host,
         "port": port,
@@ -360,9 +391,29 @@ fn trojan_node(
         "ech": q.get("ech").cloned().unwrap_or_default(),
         "path": q.get("path").cloned().unwrap_or_default(),
         "host": q.get("host").cloned().unwrap_or_default(),
-        // 查询参数来自订阅链接本身，不能让它关掉证书校验。
-        "allowInsecure": json!(false),
+        "allowInsecure": json!(query_insecure(&q)),
     });
+    // 标准 clash 字段补齐：security→tls 布尔；network=ws 时 path/host 归位 ws-opts
+    if let Some(obj) = config.as_object_mut() {
+        let security = q.get("security").cloned().unwrap_or_default();
+        obj.insert(
+            "tls".into(),
+            json!(matches!(security.as_str(), "tls" | "reality") || security.is_empty()),
+        );
+        let network = q.get("type").cloned().unwrap_or_default();
+        let ws_host = q.get("host").cloned().unwrap_or_default();
+        let ws_path = q.get("path").cloned().unwrap_or_default();
+        if network == "ws" && (!ws_host.is_empty() || !ws_path.is_empty()) {
+            let mut ws_opts = serde_json::Map::new();
+            if !ws_path.is_empty() {
+                ws_opts.insert("path".into(), json!(ws_path));
+            }
+            if !ws_host.is_empty() {
+                ws_opts.insert("headers".into(), json!({ "Host": ws_host }));
+            }
+            obj.insert("ws-opts".into(), serde_json::Value::Object(ws_opts));
+        }
+    }
     make_node("trojan", name, host, port, uri, config, source_id)
 }
 
@@ -383,7 +434,7 @@ fn parse_hysteria2(uri: &str, source_id: Option<&str>) -> Option<Node> {
             "password": auth,
             "name": name,
             "sni": q.get("sni").cloned().unwrap_or_default(),
-            "insecure": json!(false),
+            "insecure": json!(query_insecure(&q)),
             "obfs": q.get("obfs").cloned().unwrap_or_default(),
             "obfs-password": q.get("obfs-password").cloned().unwrap_or_default(),
             "udp": json!(true),
@@ -414,7 +465,7 @@ fn parse_hysteria2(uri: &str, source_id: Option<&str>) -> Option<Node> {
         "password": auth,
         "name": name,
         "sni": q.get("sni").cloned().unwrap_or_default(),
-        "insecure": json!(false),
+        "insecure": json!(query_insecure(&q)),
         "obfs": q.get("obfs").cloned().unwrap_or_default(),
         "obfs-password": q.get("obfs-password").cloned().unwrap_or_default(),
         "udp": json!(true),
@@ -565,8 +616,8 @@ fn parse_tuic(uri: &str, source_id: Option<&str>) -> Option<Node> {
         "congestion_control": congestion_control,
         "udp-relay-mode": udp_relay_mode,
         "udp_relay_mode": udp_relay_mode,
-        "allowInsecure": json!(false),
-        "insecure": json!(false),
+        "allowInsecure": json!(query_insecure(&q)),
+        "insecure": json!(query_insecure(&q)),
     });
 
     Some(make_node(
@@ -968,7 +1019,7 @@ fn parse_naive(uri: &str, source_id: Option<&str>) -> Option<Node> {
         "password": password,
         "sni": sni,
         "tls": json!(!is_quic),
-        "insecure": json!(false),
+        "insecure": json!(query_insecure(&q)),
         "name": name,
     });
     Some(make_node(
