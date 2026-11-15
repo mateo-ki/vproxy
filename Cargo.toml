@@ -93,8 +93,10 @@ split-debuginfo = "unpacked"
 opt-level = 1
 
 [profile.release]
-lto = "thin"
-codegen-units = 16
+# fat LTO + 单编译单元：跨 crate 全局优化与死代码消除（48.5MB → 预期 −8~15%）
+# 构建时间约 ×2~3；strip=true 已剥离符号表
+lto = "fat"
+codegen-units = 1
 strip = true
 incremental = false
 
