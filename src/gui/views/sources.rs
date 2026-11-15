@@ -9,6 +9,22 @@ use crate::gui::widgets::{
 use crate::gui::VpnApp;
 use eframe::egui::{self, Color32, CornerRadius, Frame, Margin, RichText, Stroke, Ui};
 
+/// 订阅源行操作菜单动作：右键菜单与操作列「更多」下拉共用。
+#[derive(Debug, Clone)]
+enum SourceRowMenuAction {
+    Fetch(String),
+    ProxyFetch(String),
+    /// `Source` 本体约 432 字节，装箱避免枚举尺寸差（clippy::large_enum_variant）
+    Edit(Box<crate::models::Source>),
+    ToggleEnabled((String, bool)),
+    TogglePush((String, bool)),
+    Speedtest((String, String)),
+    OpenNodes((String, String)),
+    CopyUrl(String),
+    Delete(String),
+    ClearUngrouped,
+}
+
 impl VpnApp {
     pub(crate) fn ui_sources(&mut self, ui: &mut Ui) {
         self.ui_clear_sources_confirm(ui.ctx());
@@ -219,13 +235,14 @@ impl VpnApp {
                     let w2 = ((content_w * 0.08) - 10.0).clamp(50.0, 75.0);  // 状态（紧凑）
                     let w3 = (content_w * 0.12).clamp(95.0, 125.0);          // 最近拉取
                     let w4 = (content_w * 0.12).clamp(95.0, 125.0);          // 健康度
-                    let w5 = (content_w - w0 - w1 - w2 - w3 - w4).max(150.0); // 流量配额（吸纳全部剩余宽度并充裕保底）
+                    let w6 = 76.0_f32;                                       // 操作（更多下拉）
+                    let w5 = (content_w - w0 - w1 - w2 - w3 - w4 - w6).max(150.0); // 流量配额（吸纳剩余宽度）
 
                     let row_h = 40.0_f32;
 
                     egui::Grid::new("sources_grid")
                         .striped(true)
-                        .num_columns(6)
+                        .num_columns(7)
                         .spacing([grid_spacing, 6.0])
                         .min_col_width(40.0)
                         .show(ui, |ui| {
@@ -251,6 +268,7 @@ impl VpnApp {
                             col_header(ui, "最近拉取", w3);
                             col_header(ui, "健康度", w4);
                             col_header(ui, "流量配额", w5);
+                            col_header(ui, self.tr("操作"), w6);
                             ui.end_row();
 
                             for s in &visible_sources {
@@ -260,6 +278,9 @@ impl VpnApp {
                                     !self.busy || self.tasks.has_active_fetch();
                                 let retry =
                                     s.last_status.as_deref().is_some_and(source_status_failed);
+                                let has_proxy = self.subscription_proxy_url().is_some();
+                                // 本帧该行弹出的菜单动作（操作列「更多」下拉 / 右键菜单同源共用）
+                                let mut row_menu_action: Option<SourceRowMenuAction> = None;
 
                                 // 1. 名称（上下垂直居中）
                                 let hover_msg = if s.name.chars().count() > 18 {
@@ -600,8 +621,32 @@ impl VpnApp {
                                 let col5_rect = col5_cell.response.rect;
                                 col5_cell
                                     .response
-                                    .on_hover_text("流量配额（点击编辑配置，右键弹出操作菜单）")
+                                    .on_hover_text("流量配额（点击编辑配置，右键或操作列「更多」弹出菜单）")
                                     .on_hover_cursor(egui::CursorIcon::PointingHand);
+
+                                // 7. 操作：更多下拉（与右键菜单同一套条目）
+                                let col6_cell = ui.allocate_ui_with_layout(
+                                    egui::vec2(w6, row_h),
+                                    egui::Layout::left_to_right(egui::Align::Center),
+                                    |ui| {
+                                        ui.set_min_size(egui::vec2(w6, row_h));
+                                        ui.set_max_size(egui::vec2(w6, row_h));
+                                        ui.menu_button(RichText::new("更多 ⌄").size(11.0), |ui| {
+                                            ui.set_min_width(160.0);
+                                            if let Some(a) = self.source_row_menu(
+                                                ui,
+                                                s,
+                                                source_active,
+                                                retry,
+                                                fetch_operation_allowed,
+                                                has_proxy,
+                                            ) {
+                                                row_menu_action = Some(a);
+                                            }
+                                        });
+                                    },
+                                );
+                                let col6_rect = col6_cell.response.rect;
 
                                 // 聚合行范围：包括全部列、列间距空白以及右侧所有横向延伸空白区域
                                 let row_cells_rect = col0_rect
@@ -609,7 +654,8 @@ impl VpnApp {
                                     .union(col2_rect)
                                     .union(col3_rect)
                                     .union(col4_rect)
-                                    .union(col5_rect);
+                                    .union(col5_rect)
+                                    .union(col6_rect);
 
                                 let full_row_max_x = row_cells_rect
                                     .max
@@ -642,105 +688,50 @@ impl VpnApp {
                                     }
                                 }
 
-                                let has_proxy = self.subscription_proxy_url().is_some();
                                 row_resp.context_menu(|ui| {
                                     ui.set_min_width(160.0);
-                                    let is_imported = s.is_imported();
-                                    if is_imported {
-                                        ui.add_enabled(
-                                            false,
-                                            egui::Button::new("🔄 本地源无需拉取"),
-                                        )
-                                        .on_hover_text("本地导入自建节点池无需网络拉取");
-                                    } else {
-                                        let fetch_label = match (source_active, retry) {
-                                            (true, true) => "🔄 重试中...",
-                                            (true, false) => "🔄 拉取中...",
-                                            (false, true) => "🔄 重试拉取",
-                                            (false, false) => "🔄 立即拉取",
-                                        };
-                                        if ui
-                                            .add_enabled(
-                                                fetch_operation_allowed && !source_active,
-                                                egui::Button::new(fetch_label),
-                                            )
-                                            .clicked()
-                                        {
-                                            action_fetch = Some(s.id.clone());
-                                            ui.close();
-                                        }
-                                        if ui
-                                            .add_enabled(
-                                                fetch_operation_allowed && !source_active && has_proxy,
-                                                egui::Button::new(self.tr("代理拉取")),
-                                            )
-                                            .on_hover_text("通过当前运行中的本地代理拉取此订阅源")
-                                            .clicked()
-                                        {
-                                            action_proxy_fetch = Some(s.id.clone());
-                                            ui.close();
-                                        }
-                                    }
-                                    ui.separator();
-                                    if ui.button(self.tr("编辑")).clicked() {
-                                        action_edit = Some(s.clone());
-                                        ui.close();
-                                    }
-                                    if ui
-                                        .button(if s.enabled { self.tr("禁用") } else { self.tr("启用") })
-                                        .on_hover_text(if s.enabled {
-                                            "禁用后不会参与批量拉取"
-                                        } else {
-                                            "启用后可参与批量拉取"
-                                        })
-                                        .clicked()
-                                    {
-                                        action_toggle_enabled = Some((s.id.clone(), !s.enabled));
-                                        ui.close();
-                                    }
-                                    if ui
-                                        .button(if s.push_disabled {
-                                            self.tr("恢复推送")
-                                        } else {
-                                            self.tr("不推送")
-                                        })
-                                        .on_hover_text(if s.push_disabled {
-                                            "恢复后该源的节点会参与“推送可用节点”"
-                                        } else {
-                                            "标记后该源的节点不参与“推送可用节点”（仍照常拉取和测速）"
-                                        })
-                                        .clicked()
-                                    {
-                                        action_toggle_push = Some((s.id.clone(), !s.push_disabled));
-                                        ui.close();
-                                    }
-                                    ui.separator();
-                                    if ui.button("⚡ 测速此源全部节点").clicked() {
-                                        action_speedtest = Some((s.id.clone(), s.name.clone()));
-                                        ui.close();
-                                    }
-                                    if ui.button("📋 查看节点列表").clicked() {
-                                        action_open_nodes = Some((s.id.clone(), s.name.clone()));
-                                        ui.close();
-                                    }
-                                    if !is_imported
-                                        && ui.button("📄 复制订阅链接").clicked() {
-                                            action_copy_url = Some(s.url_template.clone());
-                                            ui.close();
-                                        }
-                                    ui.separator();
-                                    if s.id == crate::db::UNGROUPED_SOURCE_ID {
-                                        if ui.button(RichText::new("🗑️ 清空导入节点").color(theme::danger())).clicked() {
-                                            action_clear_ungrouped = true;
-                                            ui.close();
-                                        }
-                                    } else {
-                                        if ui.button(RichText::new("🗑️ 删除订阅源").color(theme::danger())).clicked() {
-                                            action_delete = Some(s.id.clone());
-                                            ui.close();
-                                        }
+                                    if let Some(a) = self.source_row_menu(
+                                        ui,
+                                        s,
+                                        source_active,
+                                        retry,
+                                        fetch_operation_allowed,
+                                        has_proxy,
+                                    ) {
+                                        row_menu_action = Some(a);
                                     }
                                 });
+
+                                // 本帧该行弹出的菜单动作（操作列「更多」下拉 / 右键菜单）映射到外层动作
+                                match row_menu_action {
+                                    Some(SourceRowMenuAction::Fetch(id)) => {
+                                        action_fetch = Some(id)
+                                    }
+                                    Some(SourceRowMenuAction::ProxyFetch(id)) => {
+                                        action_proxy_fetch = Some(id)
+                                    }
+                                    Some(SourceRowMenuAction::Edit(v)) => {
+                                        action_edit = Some(*v)
+                                    }
+                                    Some(SourceRowMenuAction::ToggleEnabled(v)) => {
+                                        action_toggle_enabled = Some(v)
+                                    }
+                                    Some(SourceRowMenuAction::TogglePush(v)) => {
+                                        action_toggle_push = Some(v)
+                                    }
+                                    Some(SourceRowMenuAction::Speedtest(v)) => {
+                                        action_speedtest = Some(v)
+                                    }
+                                    Some(SourceRowMenuAction::OpenNodes(v)) => {
+                                        action_open_nodes = Some(v)
+                                    }
+                                    Some(SourceRowMenuAction::CopyUrl(u)) => action_copy_url = Some(u),
+                                    Some(SourceRowMenuAction::Delete(id)) => action_delete = Some(id),
+                                    Some(SourceRowMenuAction::ClearUngrouped) => {
+                                        action_clear_ungrouped = true
+                                    }
+                                    None => {}
+                                }
 
                                 ui.end_row();
                             }
@@ -779,6 +770,131 @@ impl VpnApp {
                     }
                 });
         });
+    }
+
+    /// 订阅源行操作菜单（右键菜单与操作列「更多」下拉共用同一套条目）。
+    /// 返回 `Some` 表示用户点了某项；调用方把它映射回各自的 action 变量。
+    fn source_row_menu(
+        &self,
+        ui: &mut Ui,
+        s: &crate::models::Source,
+        source_active: bool,
+        retry: bool,
+        fetch_operation_allowed: bool,
+        has_proxy: bool,
+    ) -> Option<SourceRowMenuAction> {
+        let is_imported = s.is_imported();
+        if is_imported {
+            ui.add_enabled(false, egui::Button::new("🔄 本地源无需拉取"))
+                .on_hover_text("本地导入自建节点池无需网络拉取");
+        } else {
+            let fetch_label = match (source_active, retry) {
+                (true, true) => "🔄 重试中...",
+                (true, false) => "🔄 拉取中...",
+                (false, true) => "🔄 重试拉取",
+                (false, false) => "🔄 立即拉取",
+            };
+            if ui
+                .add_enabled(
+                    fetch_operation_allowed && !source_active,
+                    egui::Button::new(fetch_label),
+                )
+                .clicked()
+            {
+                ui.close();
+                return Some(SourceRowMenuAction::Fetch(s.id.clone()));
+            }
+            if ui
+                .add_enabled(
+                    fetch_operation_allowed && !source_active && has_proxy,
+                    egui::Button::new(self.tr("代理拉取")),
+                )
+                .on_hover_text("通过当前运行中的本地代理拉取此订阅源")
+                .clicked()
+            {
+                ui.close();
+                return Some(SourceRowMenuAction::ProxyFetch(s.id.clone()));
+            }
+        }
+        ui.separator();
+        if ui.button(self.tr("编辑")).clicked() {
+            ui.close();
+            return Some(SourceRowMenuAction::Edit(Box::new(s.clone())));
+        }
+        if ui
+            .button(if s.enabled {
+                self.tr("禁用")
+            } else {
+                self.tr("启用")
+            })
+            .on_hover_text(if s.enabled {
+                "禁用后不会参与批量拉取"
+            } else {
+                "启用后可参与批量拉取"
+            })
+            .clicked()
+        {
+            ui.close();
+            return Some(SourceRowMenuAction::ToggleEnabled((
+                s.id.clone(),
+                !s.enabled,
+            )));
+        }
+        if ui
+            .button(if s.push_disabled {
+                self.tr("恢复推送")
+            } else {
+                self.tr("不推送")
+            })
+            .on_hover_text(if s.push_disabled {
+                "恢复后该源的节点会参与“推送可用节点”"
+            } else {
+                "标记后该源的节点不参与“推送可用节点”（仍照常拉取和测速）"
+            })
+            .clicked()
+        {
+            ui.close();
+            return Some(SourceRowMenuAction::TogglePush((
+                s.id.clone(),
+                !s.push_disabled,
+            )));
+        }
+        ui.separator();
+        if ui.button("⚡ 测速此源全部节点").clicked() {
+            ui.close();
+            return Some(SourceRowMenuAction::Speedtest((
+                s.id.clone(),
+                s.name.clone(),
+            )));
+        }
+        if ui.button("📋 查看节点列表").clicked() {
+            ui.close();
+            return Some(SourceRowMenuAction::OpenNodes((
+                s.id.clone(),
+                s.name.clone(),
+            )));
+        }
+        if !is_imported && ui.button("📄 复制订阅链接").clicked() {
+            ui.close();
+            return Some(SourceRowMenuAction::CopyUrl(s.url_template.clone()));
+        }
+        ui.separator();
+        if s.id == crate::db::UNGROUPED_SOURCE_ID {
+            if ui
+                .button(RichText::new("🗑️ 清空导入节点").color(theme::danger()))
+                .clicked()
+            {
+                ui.close();
+                return Some(SourceRowMenuAction::ClearUngrouped);
+            }
+        } else if ui
+            .button(RichText::new("🗑️ 删除订阅源").color(theme::danger()))
+            .clicked()
+        {
+            ui.close();
+            return Some(SourceRowMenuAction::Delete(s.id.clone()));
+        }
+        None
     }
 
     pub(crate) fn ui_fetch_results(&self, ui: &mut Ui) {
