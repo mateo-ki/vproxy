@@ -629,7 +629,8 @@ impl VpnApp {
                                     |ui| {
                                         ui.set_min_size(egui::vec2(w6, row_h));
                                         ui.set_max_size(egui::vec2(w6, row_h));
-                                        ui.menu_button(RichText::new("更多 ⌄").size(11.0), |ui| {
+                                        // 纯文字标题：⌄（U+2304）不在 eframe 内置字体覆盖内，会渲染成缺字形方框
+                                        ui.menu_button(RichText::new("更多").size(11.0), |ui| {
                                             ui.set_min_width(160.0);
                                             if let Some(a) = self.source_row_menu(
                                                 ui,
