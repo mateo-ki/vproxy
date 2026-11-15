@@ -371,12 +371,10 @@ impl VpnApp {
                                             }
                                             if let Some(reports) = &self.homogeneity_reports {
                                                 if let Some(rep) = reports.iter().find(|r| r.source_id == s.id) {
+                                                    // 同质化/独有徽标已按需求移除（完整分析仍在
+                                                    // 「反向剔除同质化源」弹窗里），仅保留空源失效预警
                                                     if rep.total_nodes == 0 {
                                                         status_badge(ui, "⚠️ 空源", theme::warning());
-                                                    } else if rep.is_redundant {
-                                                        status_badge(ui, &format!("⚠️ 同质 {:.0}%", rep.overlap_rate_pct), theme::warning());
-                                                    } else if rep.unique_alive_nodes > 0 {
-                                                        status_badge(ui, &format!("独有 {}", rep.unique_alive_nodes), theme::accent_strong());
                                                     }
                                                 }
                                             }
@@ -621,7 +619,7 @@ impl VpnApp {
                                 let col5_rect = col5_cell.response.rect;
                                 col5_cell
                                     .response
-                                    .on_hover_text("流量配额（点击编辑配置，右键或操作列「更多」弹出菜单）")
+                                    .on_hover_text("流量配额（右键或操作列「更多」弹出菜单）")
                                     .on_hover_cursor(egui::CursorIcon::PointingHand);
 
                                 // 7. 操作：更多下拉（与右键菜单同一套条目）
@@ -673,7 +671,7 @@ impl VpnApp {
                                     if let Some(pos) = ui.input(|i| i.pointer.interact_pos()) {
                                         if col0_rect.contains(pos) {
                                             action_open_nodes = Some((s.id.clone(), s.name.clone()));
-                                        } else if col1_rect.contains(pos) || col2_rect.contains(pos) || col5_rect.contains(pos) {
+                                        } else if col1_rect.contains(pos) || col2_rect.contains(pos) {
                                             action_edit = Some(s.clone());
                                         } else if col3_rect.contains(pos) {
                                             if fetch_operation_allowed && !source_active && !s.is_imported() {
