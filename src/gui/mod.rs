@@ -181,6 +181,9 @@ pub struct VpnApp {
     pub(crate) kernel_progress: Option<KernelUpdateProgress>,
     pub(crate) kernel_cancel: Arc<AtomicBool>,
     pub(crate) kernel_busy: bool,
+    /// 内核正在运行时也允许更新（Windows 靠"运行中 exe 可改名"完成替换）；
+    /// 置位后更新成功会自动重启代理以启用新内核。
+    pub(crate) restart_after_kernel_update: bool,
     pub(crate) speedtest_busy: bool,
     /// 「关于」页的应用自身更新：最新 Release、下载进度、已校验的安装包。
     pub(crate) app_release: Option<crate::app_update::AppReleaseInfo>,
@@ -730,6 +733,7 @@ impl VpnApp {
             kernel_progress: None,
             kernel_cancel: Arc::new(AtomicBool::new(false)),
             kernel_busy: false,
+            restart_after_kernel_update: false,
             speedtest_busy: false,
             app_release: None,
             app_update_progress: None,
@@ -3468,9 +3472,15 @@ impl VpnApp {
         local_file: Option<std::path::PathBuf>,
         remember_source: bool,
     ) {
-        if self.proxy_status.kernel_in_use(kind) {
-            self.status = format!("关闭内核后才能更新 {}", kind.display_name());
-            return;
+        // 内核正在运行也允许更新：Windows 上"运行中的 exe 可改名"让替换舞蹈照常成立
+        // （vpcore.exe → vpcore.exe.backup 后新文件落回原路径，运行中的旧镜像不受影响）。
+        // 成功后自动重启代理，让新内核立刻生效；失败则回滚、代理全程在线。
+        self.restart_after_kernel_update = self.proxy_status.kernel_in_use(kind);
+        if self.restart_after_kernel_update {
+            self.status = format!(
+                "{} 正在运行，更新完成后将自动重启代理以启用新内核",
+                kind.display_name()
+            );
         }
         if source == crate::kernel::KernelSource::Local && local_file.is_none() {
             self.status = "本地导入要先选好 zip 文件".into();

@@ -837,9 +837,25 @@ impl VpnApp {
                                     self.prepare_error = None;
                                     // 装好了就作废缓存，徽章当下这一帧就该从「预备」换掉。
                                     self.kernel_cache = None;
-                                    self.status = message;
+                                    self.status = message.clone();
+                                    // 更新前内核在运行：自动重启代理启用新内核。运行中的
+                                    // 进程一直跑的是旧镜像（文件已被改名为 .backup），只有
+                                    // 重启才换新。实际重启在 ProxyOp(Stop) 完成回调里触发。
+                                    if self.restart_after_kernel_update {
+                                        if self.proxy_status.state == ProxyState::Running {
+                                            crate::startup_log(&format!(
+                                                "[内核] {message}；代理正在运行，自动重启以启用新内核"
+                                            ));
+                                            self.status =
+                                                format!("{message} —— 正在重启代理以启用新内核");
+                                            self.stop_proxy();
+                                        } else {
+                                            self.restart_after_kernel_update = false;
+                                        }
+                                    }
                                 }
                                 Err(error) => {
+                                    self.restart_after_kernel_update = false;
                                     if self.prepare_attempts > 0 && !Self::kernel_installed() {
                                         crate::startup_log(&format!(
                                             "[预备] 第 {}/{} 次自动下载失败: {error}{}",
@@ -1117,6 +1133,13 @@ impl VpnApp {
                                         self.proxy_status.state = ProxyState::Stopped;
                                         self.proxy_status.local_proxy_ready = false;
                                         self.proxy_status.system_proxy_enabled = false;
+                                        // 内核更新后的自动重启：此刻新内核文件已就位，
+                                        // 重新拉起即运行新版本。
+                                        if self.restart_after_kernel_update {
+                                            self.restart_after_kernel_update = false;
+                                            crate::startup_log("[内核] 内核已替换，自动重启代理");
+                                            self.start_proxy();
+                                        }
                                     } else {
                                         self.note_proxy_state_transition(ProxyState::Running);
                                         self.proxy_status.state = ProxyState::Running;
