@@ -209,8 +209,10 @@ fn handle_command(cmd: Commands) -> Result<()> {
                 "direct" => vproxy::proxy::RoutingMode::Direct,
                 _ => vproxy::proxy::RoutingMode::Rule,
             };
-            let mut options = vproxy::proxy::MihomoConfigOptions::default();
-            options.routing_mode = routing_mode;
+            let options = vproxy::proxy::MihomoConfigOptions {
+                routing_mode,
+                ..Default::default()
+            };
             let plan = vproxy::proxy::ir::lower_options_to_ir(&options, Some(&nodes[0]));
             use vproxy::proxy::compiler::{
                 BackendCompiler, CompiledArtifact, MeowCompiler, MihomoCompiler, ShoesCompiler,
@@ -219,10 +221,10 @@ fn handle_command(cmd: Commands) -> Result<()> {
             let artifact = match kernel.to_ascii_lowercase().as_str() {
                 "mihomo" | "clash" => MihomoCompiler::default().compile(&plan)?,
                 "sing-box" | "singbox" => SingBoxCompiler::default().compile(&plan)?,
-                "vp-core" | "vpcore" | "vp_core" => VpCoreCompiler::default().compile(&plan)?,
+                "vp-core" | "vpcore" | "vp_core" => VpCoreCompiler.compile(&plan)?,
                 "xray" => XrayCompiler::default().compile(&plan)?,
                 "shoes" => ShoesCompiler::default().compile(&plan)?,
-                "meow" => MeowCompiler::default().compile(&plan)?,
+                "meow" => MeowCompiler.compile(&plan)?,
                 other => {
                     eprintln!("错误: 不支持的内核类型 '{other}'，可选: mihomo, sing-box, vp-core, xray, shoes, meow");
                     std::process::exit(1);
@@ -1106,11 +1108,7 @@ async fn connect_saved_proxy_at_login(
 /// Manual opens remember selection without connecting. Only the enabled login
 /// entry reconnects, and an absent selection simply opens the GUI for selection.
 #[cfg(any(feature = "gui", test))]
-fn login_proxy_node_id<'a>(
-    login_entry: bool,
-    enabled: bool,
-    selected: Option<&'a str>,
-) -> Option<&'a str> {
+fn login_proxy_node_id(login_entry: bool, enabled: bool, selected: Option<&str>) -> Option<&str> {
     if login_entry && enabled {
         selected.filter(|id| !id.is_empty())
     } else {

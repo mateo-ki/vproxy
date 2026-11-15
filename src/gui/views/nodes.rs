@@ -215,10 +215,10 @@ impl VpnApp {
                     self.render_nodes_toolbar_search_and_filters(
                         ui,
                         &mut filter_changed,
-                        &tr_search_hint,
-                        &tr_sources_label,
-                        &tr_all_sources,
-                        &tr_source_search_hint,
+                        tr_search_hint,
+                        tr_sources_label,
+                        tr_all_sources,
+                        tr_source_search_hint,
                     );
 
                     ui.separator();
@@ -232,17 +232,17 @@ impl VpnApp {
                         &mut delete_dead,
                         &mut delete_invalid,
                         &mut clear_all,
-                        &tr_import_export,
-                        &tr_import_clip,
-                        &tr_push_nodes,
-                        &tr_export_sub,
-                        &tr_export_clash,
-                        &tr_export_vp,
-                        &tr_export_uri,
-                        &tr_export_json,
-                        &tr_maintenance,
-                        &tr_prune_stale,
-                        &tr_dedup,
+                        tr_import_export,
+                        tr_import_clip,
+                        tr_push_nodes,
+                        tr_export_sub,
+                        tr_export_clash,
+                        tr_export_vp,
+                        tr_export_uri,
+                        tr_export_json,
+                        tr_maintenance,
+                        tr_prune_stale,
+                        tr_dedup,
                     );
                 });
 
@@ -418,16 +418,15 @@ impl VpnApp {
             self.keyword_applied = self.keyword.clone();
             *filter_changed = true;
         }
-        if !self.keyword.is_empty() {
-            if ui
+        if !self.keyword.is_empty()
+            && ui
                 .add(crate::gui::icons::icon_btn_square(Icon::Close, 11.0))
                 .on_hover_text("清除搜索关键词")
                 .clicked()
-            {
-                self.keyword.clear();
-                self.keyword_applied.clear();
-                *filter_changed = true;
-            }
+        {
+            self.keyword.clear();
+            self.keyword_applied.clear();
+            *filter_changed = true;
         }
 
         ui.separator();
@@ -479,14 +478,13 @@ impl VpnApp {
                             .hint_text(tr_source_search_hint),
                     );
                     crate::gui::widgets::note_text_field(ui, &search_edit);
-                    if !self.source_search_query.is_empty() {
-                        if ui
+                    if !self.source_search_query.is_empty()
+                        && ui
                             .add(crate::gui::icons::icon_btn_square(Icon::Close, 11.0))
                             .on_hover_text("清空搜索")
                             .clicked()
-                        {
-                            self.source_search_query.clear();
-                        }
+                    {
+                        self.source_search_query.clear();
                     }
                 });
                 ui.separator();
@@ -577,6 +575,8 @@ impl VpnApp {
             });
     }
 
+    // 工具栏按钮的点击标志（&mut bool）与 i18n 文案（&str）一一对应按钮，全部调用点在同一渲染函数里，打包成结构体只会多一层间接。
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn render_nodes_toolbar_actions(
         &mut self,
         ui: &mut Ui,
@@ -1141,7 +1141,7 @@ pub(crate) mod empty_pool_modal_tests {
             if let Some(list) = g.get(layer) {
                 for entry in list.all_entries() {
                     if let egui::Shape::Text(t) = &entry.shape {
-                        text.push_str(&t.galley.text());
+                        text.push_str(t.galley.text());
                         text.push(' ');
                     }
                 }
@@ -1151,12 +1151,13 @@ pub(crate) mod empty_pool_modal_tests {
     }
 
     fn screen_input() -> egui::RawInput {
-        let mut input = egui::RawInput::default();
-        input.screen_rect = Some(egui::Rect::from_min_size(
-            egui::Pos2::ZERO,
-            egui::vec2(1280.0, 800.0),
-        ));
-        input
+        egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1280.0, 800.0),
+            )),
+            ..Default::default()
+        }
     }
 
     /// 弹框的图层就按它 Area 的 id 寻址（`Modal::default_area` 用的是 `Order::Foreground`）。

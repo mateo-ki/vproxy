@@ -902,6 +902,8 @@ pub async fn run_speedtest_pipeline(
     })
 }
 
+// 串行内核探测的流水线状态（批次游标、拒绝计数、起止时间）彼此独立推进，打包成结构体反而要为每个调用点手工搬运字段。
+#[allow(clippy::too_many_arguments)]
 async fn run_sequential_kernel<P>(
     kernel: KernelKind,
     nodes: Vec<Node>,

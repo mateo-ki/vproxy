@@ -293,8 +293,8 @@ fn light_ink(accent: Color32) -> Ink {
 /// 语义色彩全面恢复鲜活生机与警示辨识度：活力翠绿 (#34D399)、温暖琥珀金 (#FBBF24)、鲜明珊瑚红 (#F87171)。
 fn dark_ink(accent: Color32) -> Ink {
     Ink {
-        page: rgb(0x12_13_16),
-        sidebar: rgb(0x12_13_16),
+        page: rgb(0x121316),
+        sidebar: rgb(0x121316),
         panel: rgb(0x1F_22_28),
         panel_hover: rgb(0x28_2B_33),
         border: rgb(0x2D_31_3A),
@@ -435,11 +435,13 @@ pub fn apply(ctx: &egui::Context, id: &str, dark: bool) {
         *guard = resolved.clone();
     }
 
-    let mut style = egui::Style::default();
-    style.visuals = if pal.light {
-        egui::Visuals::light()
-    } else {
-        egui::Visuals::dark()
+    let mut style = egui::Style {
+        visuals: if pal.light {
+            egui::Visuals::light()
+        } else {
+            egui::Visuals::dark()
+        },
+        ..Default::default()
     };
     let visuals = &mut style.visuals;
     visuals.panel_fill = pal.page_bg;

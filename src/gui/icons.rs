@@ -1373,8 +1373,10 @@ mod tests {
     fn each_sidebar_icon_paints_shapes() {
         let ctx = egui::Context::default();
         let layer = egui::LayerId::new(egui::Order::Background, egui::Id::new("icon_probe"));
-        let mut input = egui::RawInput::default();
-        input.screen_rect = Some(Rect::from_min_size(Pos2::ZERO, Vec2::splat(200.0)));
+        let input = egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::splat(200.0))),
+            ..Default::default()
+        };
         let mut painted: Vec<(Icon, usize)> = Vec::new();
         let _ = crate::gui::run_test_ui(&ctx, input, |ui| {
             let ctx = ui.ctx();

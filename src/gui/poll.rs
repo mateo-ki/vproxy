@@ -1430,11 +1430,12 @@ impl VpnApp {
                                         ..Default::default()
                                     });
 
-                                if rec.protocol.is_empty() || rec.protocol == "-" {
-                                    if !proto.is_empty() && proto != "-" {
-                                        rec.protocol = proto;
-                                        rec.server = srv;
-                                    }
+                                if (rec.protocol.is_empty() || rec.protocol == "-")
+                                    && !proto.is_empty()
+                                    && proto != "-"
+                                {
+                                    rec.protocol = proto;
+                                    rec.server = srv;
                                 }
 
                                 rec.upload_bytes = rec.upload_bytes.saturating_add(delta_up);
@@ -1643,19 +1644,18 @@ impl VpnApp {
                 Err(TryRecvError::Disconnected) => break,
             }
         }
-        if self.proxy_status.state != ProxyState::Running {
-            if self.traffic_up_rate > 0
+        if self.proxy_status.state != ProxyState::Running
+            && (self.traffic_up_rate > 0
                 || self.traffic_down_rate > 0
                 || !self.active_connections.is_empty()
-                || !self.traffic_history.is_empty()
-            {
-                self.traffic_up_rate = 0;
-                self.traffic_down_rate = 0;
-                self.active_connections.clear();
-                self.traffic_history.clear();
-                self.traffic_prev_sample = None;
-                self.traffic_polling = false;
-            }
+                || !self.traffic_history.is_empty())
+        {
+            self.traffic_up_rate = 0;
+            self.traffic_down_rate = 0;
+            self.active_connections.clear();
+            self.traffic_history.clear();
+            self.traffic_prev_sample = None;
+            self.traffic_polling = false;
         }
         if need_repaint {
             ctx.request_repaint();

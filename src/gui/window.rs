@@ -496,15 +496,13 @@ impl VpnApp {
 
     #[cfg(not(target_os = "macos"))]
     pub(crate) fn request_window_close(&mut self, ctx: &egui::Context) {
-        if self.settings.close_to_tray && !self.force_quit {
-            if self.tray.supported() {
-                crate::startup_log("Window close requested -> 收进托盘（停放到屏幕外）");
-                if self.park_to_tray() {
-                    ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
-                    return;
-                }
-                crate::startup_log("[托盘] 停放失败，降级为退出程序");
+        if self.settings.close_to_tray && !self.force_quit && self.tray.supported() {
+            crate::startup_log("Window close requested -> 收进托盘（停放到屏幕外）");
+            if self.park_to_tray() {
+                ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+                return;
             }
+            crate::startup_log("[托盘] 停放失败，降级为退出程序");
         }
         self.quit_main_window(ctx);
     }

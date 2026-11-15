@@ -42,7 +42,7 @@ impl Language {
 }
 
 /// 翻译字典核心函数
-pub fn tr<'a>(lang: Language, key: &'a str) -> &'a str {
+pub fn tr(lang: Language, key: &str) -> &str {
     match lang {
         Language::ZhCn => key,
         Language::En => match key {

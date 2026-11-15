@@ -538,8 +538,7 @@ fn compact_diagnostic(diagnostic: &str) -> String {
     let text = diagnostic
         .lines()
         .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .last()
+        .rfind(|line| !line.is_empty())
         .unwrap_or("未知配置错误");
     text.chars().take(240).collect()
 }

@@ -106,7 +106,7 @@ impl ProxyWorkDir {
 }
 
 pub(crate) enum ProxyChild {
-    Standard(Child),
+    Standard(Box<Child>),
     Elevated(crate::platform::ElevatedChild),
 }
 
@@ -408,8 +408,7 @@ mod failed_start_cleanup_tests {
         let dropped = child.dropped.clone();
         let (retained, error) = stop_failed_start_child(child, Duration::from_millis(5))
             .await
-            .err()
-            .expect("unconfirmed child must be returned");
+            .expect_err("unconfirmed child must be returned");
         assert_eq!(retained.token, 42);
         assert!(!dropped.load(Ordering::SeqCst));
         assert!(error.to_string().contains("等待退出超时"));
@@ -423,8 +422,7 @@ mod failed_start_cleanup_tests {
         let dropped = child.dropped.clone();
         let (retained, error) = stop_failed_start_child(child, Duration::from_millis(5))
             .await
-            .err()
-            .expect("status error must retain the child");
+            .expect_err("status error must retain the child");
         assert_eq!(retained.token, 42);
         assert!(!dropped.load(Ordering::SeqCst));
         assert!(error.to_string().contains("等待退出失败"));
@@ -522,7 +520,10 @@ mod failed_start_cleanup_tests {
             .await
             .expect_err("restore failure must be reported");
         let runtime = manager.runtime.lock().await;
-        assert_eq!(*controller.restored.lock().unwrap(), [snapshot.clone()]);
+        assert_eq!(
+            controller.restored.lock().unwrap().as_slice(),
+            std::slice::from_ref(&snapshot)
+        );
         assert_eq!(runtime.system_proxy_snapshot, Some(snapshot));
         assert!(runtime.status.system_proxy_enabled);
         assert_eq!(runtime.status.state, ProxyState::Degraded);
@@ -1116,7 +1117,7 @@ impl ProxyManager {
     pub async fn set_port_mapping_nodes(&self, items: Vec<(u16, Node)>) {
         let mut mapping_nodes = Vec::with_capacity(items.len());
         for (port, node) in items {
-            let clash = crate::export::nodes_to_clash_proxies(&[node.clone()]);
+            let clash = crate::export::nodes_to_clash_proxies(std::slice::from_ref(&node));
             if let Some(proxy_obj) = clash.into_iter().next() {
                 mapping_nodes.push((port, node.name, proxy_obj));
             }
@@ -1276,6 +1277,7 @@ impl ProxyManager {
     /// - VP-Core：重新编译全量配置后 PUT /configs 热重载（内核按 tun.enable 差量同步入站）；
     /// - 其余内核（SingBox / Xray / Shoes / Meow）没有运行时 TUN API：返回 Ok(false)，
     ///   由调用方回退整进程重启。
+    ///
     /// 返回 Ok(true) = 热切换已确认；Ok(false) = 需要重连或请求已取消；
     /// Err = 配置冲突或请求/确认失败，不能据此认定请求未生效并自动重启。
     pub async fn try_hot_toggle_tun(&self, options: MihomoConfigOptions) -> Result<bool> {
@@ -2040,7 +2042,7 @@ impl ProxyManager {
                         crate::platform::assign_child_process_id(pid);
                         runtime.status.kernel_pid = Some(pid);
                     }
-                    ProxyChild::Standard(child)
+                    ProxyChild::Standard(Box::new(child))
                 }
                 Err(error) => {
                     let _ = work_dir.cleanup().await;
@@ -3874,7 +3876,7 @@ mod recovery_tests {
             runtime.request_start(&selected_node("original"), Some(KernelPreference::Mihomo));
             runtime.status.state = ProxyState::Running;
             runtime.status.local_proxy_ready = true;
-            runtime.child = Some(ProxyChild::Standard(child));
+            runtime.child = Some(ProxyChild::Standard(Box::new(child)));
         }
         let status = manager.status().await;
         assert_eq!(status.state, ProxyState::Failed);
@@ -3959,7 +3961,7 @@ mod recovery_tests {
         {
             let mut runtime = manager.runtime.lock().await;
             runtime.request_start(&selected_node("same-node"), None);
-            runtime.child = Some(ProxyChild::Standard(child));
+            runtime.child = Some(ProxyChild::Standard(Box::new(child)));
             runtime.status.state = ProxyState::Degraded;
             runtime.recovery_pending = true;
             runtime.recovery_waiting_for_route = true;
@@ -4544,8 +4546,7 @@ mod system_proxy_transaction_tests {
 pub fn last_nonempty_line(text: &str) -> &str {
     text.lines()
         .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .next_back()
+        .rfind(|line| !line.is_empty())
         .unwrap_or("未知错误")
 }
 
@@ -4694,7 +4695,7 @@ mod config_reload_tests {
             runtime.status.state = ProxyState::Running;
             runtime.status.kernel = Some(KernelKind::Mihomo);
             runtime.status.local_proxy_ready = true;
-            runtime.child = Some(ProxyChild::Standard(child));
+            runtime.child = Some(ProxyChild::Standard(Box::new(child)));
             runtime.current_node = Some(node);
             runtime.work_dir = Some(ProxyWorkDir {
                 root: root.clone(),

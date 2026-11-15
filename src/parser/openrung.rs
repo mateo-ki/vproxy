@@ -9,10 +9,8 @@ pub fn parse_openrung_json(content: &str, source_id: Option<&str>) -> Option<Vec
     let val: Value = serde_json::from_str(content).ok()?;
     let relays = if let Some(arr) = val.get("relays").and_then(Value::as_array) {
         arr
-    } else if let Some(arr) = val.as_array() {
-        arr
     } else {
-        return None;
+        val.as_array()?
     };
 
     if relays.is_empty() {

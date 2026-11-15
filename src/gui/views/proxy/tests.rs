@@ -14,11 +14,13 @@ mod rule_import_help_probe_tests {
         let mut top = String::new();
         let mut bottom = String::new();
         for frame in 0..4 {
-            let mut input = RawInput::default();
-            input.screen_rect = Some(Rect::from_min_size(
-                egui::Pos2::ZERO,
-                Vec2::new(screen_width, 900.0),
-            ));
+            let mut input = RawInput {
+                screen_rect: Some(Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    Vec2::new(screen_width, 900.0),
+                )),
+                ..Default::default()
+            };
             if frame == 2 {
                 // 光标停在窗口里往下滚。
                 let center = rect.center();
@@ -50,7 +52,7 @@ mod rule_import_help_probe_tests {
                         };
                         for shape in list.all_entries() {
                             if let egui::Shape::Text(text) = &shape.shape {
-                                out.push_str(&text.galley.text());
+                                out.push_str(text.galley.text());
                                 out.push('\n');
                             }
                         }
@@ -125,8 +127,10 @@ mod rule_hits_height_probe_tests {
     /// `strip_note` = 把"从本进程启动开始统计…"那行并掉；`reserve` = 视口预留量。
     fn probe(window: Vec2, strip_note: bool, reserve: f32) -> (f32, f32) {
         let ctx = egui::Context::default();
-        let mut input = RawInput::default();
-        input.screen_rect = Some(Rect::from_min_size(egui::Pos2::ZERO, window));
+        let input = RawInput {
+            screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, window)),
+            ..Default::default()
+        };
         let mut viewport = 0.0_f32;
         let mut card_bottom = 0.0_f32;
         let _ = crate::gui::run_test_ui(&ctx, input, |ui| {
@@ -246,11 +250,13 @@ mod rules_row_probe_tests {
     /// 放不下就让动作组另起一行。返回（面板矩形, 分区标签占的矩形, 动作组占的矩形）。
     fn probe(window_width: f32) -> (Rect, Rect, Rect) {
         let ctx = egui::Context::default();
-        let mut input = RawInput::default();
-        input.screen_rect = Some(Rect::from_min_size(
-            egui::Pos2::ZERO,
-            Vec2::new(window_width, 800.0),
-        ));
+        let input = RawInput {
+            screen_rect: Some(Rect::from_min_size(
+                egui::Pos2::ZERO,
+                Vec2::new(window_width, 800.0),
+            )),
+            ..Default::default()
+        };
         let mut panel = Rect::NOTHING;
         let mut tabs = Rect::NOTHING;
         let mut group = Rect::NOTHING;
@@ -335,11 +341,13 @@ mod rules_row_probe_tests {
 
     fn probe_single_row(window_width: f32) -> (Rect, Rect, Rect) {
         let ctx = egui::Context::default();
-        let mut input = RawInput::default();
-        input.screen_rect = Some(Rect::from_min_size(
-            egui::Pos2::ZERO,
-            Vec2::new(window_width, 800.0),
-        ));
+        let input = RawInput {
+            screen_rect: Some(Rect::from_min_size(
+                egui::Pos2::ZERO,
+                Vec2::new(window_width, 800.0),
+            )),
+            ..Default::default()
+        };
         let mut panel = Rect::NOTHING;
         let mut tabs = Rect::NOTHING;
         let mut group = Rect::NOTHING;
@@ -420,11 +428,13 @@ mod status_button_style_tests {
     /// 照状态栏那一排的写法真画一遍，读这一帧画出来的按钮矩形。
     fn painted() -> Vec<(CornerRadius, f32, Color32)> {
         let ctx = egui::Context::default();
-        let mut input = RawInput::default();
-        input.screen_rect = Some(Rect::from_min_size(
-            egui::Pos2::ZERO,
-            Vec2::new(1330.0, 200.0),
-        ));
+        let input = RawInput {
+            screen_rect: Some(Rect::from_min_size(
+                egui::Pos2::ZERO,
+                Vec2::new(1330.0, 200.0),
+            )),
+            ..Default::default()
+        };
         let mut out = Vec::new();
         let _ = crate::gui::run_test_ui(&ctx, input, |ui| {
             CentralPanel::default().show(ui, |ui| {
@@ -779,11 +789,13 @@ mod collapsed_section_tests {
             let ctx = egui::Context::default();
             let mut seen = false;
             for _ in 0..2 {
-                let mut input = RawInput::default();
-                input.screen_rect = Some(Rect::from_min_size(
-                    egui::Pos2::ZERO,
-                    Vec2::new(900.0, 600.0),
-                ));
+                let input = RawInput {
+                    screen_rect: Some(Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        Vec2::new(900.0, 600.0),
+                    )),
+                    ..Default::default()
+                };
                 seen = false;
                 let _ = crate::gui::run_test_ui(&ctx, input, |ui| {
                     egui::CentralPanel::default().show(ui, |ui| {

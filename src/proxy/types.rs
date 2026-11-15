@@ -408,11 +408,13 @@ mod elevated_handoff_tests {
     /// 交接配置必须能原样读回来 —— 编解码是同一份实现，但这条钉的是"字段没漏、没被 serde 改名"。
     #[test]
     fn elevated_config_round_trips_through_temporary_file() {
-        let mut source = MihomoConfigOptions::default();
-        source.mode = ProxyMode::Tun;
-        source.url_test = true;
-        source.url_test_size = 8;
-        source.override_yaml = Some("rules:\n  - DOMAIN-SUFFIX,google.com,DIRECT".to_string());
+        let source = MihomoConfigOptions {
+            mode: ProxyMode::Tun,
+            url_test: true,
+            url_test_size: 8,
+            override_yaml: Some("rules:\n  - DOMAIN-SUFFIX,google.com,DIRECT".to_string()),
+            ..Default::default()
+        };
 
         let file_path =
             super::write_elevated_proxy_config_file(&source).expect("写配置临时文件失败");
@@ -425,10 +427,12 @@ mod elevated_handoff_tests {
 
     #[test]
     fn elevated_config_round_trips_through_the_command_line() {
-        let mut source = MihomoConfigOptions::default();
-        source.mode = ProxyMode::Tun;
-        source.url_test = true;
-        source.url_test_size = 7;
+        let source = MihomoConfigOptions {
+            mode: ProxyMode::Tun,
+            url_test: true,
+            url_test_size: 7,
+            ..Default::default()
+        };
         let encoded = encode_elevated_proxy_config(&source).expect("编码不该失败");
         assert!(
             !encoded.contains('='),
@@ -441,8 +445,10 @@ mod elevated_handoff_tests {
     /// `controller_secret` 是 `serde(skip)` 的一次性密钥：交接不该把它带过去，提权实例自己生成一份。
     #[test]
     fn the_parent_controller_secret_does_not_cross_the_handoff() {
-        let mut source = MihomoConfigOptions::default();
-        source.controller_secret = "parent-one-time-secret".into();
+        let source = MihomoConfigOptions {
+            controller_secret: "parent-one-time-secret".into(),
+            ..Default::default()
+        };
         let back = decode_elevated_proxy_config(&encode_elevated_proxy_config(&source).unwrap())
             .expect("解码不该失败");
         assert_eq!(back.controller_secret, "");
@@ -451,9 +457,7 @@ mod elevated_handoff_tests {
     /// 反向对照：坏值必须报错，不能悄悄回落到默认配置 —— 那会让提权实例用一套没人写的选项起内核。
     #[test]
     fn garbage_payload_is_rejected_not_defaulted() {
-        let error = decode_elevated_proxy_config("not-base64-!!!")
-            .err()
-            .expect("这种输入必须失败");
+        let error = decode_elevated_proxy_config("not-base64-!!!").expect_err("这种输入必须失败");
         assert!(
             error.to_string().contains("提权代理配置"),
             "报的是另一件事：{error}"

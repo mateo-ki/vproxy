@@ -216,9 +216,8 @@ pub fn render_signal_bars_with_status(
 
     let dim_color = theme::border_subtle();
 
-    for i in 0..4 {
+    for (i, &h) in heights.iter().enumerate() {
         let x = rect.min.x + i as f32 * (bar_w + bar_gap);
-        let h = heights[i];
         let bar_rect =
             egui::Rect::from_min_max(egui::pos2(x, baseline - h), egui::pos2(x + bar_w, baseline));
         let fill = if i < active_bars {

@@ -119,9 +119,11 @@ fn test_diagnose_mihomo_config_with_recommended_override() {
         created_at: chrono::Utc::now(),
         updated_at: chrono::Utc::now(),
     };
-    let mut options = MihomoConfigOptions::default();
-    options.smart_routing = true;
-    options.override_yaml = Some(CLASH_VERGE_RECOMMENDED_OVERRIDE.to_string());
+    let options = MihomoConfigOptions {
+        smart_routing: true,
+        override_yaml: Some(CLASH_VERGE_RECOMMENDED_OVERRIDE.to_string()),
+        ..Default::default()
+    };
     let config_val = build_mihomo_config(&node, options).expect("build config");
     let yaml_str = serde_yaml::to_string(&config_val).expect("to yaml");
     std::fs::write("target/diagnose_mihomo.yaml", &yaml_str).expect("write yaml");
@@ -218,7 +220,11 @@ fn startup_proxy_verification_uses_five_second_total_budget() {
 
 #[test]
 fn startup_requires_google_connectivity_verification() {
-    assert!(VERIFY_CONNECTIVITY_ON_START);
+    // 该常量是"启动即验证连通性"的产品开关，这里钉死它不许被悄悄关掉；
+    // 常量断言放 const 块，编译期即检查。
+    const {
+        assert!(VERIFY_CONNECTIVITY_ON_START);
+    }
 }
 
 #[test]
@@ -1139,8 +1145,10 @@ async fn restart_stop_preserves_system_proxy_without_restoring_it() {
 #[tokio::test]
 async fn test_hot_toggle_system_proxy_transitions() {
     let controller = Arc::new(FakeSystemProxy::default());
-    let mut opts = MihomoConfigOptions::default();
-    opts.mode = ProxyMode::Tun;
+    let opts = MihomoConfigOptions {
+        mode: ProxyMode::Tun,
+        ..Default::default()
+    };
     let manager = ProxyManager::with_system_proxy(opts, controller.clone());
     {
         let mut rt = manager.runtime.lock().await;
@@ -1361,14 +1369,16 @@ fn format_kernel_diagnostic_cleans_raw_errors() {
 
 #[test]
 fn port_mapping_validation_checks() {
-    let mut options = MihomoConfigOptions::default();
-    options.port_mappings = vec![PortMapping {
-        id: "1".into(),
-        port: 80, // < 1024
-        node_id: "n1".into(),
-        node_name: "Node 1".into(),
-        enabled: true,
-    }];
+    let mut options = MihomoConfigOptions {
+        port_mappings: vec![PortMapping {
+            id: "1".into(),
+            port: 80, // < 1024
+            node_id: "n1".into(),
+            node_name: "Node 1".into(),
+            enabled: true,
+        }],
+        ..Default::default()
+    };
     assert!(options
         .validate()
         .unwrap_err()
@@ -1421,7 +1431,7 @@ fn port_mappings_generate_mihomo_listeners_and_in_port_rules() {
         "vless",
         json!({"server": "5.6.7.8", "port": 443, "uuid": "u2", "network": "ws", "security": "tls"}),
     );
-    let clash_proxies = crate::export::nodes_to_clash_proxies(&[mapped_node.clone()]);
+    let clash_proxies = crate::export::nodes_to_clash_proxies(std::slice::from_ref(&mapped_node));
     let mut options = MihomoConfigOptions {
         port_mappings: vec![PortMapping {
             id: "m1".into(),
@@ -1521,7 +1531,7 @@ fn security_privacy_protections_generate_expected_configs() {
     assert!(xray_rules.iter().any(|r| r
         .get("port")
         .and_then(|p| p.as_str())
-        .map_or(false, |s| s.contains("19302-19309"))));
+        .is_some_and(|s| s.contains("19302-19309"))));
 }
 
 #[test]
@@ -1726,17 +1736,19 @@ fn override_yaml_rules_are_translated_across_all_kernels() {
             "reserved": [0, 0, 0]
         }),
     );
-    let mut options = MihomoConfigOptions::default();
-    options.override_yaml = Some(
-        r#"
+    let options = MihomoConfigOptions {
+        override_yaml: Some(
+            r#"
 rules:
   - DOMAIN-SUFFIX,custom-direct.com,DIRECT
   - DOMAIN-KEYWORD,custom-proxy,PROXY
   - IP-CIDR,192.168.99.0/24,DIRECT
   - PROCESS-NAME,curl.exe,REJECT
 "#
-        .to_string(),
-    );
+            .to_string(),
+        ),
+        ..Default::default()
+    };
 
     let plan = lower_options_to_ir(&options, Some(&sample_node));
     let plan_wg = lower_options_to_ir(&options, Some(&wg_node));
@@ -1865,22 +1877,24 @@ fn test_subscription_routing_mode_lowers_rules_and_default_action() {
             "password": "pass"
         }),
     );
-    let mut options = MihomoConfigOptions::default();
-    options.routing_mode = RoutingMode::Subscription;
-    options.rules = vec![TrafficRule {
-        matcher: RuleMatcher::Domain("custom-user-override.com".into()),
-        action: RuleAction::Direct,
-    }];
-    options.subscription_rules_yaml = Some(
-        r#"
+    let options = MihomoConfigOptions {
+        routing_mode: RoutingMode::Subscription,
+        rules: vec![TrafficRule {
+            matcher: RuleMatcher::Domain("custom-user-override.com".into()),
+            action: RuleAction::Direct,
+        }],
+        subscription_rules_yaml: Some(
+            r#"
 rules:
   - "DOMAIN-SUFFIX,sub-openai.com,AI分组"
   - "GEOSITE,youtube,国际流媒体"
   - "GEOIP,CN,DIRECT"
   - "MATCH,漏网之鱼"
 "#
-        .into(),
-    );
+            .into(),
+        ),
+        ..Default::default()
+    };
 
     let plan = lower_options_to_ir(&options, Some(&n));
 
@@ -1920,18 +1934,18 @@ fn test_subscription_routing_mode_mihomo_compiler_groups_and_rules() {
             "password": "pass"
         }),
     );
-    let mut options = MihomoConfigOptions::default();
-    options.routing_mode = RoutingMode::Subscription;
-    options.subscription_rules_yaml = Some(
-        r#"
+    let options = MihomoConfigOptions {
+        routing_mode: RoutingMode::Subscription,
+        subscription_rules_yaml: Some(
+            r#"
 rules:
   - "DOMAIN-SUFFIX,netflix.com,国际流媒体"
   - "MATCH,漏网之鱼"
 "#
-        .into(),
-    );
-    options.subscription_groups_yaml = Some(
-        r#"
+            .into(),
+        ),
+        subscription_groups_yaml: Some(
+            r#"
 proxy-groups:
   - name: "国际流媒体"
     type: select
@@ -1940,8 +1954,10 @@ proxy-groups:
     type: select
     proxies: ["PROXY", "DIRECT"]
 "#
-        .into(),
-    );
+            .into(),
+        ),
+        ..Default::default()
+    };
 
     let plan = lower_options_to_ir(&options, Some(&n));
     let artifact = MihomoCompiler::new()
@@ -2062,8 +2078,10 @@ fn test_compiler_emits_correct_mode_for_mihomo_and_vpcore() {
     ];
 
     for (mode, expected_str) in cases {
-        let mut options = MihomoConfigOptions::default();
-        options.routing_mode = mode;
+        let options = MihomoConfigOptions {
+            routing_mode: mode,
+            ..Default::default()
+        };
         let plan = lower_options_to_ir(&options, Some(&test_node));
 
         // MihomoCompiler
@@ -2120,9 +2138,9 @@ fn test_clash_party_yaml_override_in_mihomo_compiler() {
             "password": "pass"
         }),
     );
-    let mut options = MihomoConfigOptions::default();
-    options.override_yaml = Some(
-        r#"
+    let options = MihomoConfigOptions {
+        override_yaml: Some(
+            r#"
 mixed-port: 9999
 dns:
   +nameserver:
@@ -2138,8 +2156,10 @@ rules+:
     type: select
     proxies: ["DIRECT"]
 "#
-        .into(),
-    );
+            .into(),
+        ),
+        ..Default::default()
+    };
 
     let plan = lower_options_to_ir(&options, Some(&n));
     let artifact = MihomoCompiler::new()
@@ -2190,9 +2210,9 @@ fn test_mihomo_yaml_and_rhai_script_stacked_override() {
             "password": "pass"
         }),
     );
-    let mut options = MihomoConfigOptions::default();
-    options.override_yaml = Some(
-        r#"
+    let options = MihomoConfigOptions {
+        override_yaml: Some(
+            r#"
 mixed-port: 9999
 dns:
   nameserver:
@@ -2200,11 +2220,10 @@ dns:
 +rules:
   - DOMAIN-SUFFIX,yaml-rule.com,DIRECT
 "#
-        .into(),
-    );
-
-    options.override_script = Some(
-        r#"
+            .into(),
+        ),
+        override_script: Some(
+            r#"
 fn main(config) {
     // 验证脚本作为最终裁决者：覆盖 YAML 设定的 9999
     config["mixed-port"] = 8888;
@@ -2213,8 +2232,10 @@ fn main(config) {
     return config;
 }
 "#
-        .into(),
-    );
+            .into(),
+        ),
+        ..Default::default()
+    };
 
     let plan = lower_options_to_ir(&options, Some(&n));
     let artifact = MihomoCompiler::new()
@@ -2352,14 +2373,16 @@ fn test_mihomo_chain_proxy_lifecycle_and_cleared_fallback() {
     node_b.name = "Node B".into();
 
     // 1. 双节点就绪：成功编译出 dialer-proxy 代理实体并置入 PROXY 组首位 (对齐 Mihomo 1.19+ 规范)
-    let mut opts = MihomoConfigOptions::default();
-    opts.chain_proxy_enabled = true;
-    opts.chain_entry_node_name = Some("Node A".into());
-    opts.chain_exit_node_name = Some("Node B".into());
-    opts.url_test_nodes = vec![
-        json!({ "name": "Node A", "type": "ss", "server": "1.1.1.1", "port": 8388, "password": "p", "cipher": "aes-128-gcm" }),
-        json!({ "name": "Node B", "type": "ss", "server": "2.2.2.2", "port": 8388, "password": "p", "cipher": "aes-128-gcm" }),
-    ];
+    let opts = MihomoConfigOptions {
+        chain_proxy_enabled: true,
+        chain_entry_node_name: Some("Node A".into()),
+        chain_exit_node_name: Some("Node B".into()),
+        url_test_nodes: vec![
+            json!({ "name": "Node A", "type": "ss", "server": "1.1.1.1", "port": 8388, "password": "p", "cipher": "aes-128-gcm" }),
+            json!({ "name": "Node B", "type": "ss", "server": "2.2.2.2", "port": 8388, "password": "p", "cipher": "aes-128-gcm" }),
+        ],
+        ..Default::default()
+    };
 
     let plan = lower_options_to_ir(&opts, Some(&node_a));
     let art = MihomoCompiler::new()
@@ -2441,9 +2464,11 @@ fn test_mihomo_chain_proxy_lifecycle_and_cleared_fallback() {
     assert!(proxies_same.iter().all(|p| p["name"] != "链式代理"));
 
     // 5. 跨订阅源直查预热注入 (chain_nodes 实体测试)
-    let mut opts_entity = MihomoConfigOptions::default();
-    opts_entity.chain_proxy_enabled = true;
-    opts_entity.chain_nodes = Some(Box::new((node_a.clone(), node_b.clone())));
+    let opts_entity = MihomoConfigOptions {
+        chain_proxy_enabled: true,
+        chain_nodes: Some(Box::new((node_a.clone(), node_b.clone()))),
+        ..Default::default()
+    };
     let plan_entity = lower_options_to_ir(&opts_entity, Some(&node_a));
     let art_entity = MihomoCompiler::new()
         .compile(&plan_entity)

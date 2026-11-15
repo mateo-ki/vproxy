@@ -416,7 +416,7 @@ fn run_tray_loop(
                 if event == WM_LBUTTONUP
                     || event == WM_LBUTTONDBLCLK
                     || event == 0x0201 // WM_LBUTTONDOWN
-                    || event == (WM_USER + 0)
+                    || event == WM_USER
                     || event == (WM_USER + 1)
                 {
                     crate::startup_log("Tray click event matched -> queueing show-window event");
@@ -485,7 +485,7 @@ fn run_tray_loop(
                                 SetForegroundWindow(hwnd);
                             }
                             let hmenu = CreatePopupMenu();
-                            if hmenu != std::ptr::null_mut() {
+                            if !hmenu.is_null() {
                                 let show_text = "显示主界面\0".encode_utf16().collect::<Vec<u16>>();
                                 AppendMenuW(
                                     hmenu,

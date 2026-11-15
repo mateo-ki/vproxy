@@ -423,7 +423,7 @@ pub async fn register_warp_masque_native(proxy_url: Option<&str>) -> anyhow::Res
     ring::rand::SystemRandom::new()
         .fill(&mut rand_bytes)
         .map_err(|e| anyhow::anyhow!("随机数生成失败: {e}"))?;
-    let rand_b64 = B64.encode(&rand_bytes);
+    let rand_b64 = B64.encode(rand_bytes);
 
     let mut serial_bytes = [0u8; 8];
     ring::rand::SystemRandom::new()

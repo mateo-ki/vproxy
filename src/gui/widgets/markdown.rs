@@ -111,14 +111,20 @@ pub fn parse_inline_spans(text: &str) -> Vec<InlineSpan<'_>> {
     spans
 }
 
-/// 解析常规 Conventional Commit 前缀
-fn parse_list_item_prefix(
-    text: &str,
-) -> (
+/// 列表项前缀解析结果：徽标（文案 + 前景/背景色）、scope、剩余文本。
+type ListItemPrefix<'a> = (
     Option<(&'static str, Color32, Color32)>,
     Option<String>,
-    &str,
-) {
+    &'a str,
+);
+
+/// Conventional Commit 前缀表条目：关键字、徽标文案、配色。
+type CommitPrefix = (&'static str, &'static str, fn() -> (Color32, Color32));
+
+/// 解析常规 Conventional Commit 前缀
+///
+/// 返回（徽标：文案+前景+背景，scope，剩余文本）。
+fn parse_list_item_prefix(text: &str) -> ListItemPrefix<'_> {
     let trimmed = text.trim();
     if let Some(rest) = trimmed.strip_prefix("[x]") {
         return (
@@ -135,7 +141,7 @@ fn parse_list_item_prefix(
         );
     }
 
-    let prefixes: &[(&str, &'static str, fn() -> (Color32, Color32))] = &[
+    let prefixes: &[CommitPrefix] = &[
         ("feat", "新增", || (theme::success(), theme::success_bg())),
         ("feature", "新增", || {
             (theme::success(), theme::success_bg())
@@ -176,21 +182,20 @@ fn parse_list_item_prefix(
     ];
 
     for &(keyword, label, color_fn) in prefixes {
-        if trimmed.starts_with(keyword) {
-            let after_kw = &trimmed[keyword.len()..];
+        if let Some(after_kw) = trimmed.strip_prefix(keyword) {
             if after_kw.starts_with('(') {
                 if let Some(close_idx) = after_kw.find(')') {
                     let scope = &after_kw[1..close_idx];
                     let after_paren = &after_kw[close_idx + 1..];
-                    if after_paren.starts_with(':') {
+                    if let Some(after_colon) = after_paren.strip_prefix(':') {
                         let (fg, bg) = color_fn();
-                        let rest = after_paren[1..].trim_start();
+                        let rest = after_colon.trim_start();
                         return (Some((label, fg, bg)), Some(scope.trim().to_string()), rest);
                     }
                 }
-            } else if after_kw.starts_with(':') {
+            } else if let Some(after_colon) = after_kw.strip_prefix(':') {
                 let (fg, bg) = color_fn();
-                let rest = after_kw[1..].trim_start();
+                let rest = after_colon.trim_start();
                 return (Some((label, fg, bg)), None, rest);
             }
         }
@@ -281,8 +286,10 @@ fn render_inline_markdown(
         320.0
     };
     let spans = parse_inline_spans(text);
-    let mut job = egui::text::LayoutJob::default();
-    job.break_on_newline = true;
+    let mut job = egui::text::LayoutJob {
+        break_on_newline: true,
+        ..Default::default()
+    };
     job.wrap.max_width = wrap_w;
     let mut first_link_url = None;
 
@@ -388,8 +395,10 @@ fn render_list_item(ui: &mut Ui, line: &str, is_unordered: bool) {
         320.0
     };
 
-    let mut job = egui::text::LayoutJob::default();
-    job.break_on_newline = true;
+    let mut job = egui::text::LayoutJob {
+        break_on_newline: true,
+        ..Default::default()
+    };
     job.wrap.max_width = wrap_w;
 
     // 1. 缩进处理
@@ -596,8 +605,10 @@ pub fn render_markdown(ui: &mut Ui, markdown: &str) {
                             });
                             ui.add_space(2.0);
                         }
-                        let mut job = egui::text::LayoutJob::default();
-                        job.break_on_newline = true;
+                        let mut job = egui::text::LayoutJob {
+                            break_on_newline: true,
+                            ..Default::default()
+                        };
                         job.wrap.max_width = (ui.available_width() - 8.0).max(60.0);
                         job.append(
                             &full_code,

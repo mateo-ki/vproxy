@@ -270,10 +270,12 @@ mod refill_tests {
 
     #[test]
     fn refill_options_are_the_cheap_kind() {
-        let mut base = AppSettings::default();
-        base.speedtest_timeout_ms = 2500;
-        base.speedtest_reuse_minutes = 30;
-        base.speedtest_download = true;
+        let base = AppSettings {
+            speedtest_timeout_ms: 2500,
+            speedtest_reuse_minutes: 30,
+            speedtest_download: true,
+            ..Default::default()
+        };
         let opts = refill_opts(&base);
         assert_eq!(
             opts.concurrency, REFILL_CONCURRENCY,

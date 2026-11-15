@@ -373,17 +373,15 @@ fn normalize_vmess(cfg: &mut Value, node: &Node) -> Value {
                 }
             }
         }
-        "h2" | "http" => {
-            if !obj.contains_key("h2-opts") && (!path.is_empty() || !host.is_empty()) {
-                let mut h2 = Map::new();
-                if !path.is_empty() {
-                    h2.insert("path".into(), json!(path));
-                }
-                if !host.is_empty() {
-                    h2.insert("host".into(), json!([host]));
-                }
-                obj.insert("h2-opts".into(), Value::Object(h2));
+        "h2" | "http" if !obj.contains_key("h2-opts") && (!path.is_empty() || !host.is_empty()) => {
+            let mut h2 = Map::new();
+            if !path.is_empty() {
+                h2.insert("path".into(), json!(path));
             }
+            if !host.is_empty() {
+                h2.insert("host".into(), json!([host]));
+            }
+            obj.insert("h2-opts".into(), Value::Object(h2));
         }
         _ => {}
     }
@@ -523,12 +521,10 @@ fn normalize_vless(cfg: &mut Value, node: &Node) -> Value {
                 }
             }
         }
-        "grpc" => {
-            if !obj.contains_key("grpc-opts") {
-                let sn = first_str(obj, &["serviceName", "servicename"]).unwrap_or(path);
-                if !sn.is_empty() {
-                    obj.insert("grpc-opts".into(), json!({ "grpc-service-name": sn }));
-                }
+        "grpc" if !obj.contains_key("grpc-opts") => {
+            let sn = first_str(obj, &["serviceName", "servicename"]).unwrap_or(path);
+            if !sn.is_empty() {
+                obj.insert("grpc-opts".into(), json!({ "grpc-service-name": sn }));
             }
         }
         _ => {}

@@ -89,11 +89,17 @@ pub fn parse_uri(uri: &str, source_id: Option<&str>) -> Option<Node> {
 
 /// query 里宽松读取 insecure 开关（1/true 视为真；兼容各客户端的别名写法）
 fn query_insecure(q: &std::collections::HashMap<String, String>) -> bool {
-    ["insecure", "allowInsecure", "allow_insecure", "skip-cert-verify", "skip_cert_verify"]
-        .iter()
-        .find_map(|k| q.get(*k))
-        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-        .unwrap_or(false)
+    [
+        "insecure",
+        "allowInsecure",
+        "allow_insecure",
+        "skip-cert-verify",
+        "skip_cert_verify",
+    ]
+    .iter()
+    .find_map(|k| q.get(*k))
+    .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+    .unwrap_or(false)
 }
 
 /// ss://uuid@host:port?type=ws&security=tls... is often a mislabeled vless link.
@@ -149,7 +155,7 @@ fn try_parse_mislabeled_ss_as_vmess(uri: &str, source_id: Option<&str>) -> Optio
 fn parse_ss(uri: &str, source_id: Option<&str>) -> Option<Node> {
     let rest = uri.trim_start_matches("ss://").trim_start_matches("SS://");
     let (body, fragment) = split_fragment(rest);
-    let name = fragment.as_deref().map(percent_decode).unwrap_or_default();
+    let name = fragment.map(percent_decode).unwrap_or_default();
 
     // SIP002: ss://base64(method:password)@host:port#name
     //          ss://base64(method:password)@host:port/?plugin=...#name
@@ -157,12 +163,7 @@ fn parse_ss(uri: &str, source_id: Option<&str>) -> Option<Node> {
     if body.contains('@') {
         let (userinfo, host, port) = split_userinfo_hostport(body)?;
         let userinfo_decoded = decode_base64_str(&userinfo).unwrap_or_else(|| userinfo.clone());
-        let (method, password) = if let Some(pair) = userinfo_decoded.split_once(':') {
-            pair
-        } else {
-            // userinfo is raw password without method (rare) — skip
-            return None;
-        };
+        let (method, password) = userinfo_decoded.split_once(':')?;
 
         let query = body.split_once('?').map(|(_, q)| q).unwrap_or("");
         let q = parse_query(query);

@@ -40,7 +40,6 @@ impl VpnApp {
     }
 
     /// 让内核把某个组切到指定成员：`PUT /proxies/{group}`，不重写配置、不掐连接。
-
     pub(crate) fn check_failover(&mut self) {
         // 探测本身不受 `auto_failover` 影响：表头要说实话，就必须一直有实测在跑。
         // 那个开关只决定"测出问题之后要不要自动换出口"（见 handle_failover_probe）。

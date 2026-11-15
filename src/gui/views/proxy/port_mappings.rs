@@ -57,8 +57,8 @@ impl VpnApp {
                     self.node_picker_open = true;
                 }
 
-                if self.new_mapping_node_id.is_some() {
-                    if ui
+                if self.new_mapping_node_id.is_some()
+                    && ui
                         .add(crate::gui::icons::icon_btn_square(Icon::Close, 11.0))
                         .on_hover_text("清除选中的节点")
                         .clicked()
@@ -66,7 +66,6 @@ impl VpnApp {
                         self.new_mapping_node_id = None;
                         self.new_mapping_node_name = None;
                     }
-                }
 
                 ui.add_space(8.0);
                 let add_btn = ui.add(

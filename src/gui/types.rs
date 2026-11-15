@@ -444,6 +444,9 @@ impl RuleDraftKind {
     }
 }
 
+// BgMsg 只经 mpsc 通道按值瞬时传递、从不批量驻留，为压尺寸把 result 装进 Box 会在每次配置刷新时引入一次堆分配，
+// 还要改动全部解构点，收益不值。
+#[allow(clippy::large_enum_variant)]
 pub enum BgMsg {
     Sources(Result<Vec<Source>, String>),
     /// 节点落地 IP 的机房/风控画像。

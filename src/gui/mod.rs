@@ -610,6 +610,8 @@ fn rules_editor_text_from_config(config: &MihomoConfigOptions) -> String {
 }
 
 impl VpnApp {
+    // 构造器按依赖顺序逐项注入（db/collector/speedtester/任务/内核/代理/API 控制器），参数打包会把装配顺序藏进结构体。
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         rt: Arc<Runtime>,
         db: Database,
@@ -1152,9 +1154,7 @@ impl VpnApp {
         url: &'static str,
     ) -> Option<u128> {
         let started = std::time::Instant::now();
-        let Some(client) = client else {
-            return None;
-        };
+        let client = client?;
         match client.get(url).send().await {
             Ok(_) => Some(started.elapsed().as_millis()),
             Err(_) => None,
@@ -3272,7 +3272,7 @@ impl VpnApp {
                 .kernel_groups
                 .iter()
                 .find(|group| group.name == "PROXY")
-                .is_some_and(|group| group.members.iter().any(|member| *member == name))
+                .is_some_and(|group| group.members.contains(&name))
         {
             self.select_kernel_member("PROXY".to_owned(), name.clone());
             self.switching_node_id = None;
@@ -6007,9 +6007,7 @@ impl VpnApp {
 
 impl eframe::App for VpnApp {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        if !self.tick_logic(ctx) {
-            return;
-        }
+        if !self.tick_logic(ctx) {}
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
@@ -6419,10 +6417,13 @@ mod tests {
 
     #[test]
     fn reopened_subscription_editor_keeps_saved_template_through_prepare() {
-        let mut config = MihomoConfigOptions::default();
-        config.rules =
-            crate::proxy::rule_io::parse_rules_text("- DOMAIN-SUFFIX,normal-rules.test,DIRECT")
-                .rules;
+        let mut config = MihomoConfigOptions {
+            rules: crate::proxy::rule_io::parse_rules_text(
+                "- DOMAIN-SUFFIX,normal-rules.test,DIRECT",
+            )
+            .rules,
+            ..Default::default()
+        };
         assert!(!config.rules.is_empty());
         config.routing_mode = RoutingMode::Subscription;
         let template = "- DOMAIN-SUFFIX,subscription-rules.test,PROXY\n- MATCH,PROXY";
@@ -6448,10 +6449,13 @@ mod tests {
 
     #[test]
     fn subscription_without_saved_template_does_not_inherit_normal_rules() {
-        let mut config = MihomoConfigOptions::default();
-        config.rules =
-            crate::proxy::rule_io::parse_rules_text("- DOMAIN-SUFFIX,normal-rules.test,DIRECT")
-                .rules;
+        let mut config = MihomoConfigOptions {
+            rules: crate::proxy::rule_io::parse_rules_text(
+                "- DOMAIN-SUFFIX,normal-rules.test,DIRECT",
+            )
+            .rules,
+            ..Default::default()
+        };
         assert!(!rules_editor_text_from_config(&config).is_empty());
         config.routing_mode = RoutingMode::Subscription;
         assert!(rules_editor_text_from_config(&config).is_empty());
@@ -6598,9 +6602,11 @@ mod tests {
     /// TUN 交接的命令行：两个 flag 各一次、配置能原样读回来、节点 id 带的是要起的那个。
     #[test]
     fn tun_handoff_arguments_carry_config_and_node_once() {
-        let mut options = crate::proxy::MihomoConfigOptions::default();
-        options.mode = ProxyMode::Tun;
-        options.url_test_size = 9;
+        let options = crate::proxy::MihomoConfigOptions {
+            mode: ProxyMode::Tun,
+            url_test_size: 9,
+            ..Default::default()
+        };
         let args =
             VpnApp::tun_handoff_arguments(&options, "node-42").expect("生成交接参数不该失败");
         assert_eq!(args[0], "--elevated-proxy-config-file");
@@ -6731,11 +6737,13 @@ mod tests {
     #[test]
     fn zoom_factor_rescales_the_whole_ui() {
         let ctx = egui::Context::default();
-        let mut input = egui::RawInput::default();
-        input.screen_rect = Some(egui::Rect::from_min_size(
-            egui::Pos2::ZERO,
-            egui::Vec2::new(1280.0, 800.0),
-        ));
+        let mut input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::Vec2::new(1280.0, 800.0),
+            )),
+            ..Default::default()
+        };
         let viewport_id = input.viewport_id;
         input
             .viewports
@@ -6827,7 +6835,7 @@ mod tests {
         n3.name = "C-Node".into();
         n3.latency_ms = Some(90);
 
-        let mut list = vec![n1.clone(), n2.clone(), n3.clone()];
+        let mut list = [n1.clone(), n2.clone(), n3.clone()];
 
         // Test sorting by latency (lowest first)
         list.sort_by_key(|n| {
@@ -6843,7 +6851,7 @@ mod tests {
         );
 
         // Test sorting by name (A-Z)
-        list.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+        list.sort_by_key(|a| a.name.to_lowercase());
         assert_eq!(
             list.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(),
             vec!["2", "1", "3"]
@@ -6917,11 +6925,13 @@ mod tests {
             style.spacing.item_spacing = Vec2::new(10.0, 9.0);
             style.spacing.button_padding = Vec2::new(14.0, 8.0);
         });
-        let mut input = egui::RawInput::default();
-        input.screen_rect = Some(egui::Rect::from_min_size(
-            egui::Pos2::ZERO,
-            Vec2::new(1280.0, 800.0),
-        ));
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                Vec2::new(1280.0, 800.0),
+            )),
+            ..Default::default()
+        };
 
         let mut allocated = 0.0_f32;
         let mut inner_height = 0.0_f32;
@@ -7070,14 +7080,16 @@ mod tests {
     fn palette_search_box_keeps_focus_when_the_result_list_shrinks() {
         // before = 搜索框之前有几个控件；rows = 搜索框之后的结果行数。
         fn probe(ctx: &egui::Context, rows: usize, before: usize, take_focus: bool) -> egui::Id {
-            let mut input = egui::RawInput::default();
-            input.screen_rect = Some(egui::Rect::from_min_size(
-                egui::Pos2::ZERO,
-                Vec2::new(1280.0, 800.0),
-            ));
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    Vec2::new(1280.0, 800.0),
+                )),
+                ..Default::default()
+            };
             let mut edit_id = egui::Id::NULL;
             let mut query = String::new();
-            let _ = crate::gui::run_test_ui(&ctx, input, |ui| {
+            let _ = crate::gui::run_test_ui(ctx, input, |ui| {
                 let ctx = ui.ctx();
                 let _ = egui::Window::new("命令面板").show(ctx, |ui| {
                     for index in 0..before {
@@ -7125,11 +7137,13 @@ mod tests {
             // 和应用里同一份全局样式：按钮本来是 14x8。
             style.spacing.button_padding = Vec2::new(14.0, 8.0);
         });
-        let mut input = egui::RawInput::default();
-        input.screen_rect = Some(egui::Rect::from_min_size(
-            egui::Pos2::ZERO,
-            Vec2::new(1330.0, 800.0),
-        ));
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                Vec2::new(1330.0, 800.0),
+            )),
+            ..Default::default()
+        };
         let mut heights = Vec::new();
         let mut total = 0.0_f32;
         let _ = run_test_ui(&ctx, input, |ui| {
@@ -7188,13 +7202,12 @@ mod tests {
     /// 2. 没焦点时事件照旧留在列表里 —— 那才是全局识别的入口。
     #[test]
     fn a_paste_event_reaches_the_app_unless_a_focused_text_field_claimed_it() {
-        let base = {
-            let mut input = egui::RawInput::default();
-            input.screen_rect = Some(egui::Rect::from_min_size(
+        let base = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
                 egui::Pos2::ZERO,
                 egui::vec2(800.0, 600.0),
-            ));
-            input
+            )),
+            ..Default::default()
         };
         // 帧 1 拿到文本框的矩形；帧 2 决定要不要先点它（拿焦点）；帧 3 喂 Paste。
         let run_case = |click_first: bool| -> (String, bool, bool) {
@@ -7280,7 +7293,7 @@ mod tests {
             text: &mut String,
         ) -> (egui::Rect, egui::Rect, Option<egui::Id>, bool) {
             let mut out = (egui::Rect::NOTHING, egui::Rect::NOTHING, None, false);
-            let _ = crate::gui::run_test_ui(&ctx, input, |ui| {
+            let _ = crate::gui::run_test_ui(ctx, input, |ui| {
                 let ctx = ui.ctx().clone();
                 egui::CentralPanel::default().show(ui, |ui| {
                     out.0 = ui.add(egui::DragValue::new(number)).rect;
@@ -7295,13 +7308,12 @@ mod tests {
             out
         }
 
-        let base = {
-            let mut input = egui::RawInput::default();
-            input.screen_rect = Some(egui::Rect::from_min_size(
+        let base = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
                 egui::Pos2::ZERO,
                 egui::vec2(1200.0, 700.0),
-            ));
-            input
+            )),
+            ..Default::default()
         };
         let click_at = |pos: egui::Pos2| {
             vec![
@@ -7357,11 +7369,13 @@ mod status_bar_room_tests {
         let mut reserved = 0.0_f32;
         let mut out = (0.0_f32, 0.0_f32, 0.0_f32, 0.0_f32);
         for _ in 0..2 {
-            let mut input = egui::RawInput::default();
-            input.screen_rect = Some(egui::Rect::from_min_size(
-                egui::Pos2::ZERO,
-                Vec2::new(width, 60.0),
-            ));
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    Vec2::new(width, 60.0),
+                )),
+                ..Default::default()
+            };
             let _ = crate::gui::run_test_ui(&ctx, input, |ui| {
                 egui::Panel::bottom("status")
                     .frame(egui::Frame::NONE.inner_margin(egui::Margin::symmetric(14, 5)))

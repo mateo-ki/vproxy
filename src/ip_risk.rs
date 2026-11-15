@@ -568,7 +568,6 @@ pub async fn lookup_egress(direct: &reqwest::Client, proxy_url: &str) -> Result<
         match fetch_text(&proxied, url, "出口 IP").await {
             Ok(body) => {
                 let candidate = body
-                    .trim()
                     .split_whitespace()
                     .next()
                     .unwrap_or_default()

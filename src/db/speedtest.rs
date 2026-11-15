@@ -5,6 +5,16 @@ use anyhow::Result;
 use chrono::Utc;
 use sqlx::Row;
 
+/// 批量测速写入行：(节点 id, 是否测通, 延迟 ms, 下载 kbps, 测速内核, 测速方式)。
+pub type SpeedResultRow = (
+    String,
+    bool,
+    Option<i64>,
+    Option<f64>,
+    Option<String>,
+    Option<String>,
+);
+
 impl Database {
     pub async fn update_node_speed(
         &self,
@@ -40,17 +50,7 @@ impl Database {
     }
 
     /// Batch write speed results (transaction). Much faster than per-node UPDATE.
-    pub async fn update_node_speeds_batch(
-        &self,
-        items: &[(
-            String,
-            bool,
-            Option<i64>,
-            Option<f64>,
-            Option<String>,
-            Option<String>,
-        )],
-    ) -> Result<()> {
+    pub async fn update_node_speeds_batch(&self, items: &[SpeedResultRow]) -> Result<()> {
         if items.is_empty() {
             return Ok(());
         }

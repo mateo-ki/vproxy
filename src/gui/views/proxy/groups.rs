@@ -27,67 +27,6 @@ fn override_text_editor(
     )
 }
 
-#[cfg(test)]
-mod editor_tests {
-    use super::*;
-
-    fn editor_frame(
-        ctx: &egui::Context,
-        text: &mut String,
-        editable: bool,
-        events: Vec<egui::Event>,
-    ) -> egui::Id {
-        let input = egui::RawInput {
-            screen_rect: Some(egui::Rect::from_min_size(
-                egui::Pos2::ZERO,
-                egui::vec2(800.0, 600.0),
-            )),
-            events,
-            ..Default::default()
-        };
-        let mut editor_id = None;
-        crate::gui::run_test_ui(ctx, input, |ui| {
-            let response = override_text_editor(ui, text, editable, "");
-            assert_eq!(response.enabled(), editable);
-            editor_id = Some(response.id);
-        });
-        editor_id.unwrap()
-    }
-
-    #[test]
-    fn saving_override_editor_rejects_input_and_accepts_it_after_save() {
-        for original in ["dns:\n  enable: true", "fn main(config) { config }"] {
-            let ctx = egui::Context::default();
-            let mut text = original.to_owned();
-            let editor = editor_frame(&ctx, &mut text, true, Vec::new());
-            ctx.memory_mut(|memory| memory.request_focus(editor));
-            editor_frame(
-                &ctx,
-                &mut text,
-                false,
-                vec![egui::Event::Text("during-save".into())],
-            );
-            assert_eq!(
-                text, original,
-                "saving must not accept edits that a response would erase"
-            );
-
-            let editor = editor_frame(&ctx, &mut text, true, Vec::new());
-            ctx.memory_mut(|memory| memory.request_focus(editor));
-            editor_frame(
-                &ctx,
-                &mut text,
-                true,
-                vec![egui::Event::Text("after-save".into())],
-            );
-            assert!(
-                text.contains("after-save"),
-                "the editor must become editable again"
-            );
-        }
-    }
-}
-
 impl VpnApp {
     pub(crate) fn ui_proxy_groups(&mut self, ui: &mut Ui) {
         ui.set_width(ui.available_width());
@@ -1044,11 +983,72 @@ pub(crate) fn visible_group_names(
     for group in kernel_groups {
         if group.members.is_empty()
             || matches!(group.name.as_str(), "GLOBAL" | "DIRECT" | "REJECT" | "PASS")
-            || names.iter().any(|shown| *shown == group.name)
+            || names.contains(&group.name)
         {
             continue;
         }
         names.push(group.name.clone());
     }
     names
+}
+
+#[cfg(test)]
+mod editor_tests {
+    use super::*;
+
+    fn editor_frame(
+        ctx: &egui::Context,
+        text: &mut String,
+        editable: bool,
+        events: Vec<egui::Event>,
+    ) -> egui::Id {
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(800.0, 600.0),
+            )),
+            events,
+            ..Default::default()
+        };
+        let mut editor_id = None;
+        crate::gui::run_test_ui(ctx, input, |ui| {
+            let response = override_text_editor(ui, text, editable, "");
+            assert_eq!(response.enabled(), editable);
+            editor_id = Some(response.id);
+        });
+        editor_id.unwrap()
+    }
+
+    #[test]
+    fn saving_override_editor_rejects_input_and_accepts_it_after_save() {
+        for original in ["dns:\n  enable: true", "fn main(config) { config }"] {
+            let ctx = egui::Context::default();
+            let mut text = original.to_owned();
+            let editor = editor_frame(&ctx, &mut text, true, Vec::new());
+            ctx.memory_mut(|memory| memory.request_focus(editor));
+            editor_frame(
+                &ctx,
+                &mut text,
+                false,
+                vec![egui::Event::Text("during-save".into())],
+            );
+            assert_eq!(
+                text, original,
+                "saving must not accept edits that a response would erase"
+            );
+
+            let editor = editor_frame(&ctx, &mut text, true, Vec::new());
+            ctx.memory_mut(|memory| memory.request_focus(editor));
+            editor_frame(
+                &ctx,
+                &mut text,
+                true,
+                vec![egui::Event::Text("after-save".into())],
+            );
+            assert!(
+                text.contains("after-save"),
+                "the editor must become editable again"
+            );
+        }
+    }
 }

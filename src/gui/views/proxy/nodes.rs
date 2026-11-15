@@ -302,20 +302,19 @@ impl VpnApp {
                             ui.label(RichText::new(hint).small().color(theme::muted()));
                             ui.add_space(12.0);
                             ui.horizontal(|ui| {
-                                if !self.proxy_search.is_empty()
-                                    || self.proxy_region_filter != "all"
+                                if (!self.proxy_search.is_empty()
+                                    || self.proxy_region_filter != "all")
+                                    && ui.button("清除筛选与搜索").clicked()
                                 {
-                                    if ui.button("清除筛选与搜索").clicked() {
-                                        self.proxy_search.clear();
-                                        self.proxy_region_filter = "all".into();
-                                        self.proxy_page = 1;
-                                    }
+                                    self.proxy_search.clear();
+                                    self.proxy_region_filter = "all".into();
+                                    self.proxy_page = 1;
                                 }
-                                if self.proxy_selected_group != "全部" {
-                                    if ui.button("查看全部节点").clicked() {
-                                        self.proxy_selected_group = "全部".into();
-                                        self.proxy_page = 1;
-                                    }
+                                if self.proxy_selected_group != "全部"
+                                    && ui.button("查看全部节点").clicked()
+                                {
+                                    self.proxy_selected_group = "全部".into();
+                                    self.proxy_page = 1;
                                 }
                             });
                             ui.add_space(10.0);

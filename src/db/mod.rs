@@ -384,7 +384,7 @@ pub(crate) fn dedupe_keep_score(n: &Node) -> i64 {
         Some(true) => {
             score += 1_000_000;
             if let Some(ms) = n.latency_ms {
-                score += (100_000 - ms.clamp(0, 99_999)) as i64;
+                score += 100_000 - ms.clamp(0, 99_999);
             }
         }
         Some(false) => score += 10_000,

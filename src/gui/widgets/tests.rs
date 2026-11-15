@@ -16,11 +16,13 @@ mod sparkline_tests {
     /// 返回 (图拿到的宽度, 整行占掉的高度, 这一行之后还剩多少高度)。
     fn probe(window_w: f32, samples: usize, active: bool) -> (f32, f32, f32) {
         let ctx = egui::Context::default();
-        let mut input = RawInput::default();
-        input.screen_rect = Some(Rect::from_min_size(
-            egui::Pos2::ZERO,
-            Vec2::new(window_w, 800.0),
-        ));
+        let input = RawInput {
+            screen_rect: Some(Rect::from_min_size(
+                egui::Pos2::ZERO,
+                Vec2::new(window_w, 800.0),
+            )),
+            ..Default::default()
+        };
         let mut room = -1.0_f32;
         let mut row = (-1.0_f32, -1.0_f32);
         let _ = crate::gui::run_test_ui(&ctx, input, |ui| {
@@ -81,11 +83,13 @@ mod sparkline_tests {
     fn health_strip_scales_with_the_room_it_has() {
         fn probe(window_width: f32) -> (f32, f32, f32) {
             let ctx = egui::Context::default();
-            let mut input = RawInput::default();
-            input.screen_rect = Some(Rect::from_min_size(
-                egui::Pos2::ZERO,
-                Vec2::new(window_width, 200.0),
-            ));
+            let input = RawInput {
+                screen_rect: Some(Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    Vec2::new(window_width, 200.0),
+                )),
+                ..Default::default()
+            };
             let mut drawn = (0.0, 0.0, 0.0);
             let _ = crate::gui::run_test_ui(&ctx, input, |ui| {
                 CentralPanel::default().show(ui, |ui| {
@@ -124,11 +128,13 @@ mod sparkline_tests {
     fn the_failed_hours_paint_red() {
         fn fills(buckets: &[i8; 24]) -> Vec<Color32> {
             let ctx = egui::Context::default();
-            let mut input = RawInput::default();
-            input.screen_rect = Some(Rect::from_min_size(
-                egui::Pos2::ZERO,
-                Vec2::new(1280.0, 200.0),
-            ));
+            let input = RawInput {
+                screen_rect: Some(Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    Vec2::new(1280.0, 200.0),
+                )),
+                ..Default::default()
+            };
             let mut out = Vec::new();
             let _ = crate::gui::run_test_ui(&ctx, input, |ui| {
                 CentralPanel::default().show(ui, |ui| {
@@ -250,11 +256,13 @@ mod button_radius_tests {
     /// 读这一帧里画出来的所有"按钮那么高"的矩形的圆角。
     fn radii(window: f32) -> Vec<CornerRadius> {
         let ctx = egui::Context::default();
-        let mut input = RawInput::default();
-        input.screen_rect = Some(Rect::from_min_size(
-            egui::Pos2::ZERO,
-            Vec2::new(window, 200.0),
-        ));
+        let input = RawInput {
+            screen_rect: Some(Rect::from_min_size(
+                egui::Pos2::ZERO,
+                Vec2::new(window, 200.0),
+            )),
+            ..Default::default()
+        };
         let mut out = Vec::new();
         let _ = crate::gui::run_test_ui(&ctx, input, |ui| {
             CentralPanel::default().show(ui, |ui| {

@@ -186,6 +186,7 @@ pub fn sync_geo_to_all_kernels(src_dir: &Path) -> Vec<String> {
 /// meow 内核 home 目录的 geo 准备：
 /// 1. 复用 mihomo 目录的 geosite.dat / geoip.dat（meow 的发现路径接受 protobuf dat，实测加载成功）；
 /// 2. Country.mmdb 缺失时从镜像下载（meow 自己也会下，但走 GitHub，境内大概率卡住启动）。
+///
 /// 文件已就位（大小达标）时跳过，幂等。
 pub async fn ensure_meow_home_geo(home: &Path, proxy_url: Option<&str>) -> Result<String> {
     std::fs::create_dir_all(home)?;
@@ -242,12 +243,11 @@ pub async fn ensure_meow_home_geo(home: &Path, proxy_url: Option<&str>) -> Resul
             if std::fs::metadata(&vp_cand)
                 .map(|m| m.len() >= MIN_MMDB_BYTES)
                 .unwrap_or(false)
+                && link_or_copy(&vp_cand, &mmdb).is_ok()
             {
-                if link_or_copy(&vp_cand, &mmdb).is_ok() {
-                    mmdb_ok = true;
-                    report.push("Country.mmdb 已从 VP-Core 复用".into());
-                    break;
-                }
+                mmdb_ok = true;
+                report.push("Country.mmdb 已从 VP-Core 复用".into());
+                break;
             }
         }
     }

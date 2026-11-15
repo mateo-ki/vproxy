@@ -17,7 +17,7 @@ pub struct LatencySpectrumStats {
 }
 
 impl LatencySpectrumStats {
-    pub fn from_latencies<'a>(latencies: impl IntoIterator<Item = Option<i64>>) -> Self {
+    pub fn from_latencies(latencies: impl IntoIterator<Item = Option<i64>>) -> Self {
         let mut stats = Self::default();
         for lat in latencies {
             stats.total += 1;

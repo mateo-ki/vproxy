@@ -60,6 +60,10 @@ unsafe fn c_to_str<'a>(ptr: *const c_char) -> Option<&'a str> {
 /// - 失败：JSON 错误对象 `{"error": "..."}`
 ///
 /// 注意：返回的字符串指针必须调用 [`vpn_free_string`] 释放。
+///
+/// # Safety
+/// 调用方必须保证 `content` 要么为 NULL，要么指向一段以 NUL 结尾、在本次调用期间
+/// 保持有效的合法 UTF-8 C 字符串。
 #[no_mangle]
 pub unsafe extern "C" fn vpn_parse_subscription(content: *const c_char) -> *mut c_char {
     let Some(raw_content) = c_to_str(content) else {
@@ -74,6 +78,10 @@ pub unsafe extern "C" fn vpn_parse_subscription(content: *const c_char) -> *mut 
 }
 
 /// 快捷获取订阅文本中包含的可用节点数量。
+///
+/// # Safety
+/// 调用方必须保证 `content` 要么为 NULL，要么指向一段以 NUL 结尾、在本次调用期间
+/// 保持有效的合法 UTF-8 C 字符串。
 #[no_mangle]
 pub unsafe extern "C" fn vpn_parse_nodes_count(content: *const c_char) -> i32 {
     let Some(raw_content) = c_to_str(content) else {
@@ -95,6 +103,10 @@ pub unsafe extern "C" fn vpn_parse_nodes_count(content: *const c_char) -> i32 {
 /// - 失败：以 `{"error": "..."}` 格式返回错误原因
 ///
 /// 注意：返回的字符串指针必须调用 [`vpn_free_string`] 释放。
+///
+/// # Safety
+/// 调用方必须保证三个指针参数要么为 NULL，要么各自指向一段以 NUL 结尾、在本次
+/// 调用期间保持有效的合法 UTF-8 C 字符串。
 #[no_mangle]
 pub unsafe extern "C" fn vpn_compile_config(
     kernel_kind: *const c_char,
@@ -127,10 +139,10 @@ pub unsafe extern "C" fn vpn_compile_config(
     let result = match k_str.to_ascii_lowercase().as_str() {
         "mihomo" | "clash" => MihomoCompiler::default().compile(&plan),
         "sing-box" | "singbox" => SingBoxCompiler::default().compile(&plan),
-        "vp-core" | "vpcore" | "vp_core" => VpCoreCompiler::default().compile(&plan),
+        "vp-core" | "vpcore" | "vp_core" => VpCoreCompiler.compile(&plan),
         "xray" => XrayCompiler::default().compile(&plan),
         "shoes" => ShoesCompiler::default().compile(&plan),
-        "meow" => MeowCompiler::default().compile(&plan),
+        "meow" => MeowCompiler.compile(&plan),
         other => return to_c_string(format!(r#"{{"error":"unsupported kernel kind: {other}"}}"#)),
     };
 
@@ -155,6 +167,10 @@ pub unsafe extern "C" fn vpn_compile_config(
 /// 返回值：
 /// - >= 0：握手耗时（毫秒）
 /// - -1：连接超时或解析失败
+///
+/// # Safety
+/// 调用方必须保证 `host` 要么为 NULL，要么指向一段以 NUL 结尾、在本次调用期间
+/// 保持有效的合法 UTF-8 C 字符串。
 #[no_mangle]
 pub unsafe extern "C" fn vpn_test_tcp_latency(
     host: *const c_char,
@@ -195,21 +211,40 @@ pub extern "C" fn vproxy_version() -> *const c_char {
     vpn_version()
 }
 
+/// 释放由本 FFI 模块分配返回的 C 字符串指针（[`vpn_free_string`] 的品牌别名）。
+///
+/// # Safety
+/// 调用方必须确保传入的指针是由本库 FFI 函数返回的有效堆分配指针，且未被重复释放。
 #[no_mangle]
 pub unsafe extern "C" fn vproxy_free_string(ptr: *mut c_char) {
     vpn_free_string(ptr);
 }
 
+/// 解析订阅文本或多行节点链接为 JSON 字符串（[`vpn_parse_subscription`] 的品牌别名）。
+///
+/// # Safety
+/// 调用方必须保证 `content` 要么为 NULL，要么指向一段以 NUL 结尾、在本次调用期间
+/// 保持有效的合法 UTF-8 C 字符串；返回指针须用 [`vproxy_free_string`] 释放。
 #[no_mangle]
 pub unsafe extern "C" fn vproxy_parse_subscription(content: *const c_char) -> *mut c_char {
     vpn_parse_subscription(content)
 }
 
+/// 快捷获取订阅文本中包含的可用节点数量（[`vpn_parse_nodes_count`] 的品牌别名）。
+///
+/// # Safety
+/// 调用方必须保证 `content` 要么为 NULL，要么指向一段以 NUL 结尾、在本次调用期间
+/// 保持有效的合法 UTF-8 C 字符串。
 #[no_mangle]
 pub unsafe extern "C" fn vproxy_parse_nodes_count(content: *const c_char) -> i32 {
     vpn_parse_nodes_count(content)
 }
 
+/// 将节点与配置选项编译为目标内核配置（[`vpn_compile_config`] 的品牌别名）。
+///
+/// # Safety
+/// 调用方必须保证三个指针参数要么为 NULL，要么各自指向一段以 NUL 结尾、在本次
+/// 调用期间保持有效的合法 UTF-8 C 字符串；返回指针须用 [`vproxy_free_string`] 释放。
 #[no_mangle]
 pub unsafe extern "C" fn vproxy_compile_config(
     kernel_kind: *const c_char,
@@ -219,6 +254,11 @@ pub unsafe extern "C" fn vproxy_compile_config(
     vpn_compile_config(kernel_kind, node_json, options_json)
 }
 
+/// 快速轻量 TCP 握手测速（[`vpn_test_tcp_latency`] 的品牌别名）。
+///
+/// # Safety
+/// 调用方必须保证 `host` 要么为 NULL，要么指向一段以 NUL 结尾、在本次调用期间
+/// 保持有效的合法 UTF-8 C 字符串。
 #[no_mangle]
 pub unsafe extern "C" fn vproxy_test_tcp_latency(
     host: *const c_char,

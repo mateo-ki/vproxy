@@ -819,18 +819,18 @@ pub fn select_proxy_kernel_preference_for_node_with(
     let (kind, notice) = select_proxy_kernel_preference_for_node_base(
         node, preference, allow_xray, has_tun, &available,
     )?;
-    if kind != KernelKind::VpCore && node_uses_xhttp_transport(node) {
-        if KernelKind::VpCore.supports_proxy_protocol(&node.protocol)
-            && is_node_incompatible_with_vpcore(node).is_none()
-            && available(KernelKind::VpCore)
-        {
-            const UPGRADE: &str = "XHTTP/SplitHTTP 传输层仅 VP-Core 支持，已自动改由 VP-Core 运行";
-            let merged = match notice {
-                Some(n) => format!("{n}；{UPGRADE}"),
-                None => UPGRADE.to_string(),
-            };
-            return Ok((KernelKind::VpCore, Some(merged)));
-        }
+    if kind != KernelKind::VpCore
+        && node_uses_xhttp_transport(node)
+        && KernelKind::VpCore.supports_proxy_protocol(&node.protocol)
+        && is_node_incompatible_with_vpcore(node).is_none()
+        && available(KernelKind::VpCore)
+    {
+        const UPGRADE: &str = "XHTTP/SplitHTTP 传输层仅 VP-Core 支持，已自动改由 VP-Core 运行";
+        let merged = match notice {
+            Some(n) => format!("{n}；{UPGRADE}"),
+            None => UPGRADE.to_string(),
+        };
+        return Ok((KernelKind::VpCore, Some(merged)));
     }
     Ok((kind, notice))
 }
@@ -1385,8 +1385,8 @@ Use tags: with_gvisor
         let working_dir = PathBuf::from("somewhere").join("vproxy");
         let candidates = kernel_candidates(
             KernelKind::Mihomo,
-            Some(&executable.as_path()),
-            Some(&working_dir.as_path()),
+            Some(executable.as_path()),
+            Some(working_dir.as_path()),
         );
 
         assert_eq!(candidates.len(), 2);

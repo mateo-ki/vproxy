@@ -648,13 +648,11 @@ fn has_bracketed_or_prefixed(text: &str, tok: &str) -> bool {
             } else {
                 None
             };
-            let prev_bracket = prev.map_or(true, |b| {
-                matches!(b, b'[' | b'(' | b'-' | b'_' | b' ' | b'|')
-            });
-            let next_is_digit = next.map_or(false, |b| b.is_ascii_digit());
-            let next_is_delim = next.map_or(true, |b| {
-                matches!(b, b']' | b')' | b'-' | b'_' | b' ' | b'|')
-            });
+            let prev_bracket =
+                prev.is_none_or(|b| matches!(b, b'[' | b'(' | b'-' | b'_' | b' ' | b'|'));
+            let next_is_digit = next.is_some_and(|b| b.is_ascii_digit());
+            let next_is_delim =
+                next.is_none_or(|b| matches!(b, b']' | b')' | b'-' | b'_' | b' ' | b'|'));
             let has_strict_delimiter = prev.is_some_and(|b| matches!(b, b'[' | b'(' | b'-' | b'_'))
                 || next.is_some_and(|b| matches!(b, b']' | b')' | b'-' | b'_'));
 

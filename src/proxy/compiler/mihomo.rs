@@ -625,10 +625,10 @@ impl BackendCompiler for MihomoCompiler {
             for p in &mut candidate_proxies {
                 if let Some(obj) = p.as_object_mut() {
                     let p_type = obj.get("type").and_then(Value::as_str).unwrap_or("");
-                    if matches!(p_type, "hysteria" | "hysteria2" | "tuic") {
-                        if !obj.contains_key("ports") {
-                            obj.insert("ports".into(), Value::String(ports_str.clone()));
-                        }
+                    if matches!(p_type, "hysteria" | "hysteria2" | "tuic")
+                        && !obj.contains_key("ports")
+                    {
+                        obj.insert("ports".into(), Value::String(ports_str.clone()));
                     }
                 }
             }
@@ -961,10 +961,8 @@ impl BackendCompiler for MihomoCompiler {
                         sub_groups_val.get("proxy-groups").and_then(Value::as_array)
                     {
                         Some(arr.clone())
-                    } else if let Some(arr) = sub_groups_val.as_array() {
-                        Some(arr.clone())
                     } else {
-                        None
+                        sub_groups_val.as_array().cloned()
                     };
 
                     if let Some(groups) = user_groups {
@@ -1216,10 +1214,8 @@ impl BackendCompiler for MihomoCompiler {
                         override_val.get("proxy-groups").and_then(Value::as_array)
                     {
                         Some(arr.clone())
-                    } else if let Some(arr) = override_val.as_array() {
-                        Some(arr.clone())
                     } else {
-                        None
+                        override_val.as_array().cloned()
                     };
 
                     if let Some(groups) = user_groups {
@@ -1432,11 +1428,9 @@ impl BackendCompiler for MihomoCompiler {
             if !dns_hijack.iter().any(|h| h.contains("tcp://")) {
                 dns_hijack.push("tcp://any:53".into());
             }
-            if plan.dns.ipv6 {
-                if !dns_hijack.iter().any(|h| h.contains("[::]:53")) {
-                    dns_hijack.push("tcp://[::]:53".into());
-                    dns_hijack.push("udp://[::]:53".into());
-                }
+            if plan.dns.ipv6 && !dns_hijack.iter().any(|h| h.contains("[::]:53")) {
+                dns_hijack.push("tcp://[::]:53".into());
+                dns_hijack.push("udp://[::]:53".into());
             }
             config["tun"] = json!({
                 "enable": true,

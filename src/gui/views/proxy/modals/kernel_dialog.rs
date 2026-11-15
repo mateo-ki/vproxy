@@ -66,8 +66,10 @@ impl VpnApp {
                 );
                 for option in SOURCE_OPTIONS {
                     let selected = self.kernel_dialog_source == option.id;
-                    let mut job = egui::text::LayoutJob::default();
-                    job.break_on_newline = true;
+                    let mut job = egui::text::LayoutJob {
+                        break_on_newline: true,
+                        ..Default::default()
+                    };
                     job.wrap.max_width = SOURCE_W - 2.0 * PAD - DOT_W;
                     job.append(
                         option.label,

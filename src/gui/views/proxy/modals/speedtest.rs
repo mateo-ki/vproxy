@@ -272,6 +272,8 @@ fn draw_stage_flow(ui: &mut Ui, w: f32, phase: usize) {
 }
 
 /// 底部 2x2 指标小卡片 (下载、上传、延迟、抖动)
+// 纯 UI 绘制辅助：同 charts.rs 的卡片容器，参数打包收益低。
+#[allow(clippy::too_many_arguments)]
 fn draw_metric_subcard(
     ui: &mut Ui,
     w: f32,
@@ -328,6 +330,8 @@ fn draw_metric_subcard(
 }
 
 /// 实时速率平滑曲线卡片（双曲线：下载与上传，独立存储，带 X 时间轴与 Y 速率轴，支持鼠标悬浮数据探针）
+// 纯 UI 绘制辅助：曲线数据与状态参数逐项直读更清晰。
+#[allow(clippy::too_many_arguments)]
 fn draw_realtime_rate_chart(
     ui: &mut Ui,
     w: f32,
@@ -366,7 +370,7 @@ fn draw_realtime_rate_chart(
             _ => "实时速率 · 探测中".to_string(),
         }
     } else if peak_mbps > 0.1 {
-        format!("实时速率 (已完成)")
+        "实时速率 (已完成)".to_string()
     } else {
         "实时速率".to_string()
     };
@@ -1198,7 +1202,7 @@ impl VpnApp {
                                                 let raw_name = if let Some(ref node) = selected_node {
                                                     clean_node_display_name(&node.name)
                                                 } else {
-                                                    "点击选择测速节点".into()
+                                                    "点击选择测速节点"
                                                 };
                                                 // 限制右侧节点名称最大字数，确保国家代码与联网标志之间拥有充裕间距
                                                 let node_display = if raw_name.chars().count() > 14 {

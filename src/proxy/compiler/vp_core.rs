@@ -248,10 +248,9 @@ impl BackendCompiler for VpCoreCompiler {
                                 | "vless"
                                 | "trojan"
                                 | "socks5"
-                        ) {
-                            if !po.contains_key("udp") {
-                                po.insert("udp".into(), serde_json::json!(true));
-                            }
+                        ) && !po.contains_key("udp")
+                        {
+                            po.insert("udp".into(), serde_json::json!(true));
                         }
 
                         // 彻底清理重名 alias 字段，防止 serde 抛出 duplicate field `server_name` 错误
@@ -325,7 +324,7 @@ impl BackendCompiler for VpCoreCompiler {
                     for g in groups.iter_mut() {
                         if let Some(members) = g.get_mut("proxies").and_then(|m| m.as_array_mut()) {
                             members.retain(|m| {
-                                m.as_str().map_or(true, |name| !dropped_set.contains(name))
+                                m.as_str().is_none_or(|name| !dropped_set.contains(name))
                             });
                             if members.is_empty() {
                                 members.push(serde_json::json!("DIRECT"));
@@ -677,8 +676,10 @@ mod tests {
                 "network": "tcp"
             }),
         );
-        let mut options = MihomoConfigOptions::default();
-        options.mode = ProxyMode::Tun;
+        let options = MihomoConfigOptions {
+            mode: ProxyMode::Tun,
+            ..Default::default()
+        };
         let plan = crate::proxy::ir::lower_options_to_ir(&options, Some(&node));
         let artifact = VpCoreCompiler.compile(&plan).expect("compile success");
         let yaml = match artifact {
@@ -709,8 +710,10 @@ mod tests {
                 "udp": true
             }),
         );
-        let mut options = MihomoConfigOptions::default();
-        options.mode = ProxyMode::Tun;
+        let options = MihomoConfigOptions {
+            mode: ProxyMode::Tun,
+            ..Default::default()
+        };
         let plan = crate::proxy::ir::lower_options_to_ir(&options, Some(&node));
         let artifact = VpCoreCompiler.compile(&plan).expect("compile success");
         let yaml = match artifact {
@@ -734,8 +737,10 @@ mod tests {
                 "password": "pwd"
             }),
         );
-        let mut options = MihomoConfigOptions::default();
-        options.mode = ProxyMode::System;
+        let options = MihomoConfigOptions {
+            mode: ProxyMode::System,
+            ..Default::default()
+        };
         let plan = crate::proxy::ir::lower_options_to_ir(&options, Some(&node));
         let artifact = VpCoreCompiler.compile(&plan).expect("compile success");
         let yaml = match artifact {
@@ -775,16 +780,18 @@ mod tests {
                 "password": "pwd"
             }),
         );
-        let mut options = MihomoConfigOptions::default();
-        options.override_yaml = Some(
-            r#"
+        let options = MihomoConfigOptions {
+            override_yaml: Some(
+                r#"
 rules:
   - GEOSITE,google,美国节点
   - GEOIP,google,美国节点,no-resolve
   - GEOIP,CN,DIRECT,no-resolve
 "#
-            .into(),
-        );
+                .into(),
+            ),
+            ..Default::default()
+        };
         let plan = crate::proxy::ir::lower_options_to_ir(&options, Some(&node));
         let artifact = VpCoreCompiler.compile(&plan).expect("compile success");
         let yaml = match artifact {
@@ -858,31 +865,33 @@ rules:
             "vless",
             json!({"uuid": "aaaaaaaa-bbbb-4ccc-8ddd-000000000050"}),
         );
-        let mut options = MihomoConfigOptions::default();
-        options.url_test = true;
-        options.url_test_size = 5;
-        options.url_test_nodes = vec![
-            json!({
-                "name": "good-ws", "type": "vless", "server": "1.2.3.4", "port": 443,
-                "uuid": "aaaaaaaa-bbbb-4ccc-8ddd-000000000051", "network": "ws"
-            }),
-            json!({
-                "name": "good-xhttp", "type": "vless", "server": "1.2.3.4", "port": 443,
-                "uuid": "aaaaaaaa-bbbb-4ccc-8ddd-000000000052", "network": "xhttp",
-                "xhttp-opts": { "path": "/dl", "mode": "packet-up" }
-            }),
-            json!({
-                "name": "raw-alias", "type": "vmess", "server": "1.2.3.4", "port": 80,
-                "uuid": "aaaaaaaa-bbbb-4ccc-8ddd-000000000053", "alterId": "0",
-                "cipher": "auto", "network": "raw"
-            }),
-            json!({
-                "name": "good-juicity", "type": "juicity", "server": "1.2.3.4", "port": 8443,
-                "uuid": "aaaaaaaa-bbbb-4ccc-8ddd-000000000054", "password": "pw",
-                "congestion-control": "bbr", "congestion_control": "bbr",
-                "insecure": true, "allowInsecure": true
-            }),
-        ];
+        let options = MihomoConfigOptions {
+            url_test: true,
+            url_test_size: 5,
+            url_test_nodes: vec![
+                json!({
+                    "name": "good-ws", "type": "vless", "server": "1.2.3.4", "port": 443,
+                    "uuid": "aaaaaaaa-bbbb-4ccc-8ddd-000000000051", "network": "ws"
+                }),
+                json!({
+                    "name": "good-xhttp", "type": "vless", "server": "1.2.3.4", "port": 443,
+                    "uuid": "aaaaaaaa-bbbb-4ccc-8ddd-000000000052", "network": "xhttp",
+                    "xhttp-opts": { "path": "/dl", "mode": "packet-up" }
+                }),
+                json!({
+                    "name": "raw-alias", "type": "vmess", "server": "1.2.3.4", "port": 80,
+                    "uuid": "aaaaaaaa-bbbb-4ccc-8ddd-000000000053", "alterId": "0",
+                    "cipher": "auto", "network": "raw"
+                }),
+                json!({
+                    "name": "good-juicity", "type": "juicity", "server": "1.2.3.4", "port": 8443,
+                    "uuid": "aaaaaaaa-bbbb-4ccc-8ddd-000000000054", "password": "pw",
+                    "congestion-control": "bbr", "congestion_control": "bbr",
+                    "insecure": true, "allowInsecure": true
+                }),
+            ],
+            ..Default::default()
+        };
         let plan = crate::proxy::ir::lower_options_to_ir(&options, Some(&node));
         let artifact = VpCoreCompiler.compile(&plan).expect("compile success");
         let yaml = match artifact {
@@ -1061,8 +1070,10 @@ rules:
                 "ports": "20000-30000"
             }),
         );
-        let mut options = MihomoConfigOptions::default();
-        options.mode = ProxyMode::Tun;
+        let mut options = MihomoConfigOptions {
+            mode: ProxyMode::Tun,
+            ..Default::default()
+        };
         options.dns.ipv6 = true;
         let plan = crate::proxy::ir::lower_options_to_ir(&options, Some(&node));
         let artifact = VpCoreCompiler.compile(&plan).expect("compile success");

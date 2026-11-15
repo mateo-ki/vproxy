@@ -21,6 +21,16 @@ pub(crate) struct PreservedLatency {
     pub(crate) latency_tested_at: Option<String>,
 }
 
+/// 清洗无效主机时从 SQL 直取的最小行：(id, enabled, latency_kernel, latency_ms, latency_test_kind, server)。
+type ScrubHostRow = (
+    String,
+    bool,
+    Option<i64>,
+    Option<f64>,
+    Option<String>,
+    Option<String>,
+);
+
 #[inline]
 pub(crate) fn contains_ignore_ascii_case(haystack: &str, needle: &str) -> bool {
     if needle.is_empty() {
@@ -381,7 +391,7 @@ impl Database {
                     if value.eq_ignore_ascii_case("all") {
                         true
                     } else if value.eq_ignore_ascii_case("OTHER") {
-                        node.country.as_deref().map_or(true, |c| {
+                        node.country.as_deref().is_none_or(|c| {
                             !["HK", "JP", "US", "SG", "TW", "KR", "GB", "DE"].contains(&c)
                         })
                     } else {
@@ -414,19 +424,19 @@ impl Database {
             }
         }
         if let Some(proto) = protocol {
-            if !proto.is_empty() && !proto.eq_ignore_ascii_case("all") {
-                if !node.protocol.eq_ignore_ascii_case(proto) {
-                    return false;
-                }
+            if !proto.is_empty()
+                && !proto.eq_ignore_ascii_case("all")
+                && !node.protocol.eq_ignore_ascii_case(proto)
+            {
+                return false;
             }
         }
         if let Some(kw) = keyword {
-            if !kw.is_empty() {
-                if !contains_ignore_ascii_case(&node.name, kw)
-                    && !contains_ignore_ascii_case(&node.server, kw)
-                {
-                    return false;
-                }
+            if !kw.is_empty()
+                && !contains_ignore_ascii_case(&node.name, kw)
+                && !contains_ignore_ascii_case(&node.server, kw)
+            {
+                return false;
             }
         }
         if let Some(lat) = latency {
@@ -441,10 +451,8 @@ impl Database {
                         return false;
                     }
                 }
-                "untested" => {
-                    if node.latency_ok.is_some() {
-                        return false;
-                    }
+                "untested" if node.latency_ok.is_some() => {
+                    return false;
                 }
                 _ => {}
             }
@@ -452,7 +460,7 @@ impl Database {
         if let Some(c) = country {
             if !c.eq_ignore_ascii_case("all") {
                 if c.eq_ignore_ascii_case("OTHER") {
-                    let is_major = node.country.as_deref().map_or(false, |code| {
+                    let is_major = node.country.as_deref().is_some_and(|code| {
                         ["HK", "JP", "US", "SG", "TW", "KR", "GB", "DE"].contains(&code)
                     });
                     if is_major {
@@ -486,6 +494,8 @@ impl Database {
         nodes
     }
 
+    // 列表查询的过滤/分页/排序参数一一对应 API 查询串字段，打包成结构体会连带改动 API 层与全部调用点，收益不大。
+    #[allow(clippy::too_many_arguments)]
     pub async fn list_nodes(
         &self,
         protocol: Option<&str>,
@@ -940,10 +950,7 @@ impl Database {
                 if config.as_object().map(|map| map.is_empty()).unwrap_or(true) {
                     continue;
                 }
-                fingerprints.insert(
-                    id,
-                    fingerprint_from_parts(protocol, &server, *port, &config),
-                );
+                fingerprints.insert(id, fingerprint_from_parts(protocol, server, *port, &config));
             }
         }
 
@@ -1326,14 +1333,7 @@ impl Database {
     pub async fn scrub_invalid_hosts(&self) -> Result<u64> {
         // 只需要 id/server/上次测速的内核与方式：绝不能走 load_nodes，那会把全部
         // 节点的 raw+config 读出来并逐条解析 JSON，和首屏渲染抢时间。
-        let mut items: Vec<(
-            String,
-            bool,
-            Option<i64>,
-            Option<f64>,
-            Option<String>,
-            Option<String>,
-        )> = Vec::new();
+        let mut items: Vec<ScrubHostRow> = Vec::new();
         for (_scope, pool) in self.active_node_pools(None).await? {
             let rows =
                 sqlx::query("SELECT id, server, latency_kernel, latency_test_kind FROM nodes")

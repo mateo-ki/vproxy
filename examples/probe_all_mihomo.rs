@@ -12,9 +12,10 @@ use vproxy::proxy_probe::verify_nodes_with_mihomo_progress_limited;
 
 #[tokio::main]
 async fn main() {
-    let input = std::env::var("VPROXY_PROBE_INPUT").unwrap_or_else(|_| "data/probe/all_nodes.json".into());
-    let out_path =
-        std::env::var("VPROXY_PROBE_OUT").unwrap_or_else(|_| "data/probe/results_mihomo.json".into());
+    let input =
+        std::env::var("VPROXY_PROBE_INPUT").unwrap_or_else(|_| "data/probe/all_nodes.json".into());
+    let out_path = std::env::var("VPROXY_PROBE_OUT")
+        .unwrap_or_else(|_| "data/probe/results_mihomo.json".into());
     let raw = std::fs::read_to_string(&input).expect("read input");
     let items: Vec<serde_json::Value> = serde_json::from_str(&raw).expect("parse input");
     println!("mihomo 探针：{} 节点", items.len());
@@ -44,7 +45,7 @@ async fn main() {
         .collect();
 
     let progress = |p: vproxy::proxy_probe::ProxyProbeProgress| {
-        if p.done % 1000 == 0 {
+        if p.done.is_multiple_of(1000) {
             println!("  {}/{} ok={} fail={}", p.done, p.total, p.ok, p.fail);
         }
     };

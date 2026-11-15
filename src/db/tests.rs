@@ -6,9 +6,11 @@ use crate::proxy::{ProxyMode, RoutingMode, RuleAction, RuleMatcher, TrafficRule}
 async fn persists_complete_proxy_config() {
     let path = std::env::temp_dir().join(format!("vproxy-proxy-config-{}.db", Uuid::new_v4()));
     let db = Database::connect(path.to_str().unwrap()).await.unwrap();
-    let mut config = crate::proxy::MihomoConfigOptions::default();
-    config.mode = ProxyMode::Tun;
-    config.routing_mode = RoutingMode::ChinaDirect;
+    let mut config = crate::proxy::MihomoConfigOptions {
+        mode: ProxyMode::Tun,
+        routing_mode: RoutingMode::ChinaDirect,
+        ..Default::default()
+    };
     config.rules.push(TrafficRule {
         matcher: RuleMatcher::GeoSite("cn".into()),
         action: RuleAction::Direct,
@@ -27,9 +29,11 @@ async fn persists_complete_proxy_config() {
 async fn persists_selected_node_on_restart() {
     let path = std::env::temp_dir().join(format!("vproxy-proxy-node-{}.db", Uuid::new_v4()));
     let db = Database::connect(path.to_str().unwrap()).await.unwrap();
-    let mut config = crate::proxy::MihomoConfigOptions::default();
-    config.selected_node_id = Some("test-node-123".to_string());
-    config.selected_node_name = Some("香港01 - 高速专线".to_string());
+    let config = crate::proxy::MihomoConfigOptions {
+        selected_node_id: Some("test-node-123".to_string()),
+        selected_node_name: Some("香港01 - 高速专线".to_string()),
+        ..Default::default()
+    };
 
     db.update_proxy_config(&config).await.unwrap();
 
@@ -50,8 +54,10 @@ async fn persists_selected_node_on_restart() {
 async fn persists_custom_mixed_port_including_7890() {
     let path = std::env::temp_dir().join(format!("vproxy-proxy-port-{}.db", Uuid::new_v4()));
     let db = Database::connect(path.to_str().unwrap()).await.unwrap();
-    let mut config = crate::proxy::MihomoConfigOptions::default();
-    config.mixed_port = 7890;
+    let config = crate::proxy::MihomoConfigOptions {
+        mixed_port: 7890,
+        ..Default::default()
+    };
 
     db.update_proxy_config(&config).await.unwrap();
 
@@ -855,7 +861,7 @@ async fn test_source_homogeneity_analysis_and_pruning() {
 
     // Prune by disabling
     let prune_res = db
-        .prune_homogenized_sources(&[s2.id.clone()], false)
+        .prune_homogenized_sources(std::slice::from_ref(&s2.id), false)
         .await
         .unwrap();
     assert_eq!(prune_res.pruned_count, 1);
@@ -864,7 +870,7 @@ async fn test_source_homogeneity_analysis_and_pruning() {
 
     // Prune by deleting
     let delete_res = db
-        .prune_homogenized_sources(&[s2.id.clone()], true)
+        .prune_homogenized_sources(std::slice::from_ref(&s2.id), true)
         .await
         .unwrap();
     assert_eq!(delete_res.pruned_count, 1);

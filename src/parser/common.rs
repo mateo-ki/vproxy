@@ -89,7 +89,7 @@ pub fn decode_maybe_base64(input: &str) -> Option<String> {
     }
 
     let mut padded = cleaned.clone();
-    while padded.len() % 4 != 0 {
+    while !padded.len().is_multiple_of(4) {
         padded.push('=');
     }
 
@@ -127,7 +127,7 @@ pub fn decode_base64_str(input: &str) -> Option<String> {
     let cleaned: String = input.chars().filter(|c| !c.is_whitespace()).collect();
     // Pad to multiple of 4 for engines that need it.
     let mut padded = cleaned.clone();
-    while padded.len() % 4 != 0 {
+    while !padded.len().is_multiple_of(4) {
         padded.push('=');
     }
     for candidate in [&cleaned, &padded] {

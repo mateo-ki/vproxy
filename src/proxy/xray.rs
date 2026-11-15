@@ -356,8 +356,10 @@ mod tests {
 
     #[test]
     fn rejects_xray_tun_mode() {
-        let mut options = MihomoConfigOptions::default();
-        options.mode = ProxyMode::Tun;
+        let options = MihomoConfigOptions {
+            mode: ProxyMode::Tun,
+            ..Default::default()
+        };
         assert!(build_xray_config(&node("trojan", json!({"password":"p"})), options).is_err());
     }
 

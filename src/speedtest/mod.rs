@@ -248,7 +248,7 @@ impl SpeedTester {
                         SpeedTestPhase::TcpPrefilter => TaskPhase::TcpPrefilter,
                         SpeedTestPhase::RealProxy => TaskPhase::GoogleVerify,
                     };
-                    if state.done % 200 == 0 || state.done >= state.total {
+                    if state.done.is_multiple_of(200) || state.done >= state.total {
                         for source_id in &progress_sources {
                             progress_tasks.phase(&progress_task_id, source_id, phase);
                         }
@@ -442,8 +442,10 @@ mod tests {
         assert_eq!(imported, 2000);
 
         let tester = SpeedTester::new(db.clone(), TaskTracker::default());
-        let mut opts = SpeedTestOptions::default();
-        opts.tcp_ping_only = true;
+        let opts = SpeedTestOptions {
+            tcp_ping_only: true,
+            ..Default::default()
+        };
         let summary = tester.test_all_sources(opts).await.unwrap();
         assert_eq!(summary.total, 2000);
         assert_eq!(summary.ok + summary.fail, 2000);
@@ -567,8 +569,10 @@ mod tests {
         db.import_nodes(&[node]).await.unwrap();
 
         let tester = SpeedTester::new(db.clone(), TaskTracker::default());
-        let mut opts = SpeedTestOptions::default();
-        opts.tcp_ping_only = true;
+        let opts = SpeedTestOptions {
+            tcp_ping_only: true,
+            ..Default::default()
+        };
         let summary = tester
             .test_many(Some(vec!["tcp-ping-node".into()]), opts)
             .await

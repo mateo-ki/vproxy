@@ -786,7 +786,7 @@ async fn load_export_nodes(
         .await?;
 
     if quality_only {
-        nodes.sort_by(|a, b| export_score(b).cmp(&export_score(a)));
+        nodes.sort_by_key(|n| std::cmp::Reverse(export_score(n)));
         let want = limit.unwrap_or(50).clamp(1, 500) as usize;
         if nodes.len() > want {
             nodes.truncate(want);

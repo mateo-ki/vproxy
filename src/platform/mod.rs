@@ -611,7 +611,7 @@ fn get_default_browser_cmd_template() -> Option<String> {
             return None;
         }
 
-        let u16_count = (byte_len as usize + 1) / 2;
+        let u16_count = (byte_len as usize).div_ceil(2);
         let mut buf: Vec<u16> = vec![0; u16_count + 1];
         let query_val = unsafe {
             RegQueryValueExW(
@@ -704,7 +704,7 @@ fn try_fast_launch_browser(url: &str) -> Result<bool> {
             0,
             std::ptr::null_mut(),
             std::ptr::null(),
-            &mut si,
+            &si,
             &mut pi,
         )
     };
@@ -917,15 +917,13 @@ pub fn kill_orphan_proxy_cores() -> usize {
                                 false
                             };
 
-                        if is_ours {
-                            if TerminateProcess(proc_handle, 1) != 0 {
-                                killed_count += 1;
-                                tracing::info!(
-                                    pid = entry.th32ProcessID,
-                                    exe = %exe_lower,
-                                    "已成功清理归属于本程序的孤儿代理内核进程"
-                                );
-                            }
+                        if is_ours && TerminateProcess(proc_handle, 1) != 0 {
+                            killed_count += 1;
+                            tracing::info!(
+                                pid = entry.th32ProcessID,
+                                exe = %exe_lower,
+                                "已成功清理归属于本程序的孤儿代理内核进程"
+                            );
                         }
                         CloseHandle(proc_handle);
                     }
@@ -2308,7 +2306,7 @@ impl ElevatedChild {
             }
         })
         .await
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+        .map_err(std::io::Error::other)
     }
 }
 

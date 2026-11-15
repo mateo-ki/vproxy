@@ -56,7 +56,7 @@ pub fn scan_cjk_fonts(dirs: &[PathBuf], depth: u8) -> Vec<PathBuf> {
             let path = entry.path();
             let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
             if is_dir {
-                if level + 1 <= depth {
+                if level < depth {
                     stack.push((path, level + 1));
                 }
                 continue;
@@ -178,11 +178,13 @@ pub fn ink_offset(font_name: &str, data: &Arc<egui::FontData>) -> f32 {
             .insert(0, font_name.to_owned());
     }
     ctx.set_fonts(definitions);
-    let mut input = egui::RawInput::default();
-    input.screen_rect = Some(egui::Rect::from_min_size(
-        egui::Pos2::ZERO,
-        egui::vec2(400.0, 200.0),
-    ));
+    let input = egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(400.0, 200.0),
+        )),
+        ..Default::default()
+    };
     let text = INK_CALIBRATION_LABEL.to_owned();
     let mut offset = 0.0_f32;
     let mut out = ctx.run_ui(input, |ui| {
@@ -240,7 +242,7 @@ pub fn setup_chinese_fonts(ctx: &egui::Context) {
             // 仅加载 1 个最优先的可用 CJK 字体。常规中文字体（如微软雅黑、苹方、文泉驿、Noto）
             // 单个字库就包含完备的简体/繁体/日韩字形，避免同时载入多个动辄十数兆的字体文件
             // 造成堆内存与纹理缓存膨胀（每个字体保留整份原始字节与字形表）。
-            if loaded_names.len() >= 1 {
+            if !loaded_names.is_empty() {
                 break;
             }
         }
@@ -315,7 +317,7 @@ mod cjk_font_tests {
         std::fs::write(other.join("DejaVuSans.ttf"), b"fake").unwrap();
         std::fs::write(other.join("README.txt"), b"fake").unwrap();
 
-        let found = scan_cjk_fonts(&[root.clone()], 4);
+        let found = scan_cjk_fonts(std::slice::from_ref(&root), 4);
         assert_eq!(found.len(), 1, "只该找到那个 CJK 字体，实际 {found:?}");
         assert!(found[0]
             .to_string_lossy()

@@ -723,12 +723,11 @@ impl VpnApp {
                                         action_open_nodes = Some((s.id.clone(), s.name.clone()));
                                         ui.close();
                                     }
-                                    if !is_imported {
-                                        if ui.button("📄 复制订阅链接").clicked() {
+                                    if !is_imported
+                                        && ui.button("📄 复制订阅链接").clicked() {
                                             action_copy_url = Some(s.url_template.clone());
                                             ui.close();
                                         }
-                                    }
                                     ui.separator();
                                     if s.id == crate::db::UNGROUPED_SOURCE_ID {
                                         if ui.button(RichText::new("🗑️ 清空导入节点").color(theme::danger())).clicked() {
@@ -1325,14 +1324,10 @@ impl VpnApp {
             ui.add_space(6.0);
             ui.horizontal(|ui| {
                 if ui.small_button("全选").clicked() {
-                    for flag in &mut self.gist_query_flags {
-                        *flag = true;
-                    }
+                    self.gist_query_flags.fill(true);
                 }
                 if ui.small_button("清空勾选").clicked() {
-                    for flag in &mut self.gist_query_flags {
-                        *flag = false;
-                    }
+                    self.gist_query_flags.fill(false);
                 }
             });
 
@@ -1745,11 +1740,13 @@ mod source_filter_tests {
         use eframe::egui::{CentralPanel, Context, Margin, Panel, RawInput, Rect, Vec2};
 
         let ctx = Context::default();
-        let mut input = RawInput::default();
-        input.screen_rect = Some(Rect::from_min_size(
-            eframe::egui::Pos2::ZERO,
-            Vec2::new(960.0, 600.0),
-        ));
+        let input = RawInput {
+            screen_rect: Some(Rect::from_min_size(
+                eframe::egui::Pos2::ZERO,
+                Vec2::new(960.0, 600.0),
+            )),
+            ..Default::default()
+        };
         let mut panel = Rect::NOTHING;
         let mut row_right = 0.0_f32;
         let _ = crate::gui::run_test_ui(&ctx, input, |ui| {

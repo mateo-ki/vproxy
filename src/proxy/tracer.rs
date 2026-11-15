@@ -529,9 +529,7 @@ pub fn simulate_route_trace(
                 } else {
                     format!("{:.0}ms", endpoint_ms)
                 };
-                let status_str = if is_active_node {
-                    "活跃"
-                } else if n.latency_ms.is_some() {
+                let status_str = if is_active_node || n.latency_ms.is_some() {
                     "活跃"
                 } else {
                     "可用"

@@ -438,8 +438,10 @@ mod tests {
 
     #[test]
     fn rejects_shoes_tun_mode() {
-        let mut options = MihomoConfigOptions::default();
-        options.mode = ProxyMode::Tun;
+        let options = MihomoConfigOptions {
+            mode: ProxyMode::Tun,
+            ..Default::default()
+        };
         let n = node("ss", json!({"cipher":"aes-128-gcm","password":"p"}));
         assert!(build_shoes_config(&n, options).is_err());
     }
@@ -451,8 +453,10 @@ mod tests {
     #[test]
     fn multi_predicate_rules_are_split_not_any_wrapped() {
         let n = node("ss", json!({"cipher":"aes-128-gcm","password":"p"}));
-        let mut options = MihomoConfigOptions::default();
-        options.block_webrtc = true;
+        let options = MihomoConfigOptions {
+            block_webrtc: true,
+            ..Default::default()
+        };
         let val = build_shoes_config(&n, options).expect("valid config");
         let yaml_str = serde_yaml::to_string(&val).expect("serializable to yaml");
 
@@ -502,11 +506,13 @@ mod tests {
     #[test]
     fn quic_rule_is_skipped_not_translated_to_tcp_port_block() {
         let n = node("ss", json!({"cipher":"aes-128-gcm","password":"p"}));
-        let mut options = MihomoConfigOptions::default();
-        options.rules = vec![TrafficRule {
-            matcher: RuleMatcher::Quic,
-            action: RuleAction::Reject,
-        }];
+        let options = MihomoConfigOptions {
+            rules: vec![TrafficRule {
+                matcher: RuleMatcher::Quic,
+                action: RuleAction::Reject,
+            }],
+            ..Default::default()
+        };
         let val = build_shoes_config(&n, options).expect("valid config");
         let yaml_str = serde_yaml::to_string(&val).expect("serializable to yaml");
         assert!(
@@ -605,11 +611,12 @@ mod meow_tests {
     use serde_json::json;
 
     fn meow_options() -> MihomoConfigOptions {
-        let mut options = MihomoConfigOptions::default();
-        options.mixed_port = 19991;
-        options.controller_port = 19091;
-        options.controller_secret = "secret123".into();
-        options
+        MihomoConfigOptions {
+            mixed_port: 19991,
+            controller_port: 19091,
+            controller_secret: "secret123".into(),
+            ..Default::default()
+        }
     }
 
     #[test]
@@ -728,11 +735,13 @@ mod meow_real_kernel_tests {
                 "ws-opts": {"path": "/x?ed=2048", "headers": {"Host": "cdn.example.com"}}
             }),
         );
-        let mut options = MihomoConfigOptions::default();
-        options.mixed_port = 19991;
-        options.controller_port = 19091;
-        options.controller_secret = "secret123".into();
-        options.routing_mode = RoutingMode::ChinaDirect;
+        let options = MihomoConfigOptions {
+            mixed_port: 19991,
+            controller_port: 19091,
+            controller_secret: "secret123".into(),
+            routing_mode: RoutingMode::ChinaDirect,
+            ..Default::default()
+        };
         let val = crate::proxy::compiler::MeowCompiler
             .compile(&crate::proxy::ir::lower_options_to_ir(&options, Some(&n)))
             .expect("compile")

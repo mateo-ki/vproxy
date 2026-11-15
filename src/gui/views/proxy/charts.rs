@@ -198,6 +198,8 @@ fn svc_truncate(painter: &egui::Painter, text: &str, font: egui::FontId, max_w: 
 }
 
 /// .svc 独立圆角小卡片容器（用于服务状态与策略组）。
+// 纯 UI 绘制辅助：尺寸/配色/文案/选中态都随绘制点变化，抽结构体反而让每个卡片调用点变成一行字面量堆砌。
+#[allow(clippy::too_many_arguments)]
 fn dash_svc_card(
     ui: &mut Ui,
     w: f32,
@@ -371,6 +373,8 @@ fn dash_switch_compact(ui: &mut Ui, on: bool, enabled: bool) -> egui::Response {
 }
 
 /// 底部单项代理控制卡片容器
+// 纯 UI 绘制辅助：同上，参数打包收益低，保持调用点直读。
+#[allow(clippy::too_many_arguments)]
 fn dash_bottom_proxy_item(
     ui: &mut Ui,
     w: f32,
@@ -573,9 +577,7 @@ pub(crate) fn display_risk<'a>(
     front_owner: Option<&str>,
     front: Option<&'a crate::ip_risk::IpRisk>,
 ) -> Option<&'a crate::ip_risk::IpRisk> {
-    let Some(id) = node_id else {
-        return None;
-    };
+    let id = node_id?;
     let egress = if egress_owner == Some(id) {
         egress
     } else {
@@ -1236,14 +1238,13 @@ impl VpnApp {
                                             self.set_start_node(&node);
                                         }
                                         if proxy_up {
-                                            if group.name != "全部" && group.name != "all" {
-                                                if self.kernel_groups.iter().any(|g| g.name == group.name) {
+                                            if group.name != "全部" && group.name != "all"
+                                                && self.kernel_groups.iter().any(|g| g.name == group.name) {
                                                     self.select_kernel_member(
                                                         group.name.clone(),
                                                         m.clone(),
                                                     );
                                                 }
-                                            }
                                             self.status = format!(
                                                 "延迟选优：已切换至 {m}（{ms} ms）"
                                             );
@@ -1282,14 +1283,13 @@ impl VpnApp {
                                         self.set_start_node(&node);
                                     }
                                     if proxy_up {
-                                        if group.name != "全部" && group.name != "all" {
-                                            if self.kernel_groups.iter().any(|g| g.name == group.name) {
+                                        if group.name != "全部" && group.name != "all"
+                                            && self.kernel_groups.iter().any(|g| g.name == group.name) {
                                                 self.select_kernel_member(
                                                     group.name.clone(),
                                                     m.clone(),
                                                 );
                                             }
-                                        }
                                         self.status =
                                             format!("负载均衡：已切换至 {m}");
                                     } else {
@@ -1626,9 +1626,9 @@ impl VpnApp {
                                 }
                                 self.set_start_node(&node);
                                 if proxy_up {
-                                    if group.members.contains(&node.name) {
-                                        picked = Some(node.name.clone());
-                                    } else if group.name != "全部" && group.name != "all" {
+                                    if group.members.contains(&node.name)
+                                        || (group.name != "全部" && group.name != "all")
+                                    {
                                         picked = Some(node.name.clone());
                                     } else {
                                         self.switch_proxy_node(
@@ -1683,10 +1683,11 @@ impl VpnApp {
             self.group_drawer = None;
         }
         if let Some(member) = picked {
-            if group.name != "全部" && group.name != "all" {
-                if self.kernel_groups.iter().any(|g| g.name == group.name) {
-                    self.select_kernel_member(group.name.clone(), member);
-                }
+            if group.name != "全部"
+                && group.name != "all"
+                && self.kernel_groups.iter().any(|g| g.name == group.name)
+            {
+                self.select_kernel_member(group.name.clone(), member);
             }
         }
     }
@@ -1927,6 +1928,8 @@ impl VpnApp {
     }
 
     /// 状态大卡：出口 IP / 节点大字 + 国旗标识 + 标签药丸 + 三列元信息 + 86px 拟物大圆启停按钮。
+    // 纯 UI 绘制辅助：状态标志组合来自多个运行时字段，打包会掩盖调用处的真实来源。
+    #[allow(clippy::too_many_arguments)]
     fn dash_status_card(
         &mut self,
         ui: &mut Ui,
@@ -2989,7 +2992,7 @@ impl VpnApp {
             .iter()
             .map(|((rule, target), count)| (rule, target, *count))
             .collect();
-        hits.sort_by(|a, b| b.2.cmp(&a.2));
+        hits.sort_by_key(|h| std::cmp::Reverse(h.2));
 
         let outer = Rect::from_min_size(ui.cursor().min, Vec2::new(w + 28.0, h + 20.0));
         dash_card_at(ui, outer);
@@ -3142,9 +3145,7 @@ impl VpnApp {
 
     /// 命中数缩写：1234 → 1.2k，123456 → 12.3w。
     fn format_hits(count: i64) -> String {
-        if count >= 100_000 {
-            format!("{:.1}w", count as f64 / 10_000.0)
-        } else if count >= 10_000 {
+        if count >= 10_000 {
             format!("{:.1}w", count as f64 / 10_000.0)
         } else if count >= 1_000 {
             format!("{:.1}k", count as f64 / 1_000.0)
@@ -3701,7 +3702,7 @@ impl VpnApp {
                                     self.proxy_nodes
                                         .iter()
                                         .chain(self.nodes.iter())
-                                        .find(|n| &n.name == &now)
+                                        .find(|n| n.name == now)
                                         .and_then(|n| n.latency_ms)
                                 });
                             let (status_str, dot_col, text_col) = match latency {

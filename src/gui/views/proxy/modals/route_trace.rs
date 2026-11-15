@@ -50,7 +50,7 @@ impl VpnApp {
 
         // 限制窗口宽度为 780px，锁定固定尺寸防止横向抖动与形变
         let win_w = 780.0_f32.min(screen.width() - 32.0);
-        let win_h = (screen.height() * 0.82).min(660.0).max(420.0);
+        let win_h = (screen.height() * 0.82).clamp(420.0, 660.0);
 
         egui::Window::new("route_trace_modal_window_v7")
             .id(egui::Id::new("route_trace_modal_window_v7"))
@@ -464,8 +464,21 @@ impl VpnApp {
                                 format!("提取主机标识符: '{host}' (Port: {port})")
                             };
 
-                            // 5 大环节数据包：各项耗时与流水线完全由底层实际测量驱动
-                            let step_data: [(usize, &str, &str, String, String, Color32, &str, &str, String, Vec<(String, &str, String)>); 5] = [
+                            // 5 大环节数据包：各项耗时与流水线完全由底层实际测量驱动。
+                            // 行结构：(序号, 标题, 副题, 协议摘要, 耗时, 配色, 里程碑, 详情标题, 详情正文, (耗时, 事件, 说明) 列表)。
+                            type TraceStepData = (
+                                usize,
+                                &'static str,
+                                &'static str,
+                                String,
+                                String,
+                                Color32,
+                                &'static str,
+                                &'static str,
+                                String,
+                                Vec<(String, &'static str, String)>,
+                            );
+                            let step_data: [TraceStepData; 5] = [
                                 (
                                     1,
                                     "01 / 入站",

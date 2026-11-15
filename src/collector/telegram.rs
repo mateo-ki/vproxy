@@ -298,7 +298,7 @@ impl super::Collector {
         // 退一步认 Windows 系统代理：app 自己在系统代理模式下写的就是 9980，
         // v2rayN 之类外部工具指着也一样能用。只试这一条，不并发试多条。
         let through_system_proxy =
-            tokio::task::spawn_blocking(|| crate::system_proxy::current_system_proxy_url())
+            tokio::task::spawn_blocking(crate::system_proxy::current_system_proxy_url)
                 .await
                 .ok()
                 .flatten();

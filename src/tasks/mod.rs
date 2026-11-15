@@ -136,6 +136,8 @@ impl TaskTracker {
         self.update(task_id, source_id, |source| source.phase = phase);
     }
 
+    // 各阶段耗时分批可选地上报，全部可选参数都直接映射事件字段，打包成结构体反而让调用点更啰嗦。
+    #[allow(clippy::too_many_arguments)]
     pub fn timings(
         &self,
         task_id: &str,

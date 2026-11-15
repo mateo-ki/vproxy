@@ -35,7 +35,7 @@ impl NodesViewModel {
         let rows = if count == 0 {
             0
         } else {
-            (count + columns - 1) / columns
+            count.div_ceil(columns)
         };
         (columns, rows)
     }

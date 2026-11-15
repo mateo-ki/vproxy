@@ -1242,6 +1242,7 @@ impl KernelUpdater {
 /// - Windows：走 gh-proxy 2.5 秒下完 22,492,402 字节，算出的 SHA-256 与 GitHub `digest` 一致；
 /// - Linux：走 ghfast 36.6 秒下完 22,846,526 字节，`sha256sum` 与 GitHub `digest` 逐字符一致，
 ///   解出来 61,993,086 字节的静态 ELF，`chmod +x` 后 `-v` 退出码 0。
+///
 /// 代价是版本号会慢慢落后；更新它只改下面这几行常量。
 fn fallback_release(kind: KernelKind) -> Option<GithubRelease> {
     if kind == KernelKind::Meow {

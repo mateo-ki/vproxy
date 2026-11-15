@@ -149,19 +149,19 @@ impl Database {
 
             for node in all_nodes.iter() {
                 if let Some(proto) = protocol {
-                    if !proto.is_empty() && !proto.eq_ignore_ascii_case("all") {
-                        if !node.protocol.eq_ignore_ascii_case(proto) {
-                            continue;
-                        }
+                    if !proto.is_empty()
+                        && !proto.eq_ignore_ascii_case("all")
+                        && !node.protocol.eq_ignore_ascii_case(proto)
+                    {
+                        continue;
                     }
                 }
                 if let Some(kw) = keyword_trimmed {
-                    if !kw.is_empty() {
-                        if !crate::db::nodes::contains_ignore_ascii_case(&node.name, kw)
-                            && !crate::db::nodes::contains_ignore_ascii_case(&node.server, kw)
-                        {
-                            continue;
-                        }
+                    if !kw.is_empty()
+                        && !crate::db::nodes::contains_ignore_ascii_case(&node.name, kw)
+                        && !crate::db::nodes::contains_ignore_ascii_case(&node.server, kw)
+                    {
+                        continue;
                     }
                 }
                 if let Some(ref lat) = latency_lower {
@@ -285,7 +285,7 @@ impl Database {
                 .into_iter()
                 .map(|(protocol, count)| ProtocolStat { protocol, count })
                 .collect::<Vec<_>>();
-            protocol_stats.sort_by(|a, b| b.count.cmp(&a.count));
+            protocol_stats.sort_by_key(|s| std::cmp::Reverse(s.count));
 
             return Ok(Stats {
                 source_count,
@@ -319,7 +319,7 @@ impl Database {
             .into_iter()
             .map(|(protocol, count)| ProtocolStat { protocol, count })
             .collect::<Vec<_>>();
-        protocol_stats.sort_by(|a, b| b.count.cmp(&a.count));
+        protocol_stats.sort_by_key(|s| std::cmp::Reverse(s.count));
         Ok(Stats {
             source_count,
             enabled_source_count,

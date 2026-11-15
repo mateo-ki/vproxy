@@ -142,7 +142,7 @@ impl CleanupState {
         }
 
         // 按大小降序排序，最占空间的排在前面
-        found.sort_by(|a, b| b.size.cmp(&a.size));
+        found.sort_by_key(|s| std::cmp::Reverse(s.size));
 
         self.items = found;
         self.scanned = true;

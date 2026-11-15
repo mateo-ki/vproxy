@@ -348,8 +348,7 @@ async fn wait_for_sing_box_port(child: &mut Child, port: u16) -> bool {
 fn last_sing_box_log_line(text: &str) -> &str {
     text.lines()
         .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .next_back()
+        .rfind(|line| !line.is_empty())
         .unwrap_or("端口未就绪且没有日志")
 }
 

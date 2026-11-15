@@ -1176,24 +1176,22 @@ impl VpnApp {
                                         state.payload = state.host.clone();
                                     }
                                 }
-                                if !state.ip.is_empty() {
-                                    if ui.selectable_label(
+                                if !state.ip.is_empty()
+                                    && ui.selectable_label(
                                         state.rule_type == QuickRuleType::IpCidr,
                                         "IP网段 (IP-CIDR)",
                                     ).clicked() {
                                         state.rule_type = QuickRuleType::IpCidr;
                                         state.payload = format!("{}/32", state.ip);
                                     }
-                                }
-                                if !state.process.is_empty() {
-                                    if ui.selectable_label(
+                                if !state.process.is_empty()
+                                    && ui.selectable_label(
                                         state.rule_type == QuickRuleType::ProcessName,
                                         "发起进程 (PROCESS-NAME)",
                                     ).clicked() {
                                         state.rule_type = QuickRuleType::ProcessName;
                                         state.payload = state.process.clone();
                                     }
-                                }
                             });
 
                             ui.add_space(6.0);

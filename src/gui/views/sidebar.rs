@@ -381,11 +381,13 @@ mod update_marker_probe_tests {
     /// 在 220 宽的侧栏里真画一次这行标记，返回（内容右边界, 这一帧真的画出来的文字）。
     fn probe(tag: &str) -> (f32, String) {
         let ctx = egui::Context::default();
-        let mut input = RawInput::default();
-        input.screen_rect = Some(Rect::from_min_size(
-            egui::Pos2::ZERO,
-            Vec2::new(1330.0, 800.0),
-        ));
+        let input = RawInput {
+            screen_rect: Some(Rect::from_min_size(
+                egui::Pos2::ZERO,
+                Vec2::new(1330.0, 800.0),
+            )),
+            ..Default::default()
+        };
         let mut right = 0.0_f32;
         let mut painted = String::new();
         let _ = crate::gui::run_test_ui(&ctx, input, |ui| {
@@ -405,7 +407,7 @@ mod update_marker_probe_tests {
                         if let Some(list) = g.get(layer) {
                             for shape in list.all_entries() {
                                 if let egui::Shape::Text(text) = &shape.shape {
-                                    out.push_str(&text.galley.text());
+                                    out.push_str(text.galley.text());
                                     out.push(' ');
                                 }
                             }
@@ -430,11 +432,13 @@ mod update_marker_probe_tests {
 
     fn nav_probe(width: f32, label: Option<&str>) -> NavProbe {
         let ctx = egui::Context::default();
-        let mut input = RawInput::default();
-        input.screen_rect = Some(Rect::from_min_size(
-            egui::Pos2::ZERO,
-            Vec2::new(1330.0, 800.0),
-        ));
+        let input = RawInput {
+            screen_rect: Some(Rect::from_min_size(
+                egui::Pos2::ZERO,
+                Vec2::new(1330.0, 800.0),
+            )),
+            ..Default::default()
+        };
         let mut probe = NavProbe {
             row_left: 0.0,
             row_right: 0.0,
@@ -476,7 +480,7 @@ mod update_marker_probe_tests {
                                     // 量墨迹位置只能用 pos + galley 尺寸。
                                     left = left.min(t.pos.x);
                                     right = right.max(t.pos.x + t.galley.size().x);
-                                    text.push_str(&t.galley.text());
+                                    text.push_str(t.galley.text());
                                     text.push(' ');
                                 }
                             }

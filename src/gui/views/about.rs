@@ -217,8 +217,8 @@ impl VpnApp {
                         }
 
                         // 新版本说明按钮：检查到更新后，在「下载更新」旁边呈现
-                        if info.update_available || info.body.is_some() {
-                            if ui
+                        if (info.update_available || info.body.is_some())
+                            && ui
                                 .button("新版本说明")
                                 .on_hover_text("查看新版本的 Release 说明与详细更新日志")
                                 .clicked()
@@ -229,7 +229,6 @@ impl VpnApp {
                                 });
                                 action_show_notes = Some((tag_title, content));
                             }
-                        }
                     }
                     if action_download {
                         self.download_app_update();
@@ -1011,11 +1010,13 @@ mod about_layout_probe_tests {
         // 就绕开了"FnOnce 不能放进 FnMut 闭包"这条。
         let mut slot = Some(body);
         let ctx = egui::Context::default();
-        let mut input = RawInput::default();
-        input.screen_rect = Some(Rect::from_min_size(
-            egui::Pos2::ZERO,
-            Vec2::new(width, 800.0),
-        ));
+        let input = RawInput {
+            screen_rect: Some(Rect::from_min_size(
+                egui::Pos2::ZERO,
+                Vec2::new(width, 800.0),
+            )),
+            ..Default::default()
+        };
         let _ = crate::gui::run_test_ui(&ctx, input, |ui| {
             egui::CentralPanel::default()
                 .frame(

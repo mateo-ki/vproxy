@@ -6,11 +6,13 @@ mod layout_tests {
     /// 画一段表头，然后报告纵向 ui 里还剩多少高度给下面的卡片。
     fn height_left_after(header: impl Fn(&mut egui::Ui)) -> f32 {
         let ctx = egui::Context::default();
-        let mut input = RawInput::default();
-        input.screen_rect = Some(Rect::from_min_size(
-            egui::Pos2::ZERO,
-            Vec2::new(1200.0, 800.0),
-        ));
+        let input = RawInput {
+            screen_rect: Some(Rect::from_min_size(
+                egui::Pos2::ZERO,
+                Vec2::new(1200.0, 800.0),
+            )),
+            ..Default::default()
+        };
         let mut left = -1.0;
         let _ = crate::gui::run_test_ui(&ctx, input, |ui| {
             egui::CentralPanel::default().show(ui, |ui| {
@@ -81,11 +83,13 @@ mod header_probe_tests {
         pinned: bool,
     ) -> (f32, f32, f32, f32) {
         let ctx = egui::Context::default();
-        let mut input = RawInput::default();
-        input.screen_rect = Some(Rect::from_min_size(
-            egui::Pos2::ZERO,
-            Vec2::new(window_width, 890.0),
-        ));
+        let input = RawInput {
+            screen_rect: Some(Rect::from_min_size(
+                egui::Pos2::ZERO,
+                Vec2::new(window_width, 890.0),
+            )),
+            ..Default::default()
+        };
         let mut save_right = 0.0_f32;
         let mut save_left = 0.0_f32;
         let mut chips_right = 0.0_f32;
@@ -235,11 +239,13 @@ mod zoom_semantics_tests {
         let ctx = Context::default();
         let mut widths = Vec::new();
         for frame in 0..3 {
-            let mut input = RawInput::default();
-            input.screen_rect = Some(Rect::from_min_size(
-                egui::Pos2::ZERO,
-                Vec2::new(1330.0, 800.0),
-            ));
+            let input = RawInput {
+                screen_rect: Some(Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    Vec2::new(1330.0, 800.0),
+                )),
+                ..Default::default()
+            };
             let _ = crate::gui::run_test_ui(&ctx, input, |ui| {
                 if frame == 1 {
                     ui.ctx().set_zoom_factor(1.1);
@@ -273,8 +279,10 @@ mod stats_row_overflow_probe_tests {
     /// → 表头 split_row。量的是"表头右组到底钉在哪"，以及"芯片行有没有绕过右边界"。
     fn probe(window: Vec2, chips: usize) -> (f32, f32, f32, f32) {
         let ctx = egui::Context::default();
-        let mut input = RawInput::default();
-        input.screen_rect = Some(Rect::from_min_size(egui::Pos2::ZERO, window));
+        let input = RawInput {
+            screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, window)),
+            ..Default::default()
+        };
         let mut panel_right = 0.0_f32;
         let mut group_right = 0.0_f32;
         let mut chips_right = 0.0_f32;
@@ -362,11 +370,13 @@ mod slider_tick_probe_tests {
     /// 返回每个百分比对应的（手柄中心 x, 刻度 x, 误差）。
     fn probe(value: i32) -> (f32, f32) {
         let ctx = egui::Context::default();
-        let mut input = RawInput::default();
-        input.screen_rect = Some(Rect::from_min_size(
-            egui::Pos2::ZERO,
-            Vec2::new(900.0, 600.0),
-        ));
+        let input = RawInput {
+            screen_rect: Some(Rect::from_min_size(
+                egui::Pos2::ZERO,
+                Vec2::new(900.0, 600.0),
+            )),
+            ..Default::default()
+        };
         let mut handle_center = 0.0_f32;
         let mut tick_x = 0.0_f32;
         let _ = crate::gui::run_test_ui(&ctx, input, |ui| {

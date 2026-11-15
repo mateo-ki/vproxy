@@ -84,7 +84,7 @@ pub fn current_version() -> &'static str {
     // 只有这样才能在真机上跑通一遍，否则本机版本永远等于最新 Release，永远看不到亮起来。
     if let Some(fake) = crate::diag::forced_version() {
         static FAKE: std::sync::OnceLock<&'static str> = std::sync::OnceLock::new();
-        return *FAKE.get_or_init(|| Box::leak(fake.into_boxed_str()));
+        return FAKE.get_or_init(|| Box::leak(fake.into_boxed_str()));
     }
     env!("CARGO_PKG_VERSION")
 }
@@ -184,7 +184,7 @@ impl AppReleaseInfo {
     /// 「下载更新」按钮的门槛：既要有更新的版本，也要这个 Release 真的挂了安装包。
     /// 侧栏绿色↑要显示的版本号：只有"确实有更新"才亮，没更新或查失败都返回 None。
     pub fn marker(&self) -> Option<&str> {
-        self.update_available.then(|| self.tag.as_str())
+        self.update_available.then_some(self.tag.as_str())
     }
 
     #[allow(dead_code)]

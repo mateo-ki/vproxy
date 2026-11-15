@@ -10,7 +10,7 @@ pub fn export_score(node: &Node) -> i64 {
 
     // Base: prefer lower TCP latency strongly, but not exclusively.
     if let Some(ms) = node.latency_ms {
-        score += (20_000 - ms.clamp(1, 19_999)) as i64;
+        score += 20_000 - ms.clamp(1, 19_999);
     }
 
     // Protocol preference for typical v2rayN usage.
