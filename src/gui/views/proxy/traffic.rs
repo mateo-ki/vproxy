@@ -8,7 +8,7 @@ use crate::gui::theme;
 use crate::gui::types::{
     DomainTrafficRecord, NodeTrafficRecord, NodeTrafficSort, ProcessTrafficRecord, TrafficStatTab,
 };
-use crate::gui::widgets::badges::{country_flag_and_name, protocol_pill};
+use crate::gui::widgets::badges::country_flag_and_name;
 use crate::gui::widgets::{card_frame, format_bytes, format_speed};
 use crate::gui::VpnApp;
 use eframe::egui::{self, Color32, CornerRadius, Margin, Rect, RichText, Sense, Stroke, Ui, Vec2};
@@ -787,22 +787,6 @@ impl VpnApp {
                                                 )
                                                 .truncate();
                                                 ui.add(name_label);
-
-                                                if is_active {
-                                                    render_status_pill(
-                                                        ui,
-                                                        "运行中",
-                                                        theme::success(),
-                                                    );
-                                                }
-
-                                                if !item.protocol.is_empty() && item.protocol != "-"
-                                                {
-                                                    protocol_pill(
-                                                        ui,
-                                                        &item.protocol.to_uppercase(),
-                                                    );
-                                                }
                                             });
 
                                             ui.add_space(2.0);
@@ -1118,18 +1102,6 @@ fn render_traffic_bar(ui: &mut Ui, ratio: f32, is_top: bool, bar_w: f32) {
         };
         painter.rect_filled(fill_rect, CornerRadius::same(3), fill_color);
     }
-}
-
-/// 状态指示胶囊
-fn render_status_pill(ui: &mut Ui, text: &str, color: Color32) {
-    egui::Frame::NONE
-        .fill(color.gamma_multiply(0.12))
-        .stroke(Stroke::new(1.0_f32, color.gamma_multiply(0.4)))
-        .corner_radius(CornerRadius::same(4))
-        .inner_margin(Margin::symmetric(5, 1))
-        .show(ui, |ui| {
-            ui.label(RichText::new(text).size(10.0).strong().color(color));
-        });
 }
 
 /// 实时活跃绿点指示
