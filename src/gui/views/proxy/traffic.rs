@@ -175,10 +175,25 @@ impl VpnApp {
 
         let total_up: i64 = self.traffic_days_history.iter().map(|r| r.upload).sum();
         let total_down: i64 = self.traffic_days_history.iter().map(|r| r.download).sum();
-        ui.columns(2, |columns| {
-            for (idx, (title, value)) in [
-                ("近 30 天上行", format_bytes(total_up.max(0) as u64)),
-                ("近 30 天下行", format_bytes(total_down.max(0) as u64)),
+        let total_all = (total_up + total_down).max(0) as u64;
+
+        ui.columns(3, |columns| {
+            for (idx, (title, value, col)) in [
+                (
+                    "近 30 天下行",
+                    format_bytes(total_down.max(0) as u64),
+                    theme::accent(),
+                ),
+                (
+                    "近 30 天上行",
+                    format_bytes(total_up.max(0) as u64),
+                    theme::success(),
+                ),
+                (
+                    "近 30 天总消耗",
+                    format_bytes(total_all),
+                    theme::text_primary(),
+                ),
             ]
             .into_iter()
             .enumerate()
@@ -187,58 +202,315 @@ impl VpnApp {
                     ui.set_width(ui.available_width());
                     ui.label(RichText::new(title).size(11.0).color(theme::muted()));
                     ui.add_space(2.0);
-                    ui.label(
-                        RichText::new(value)
-                            .size(16.0)
-                            .strong()
-                            .color(theme::text_primary()),
-                    );
+                    ui.label(RichText::new(value).size(16.0).strong().color(col));
                 });
             }
         });
         ui.add_space(8.0);
 
-        egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-            if self.traffic_days_history.is_empty() {
+        egui::ScrollArea::vertical()
+            .id_salt("traffic_history_scroll")
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                // 1. 每日流量柱状图
+                self.render_traffic_daily_bar_chart(ui);
+                ui.add_space(10.0);
+
+                // 2. 每日详细数据卡片
+                if self.traffic_days_history.is_empty() {
+                    ui.label(
+                        RichText::new("暂无流量历史：启动代理后流量按小时落库（保留 30 天），跑一会儿再来看。")
+                            .size(12.0)
+                            .color(theme::muted()),
+                    );
+                    return;
+                }
+
+                card_frame().show(ui, |ui| {
+                    ui.label(
+                        RichText::new("📋 单日明细列表（本地时间，含今天）")
+                            .strong()
+                            .size(13.0)
+                            .color(theme::text_primary()),
+                    );
+                    ui.add_space(6.0);
+                    for row in &self.traffic_days_history {
+                        let total = (row.upload + row.download).max(0) as u64;
+                        egui::Grid::new(format!("traffic-day-{}", row.day))
+                            .num_columns(4)
+                            .spacing([16.0, 4.0])
+                            .min_col_width(0.0)
+                            .show(ui, |ui| {
+                                ui.label(
+                                    RichText::new(&row.day)
+                                        .size(12.0)
+                                        .color(theme::text_primary()),
+                                );
+                                ui.label(
+                                    RichText::new(format!("↑ {}", format_bytes(row.upload.max(0) as u64)))
+                                        .size(11.5)
+                                        .color(theme::text_secondary()),
+                                );
+                                ui.label(
+                                    RichText::new(format!("↓ {}", format_bytes(row.download.max(0) as u64)))
+                                        .size(11.5)
+                                        .color(theme::text_secondary()),
+                                );
+                                ui.label(
+                                    RichText::new(format_bytes(total))
+                                        .size(12.0)
+                                        .strong()
+                                        .color(theme::text_primary()),
+                                );
+                                ui.end_row();
+                            });
+                    }
+                });
+            });
+    }
+
+    /// 近30天每日流量柱状图（每天一个柱状，堆叠显示下行与上行）
+    fn render_traffic_daily_bar_chart(&self, ui: &mut Ui) {
+        let today = chrono::Local::now().date_naive();
+        let mut daily_data: Vec<(String, String, u64, u64)> = Vec::with_capacity(30);
+        for i in (0..30).rev() {
+            let date = today - chrono::Duration::days(i);
+            let day_str = date.format("%Y-%m-%d").to_string();
+            let short_label = if i == 0 {
+                "今天".to_string()
+            } else {
+                date.format("%m-%d").to_string()
+            };
+            let found = self.traffic_days_history.iter().find(|r| r.day == day_str);
+            let up = found.map(|r| r.upload.max(0) as u64).unwrap_or(0);
+            let down = found.map(|r| r.download.max(0) as u64).unwrap_or(0);
+            daily_data.push((day_str, short_label, up, down));
+        }
+
+        let max_day_bytes = daily_data
+            .iter()
+            .map(|(_, _, u, d)| u + d)
+            .max()
+            .unwrap_or(0);
+        let max_scale_bytes = if max_day_bytes == 0 {
+            100 * 1024 * 1024
+        } else {
+            ((max_day_bytes as f64) * 1.15).ceil() as u64
+        };
+
+        card_frame().show(ui, |ui| {
+            // 图表卡片标题栏与图例
+            ui.horizontal(|ui| {
                 ui.label(
-                    RichText::new("暂无流量历史：启动代理后流量按小时落库（保留 30 天），跑一会儿再来看。")
-                        .size(12.0)
-                        .color(theme::muted()),
+                    RichText::new("📊 每日流量柱状图（近30天）")
+                        .strong()
+                        .size(13.5)
+                        .color(theme::text_primary()),
                 );
-                return;
+
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.label(
+                        RichText::new("💡 悬停柱体查看详情")
+                            .small()
+                            .color(theme::muted()),
+                    );
+                    ui.add_space(8.0);
+                    // 上行图例
+                    ui.horizontal(|ui| {
+                        let (rect, _) =
+                            ui.allocate_exact_size(Vec2::new(10.0, 10.0), Sense::hover());
+                        ui.painter()
+                            .rect_filled(rect, CornerRadius::same(2), theme::success());
+                        ui.label(RichText::new("上行").small().color(theme::text_secondary()));
+                    });
+                    ui.add_space(6.0);
+                    // 下行图例
+                    ui.horizontal(|ui| {
+                        let (rect, _) =
+                            ui.allocate_exact_size(Vec2::new(10.0, 10.0), Sense::hover());
+                        ui.painter()
+                            .rect_filled(rect, CornerRadius::same(2), theme::accent());
+                        ui.label(RichText::new("下行").small().color(theme::text_secondary()));
+                    });
+                });
+            });
+
+            ui.add_space(8.0);
+
+            let chart_h = 160.0_f32;
+            let available_w = ui.available_width();
+            let (rect, response) =
+                ui.allocate_exact_size(Vec2::new(available_w, chart_h), Sense::hover());
+
+            let y_axis_w = 52.0_f32;
+            let plot_rect = Rect::from_min_max(
+                egui::pos2(rect.min.x + y_axis_w, rect.min.y + 10.0),
+                egui::pos2(rect.max.x - 8.0, rect.max.y - 24.0),
+            );
+
+            let painter = ui.painter_at(rect);
+
+            // 绘制横向参考刻度线（顶部 100%、中部 50%、底线 0%）
+            for fraction in [1.0_f32, 0.5_f32, 0.0_f32] {
+                let y = plot_rect.max.y - plot_rect.height() * fraction;
+                painter.line_segment(
+                    [
+                        egui::pos2(plot_rect.min.x, y),
+                        egui::pos2(plot_rect.max.x, y),
+                    ],
+                    Stroke::new(1.0, theme::border_subtle().gamma_multiply(0.4)),
+                );
+                let label_val = (max_scale_bytes as f64 * fraction as f64) as u64;
+                painter.text(
+                    egui::pos2(plot_rect.min.x - 6.0, y),
+                    egui::Align2::RIGHT_CENTER,
+                    format_bytes(label_val),
+                    egui::FontId::proportional(9.5),
+                    theme::muted(),
+                );
             }
-            ui.label(RichText::new("按天统计（本地时间，含今天）").size(11.0).color(theme::muted()));
-            ui.add_space(4.0);
-            for row in &self.traffic_days_history {
-                let total = (row.upload + row.download).max(0) as u64;
-                egui::Grid::new(format!("traffic-day-{}", row.day))
-                    .num_columns(4)
-                    .spacing([16.0, 3.0])
-                    .min_col_width(0.0)
-                    .show(ui, |ui| {
+
+            // 悬停检测与柱体绘制
+            let pointer_pos = ui.ctx().pointer_latest_pos();
+            let bar_count = daily_data.len();
+            let slot_w = plot_rect.width() / bar_count as f32;
+            let bar_w = (slot_w * 0.65).clamp(3.0, 18.0);
+            let margin_x = (slot_w - bar_w) / 2.0;
+
+            let mut hovered_day: Option<(String, u64, u64, u64)> = None;
+
+            for (idx, (day_str, short_label, up, down)) in daily_data.iter().enumerate() {
+                let slot_x = plot_rect.min.x + idx as f32 * slot_w;
+                let slot_rect = Rect::from_min_max(
+                    egui::pos2(slot_x, plot_rect.min.y),
+                    egui::pos2(slot_x + slot_w, plot_rect.max.y),
+                );
+
+                let is_hovered = pointer_pos.is_some_and(|p| slot_rect.contains(p));
+                if is_hovered {
+                    painter.rect_filled(
+                        slot_rect,
+                        CornerRadius::same(3),
+                        theme::panel_hover().gamma_multiply(0.4),
+                    );
+                    hovered_day = Some((day_str.clone(), *up, *down, *up + *down));
+                }
+
+                let total = *up + *down;
+                let x = slot_x + margin_x;
+
+                if total == 0 {
+                    // 无流量日绘制 2px 基线浅指示块
+                    let dot_rect = Rect::from_min_max(
+                        egui::pos2(x, plot_rect.max.y - 2.0),
+                        egui::pos2(x + bar_w, plot_rect.max.y),
+                    );
+                    painter.rect_filled(dot_rect, CornerRadius::same(1), theme::border_subtle());
+                } else {
+                    let bar_h =
+                        ((total as f64 / max_scale_bytes as f64) * plot_rect.height() as f64)
+                            .clamp(3.0, plot_rect.height() as f64) as f32;
+                    let down_h = (bar_h * (*down as f32 / total as f32)).round();
+                    let up_h = (bar_h - down_h).max(0.0);
+
+                    let (down_color, up_color) = if is_hovered {
+                        (theme::accent(), theme::success())
+                    } else {
+                        (
+                            theme::accent().gamma_multiply(0.85),
+                            theme::success().gamma_multiply(0.85),
+                        )
+                    };
+
+                    // 下部下行柱体
+                    if down_h > 0.0 {
+                        let down_rect = Rect::from_min_max(
+                            egui::pos2(x, plot_rect.max.y - down_h),
+                            egui::pos2(x + bar_w, plot_rect.max.y),
+                        );
+                        let cr = if up_h <= 0.0 {
+                            CornerRadius {
+                                nw: 2,
+                                ne: 2,
+                                sw: 0,
+                                se: 0,
+                            }
+                        } else {
+                            CornerRadius::ZERO
+                        };
+                        painter.rect_filled(down_rect, cr, down_color);
+                    }
+
+                    // 上部上行柱体
+                    if up_h > 0.0 {
+                        let up_rect = Rect::from_min_max(
+                            egui::pos2(x, plot_rect.max.y - bar_h),
+                            egui::pos2(x + bar_w, plot_rect.max.y - down_h),
+                        );
+                        painter.rect_filled(
+                            up_rect,
+                            CornerRadius {
+                                nw: 2,
+                                ne: 2,
+                                sw: 0,
+                                se: 0,
+                            },
+                            up_color,
+                        );
+                    }
+                }
+
+                // X 轴日期刻度：每 5 天或当天显示日期标签
+                if idx % 5 == 0 || idx == bar_count - 1 {
+                    let label_color = if idx == bar_count - 1 {
+                        theme::accent()
+                    } else {
+                        theme::muted()
+                    };
+                    painter.text(
+                        egui::pos2(x + bar_w / 2.0, plot_rect.max.y + 4.0),
+                        egui::Align2::CENTER_TOP,
+                        short_label,
+                        egui::FontId::proportional(9.0),
+                        label_color,
+                    );
+                }
+            }
+
+            // 悬停气泡提示
+            if let Some((day, up, down, total)) = hovered_day {
+                response.on_hover_ui(|ui| {
+                    ui.set_min_width(140.0);
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new("📅 日期:").size(11.0).color(theme::muted()));
                         ui.label(
-                            RichText::new(&row.day)
-                                .size(12.5)
+                            RichText::new(day)
+                                .strong()
+                                .size(12.0)
                                 .color(theme::text_primary()),
                         );
-                        ui.label(
-                            RichText::new(format!("↑ {}", format_bytes(row.upload.max(0) as u64)))
-                                .size(12.0)
-                                .color(theme::text_secondary()),
-                        );
-                        ui.label(
-                            RichText::new(format!("↓ {}", format_bytes(row.download.max(0) as u64)))
-                                .size(12.0)
-                                .color(theme::text_secondary()),
-                        );
+                    });
+                    ui.add_space(2.0);
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new("↓ 下行:").size(11.0).color(theme::accent()));
+                        ui.label(RichText::new(format_bytes(down)).strong().size(11.5));
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new("↑ 上行:").size(11.0).color(theme::success()));
+                        ui.label(RichText::new(format_bytes(up)).strong().size(11.5));
+                    });
+                    ui.add_space(2.0);
+                    ui.separator();
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new("单日总计:").strong().size(11.5));
                         ui.label(
                             RichText::new(format_bytes(total))
-                                .size(12.5)
                                 .strong()
-                                .color(theme::text_primary()),
+                                .size(12.0)
+                                .color(theme::accent()),
                         );
-                        ui.end_row();
                     });
+                });
             }
         });
     }
@@ -1217,5 +1489,50 @@ mod tests {
         assert_eq!(procs[0].process, "chrome.exe");
         sort_stat_rows(&mut procs, NodeTrafficSort::Upload);
         assert_eq!(procs[0].process, "steam.exe");
+    }
+
+    #[test]
+    fn test_traffic_30_days_daily_series_continuity() {
+        let today = chrono::Local::now().date_naive();
+        let history = [
+            crate::db::telemetry::TrafficDayRow {
+                day: today.format("%Y-%m-%d").to_string(),
+                upload: 100,
+                download: 900,
+            },
+            crate::db::telemetry::TrafficDayRow {
+                day: (today - chrono::Duration::days(5))
+                    .format("%Y-%m-%d")
+                    .to_string(),
+                upload: 50,
+                download: 200,
+            },
+        ];
+
+        let mut daily_data: Vec<(String, String, u64, u64)> = Vec::with_capacity(30);
+        for i in (0..30).rev() {
+            let date = today - chrono::Duration::days(i);
+            let day_str = date.format("%Y-%m-%d").to_string();
+            let short_label = if i == 0 {
+                "今天".to_string()
+            } else {
+                date.format("%m-%d").to_string()
+            };
+            let found = history.iter().find(|r| r.day == day_str);
+            let up = found.map(|r| r.upload.max(0) as u64).unwrap_or(0);
+            let down = found.map(|r| r.download.max(0) as u64).unwrap_or(0);
+            daily_data.push((day_str, short_label, up, down));
+        }
+
+        assert_eq!(daily_data.len(), 30);
+        assert_eq!(daily_data.last().unwrap().1, "今天");
+        assert_eq!(daily_data.last().unwrap().2, 100);
+        assert_eq!(daily_data.last().unwrap().3, 900);
+        // 5 天前的条目索引为 30 - 1 - 5 = 24
+        assert_eq!(daily_data[24].2, 50);
+        assert_eq!(daily_data[24].3, 200);
+        // 无数据的天数为 0
+        assert_eq!(daily_data[0].2, 0);
+        assert_eq!(daily_data[0].3, 0);
     }
 }
