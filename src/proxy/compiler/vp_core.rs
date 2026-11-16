@@ -247,7 +247,6 @@ impl BackendCompiler for VpCoreCompiler {
                                 | "vmess"
                                 | "vless"
                                 | "trojan"
-                                | "socks5"
                         ) && !po.contains_key("udp")
                         {
                             po.insert("udp".into(), serde_json::json!(true));
@@ -1058,6 +1057,39 @@ rules:
             is_node_incompatible_with_vpcore(&mk("vless", json!({"network": "ws"}), "")).is_none()
         );
         assert!(is_node_incompatible_with_vpcore(&mk("ss", json!({}), "")).is_none());
+
+        // OpenVPN 兼容性：CBC/SHA1 遗留套件不兼容，AEAD/GCM 兼容
+        assert!(is_node_incompatible_with_vpcore(&mk(
+            "openvpn",
+            json!({"cipher": "AES-128-CBC", "auth": "SHA1"}),
+            ""
+        ))
+        .is_some());
+        assert!(is_node_incompatible_with_vpcore(&mk(
+            "openvpn",
+            json!({"cipher": "AES-256-CBC"}),
+            ""
+        ))
+        .is_some());
+        assert!(is_node_incompatible_with_vpcore(&mk("openvpn", json!({}), "")).is_some());
+        assert!(is_node_incompatible_with_vpcore(&mk(
+            "openvpn",
+            json!({"cipher": "AES-128-GCM"}),
+            ""
+        ))
+        .is_none());
+        assert!(is_node_incompatible_with_vpcore(&mk(
+            "openvpn",
+            json!({"cipher": "CHACHA20-POLY1305"}),
+            ""
+        ))
+        .is_none());
+        assert!(is_node_incompatible_with_vpcore(&mk(
+            "openvpn",
+            json!({"cipher": "AES-128-GCM", "auth": "SHA1"}),
+            ""
+        ))
+        .is_some());
     }
 
     #[test]
@@ -1249,5 +1281,35 @@ rules:
         assert!(dsl.contains("server: \"162.159.199.1\""));
         assert!(dsl.contains("port: 8095"));
         assert!(dsl.contains("dns: [\"1.1.1.1\", \"2606:4700:4700::1111\"]"));
+    }
+
+    #[test]
+    fn test_vpcore_socks5_does_not_force_udp_true() {
+        let node = test_node(
+            "socks5",
+            json!({
+                "type": "socks5",
+                "server": "1.2.3.4",
+                "port": 1080,
+            }),
+        );
+        let options = MihomoConfigOptions {
+            mixed_port: 7890,
+            controller_port: 9090,
+            ..Default::default()
+        };
+        let plan = crate::proxy::ir::lower_options_to_ir(&options, Some(&node));
+        let artifact = VpCoreCompiler.compile(&plan).expect("compile success");
+        let val = artifact.as_json_value().expect("json value");
+
+        let proxies = val["proxies"].as_array().expect("proxies");
+        let s5 = proxies
+            .iter()
+            .find(|p| p["type"] == "socks5")
+            .expect("socks5 proxy should be preserved");
+        assert_eq!(s5["server"], "1.2.3.4");
+        assert_eq!(s5["port"], 1080);
+        // socks5 节点未声明 udp 时不应被强制注入 udp: true，防止对纯 TCP socks5 节点造成握手异常
+        assert!(s5.get("udp").is_none());
     }
 }

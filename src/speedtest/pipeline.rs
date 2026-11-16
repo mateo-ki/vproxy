@@ -1,5 +1,7 @@
 use crate::db::Database;
-use crate::kernel::{select_proxy_kernel, KernelKind};
+use crate::kernel::{
+    select_proxy_kernel, select_proxy_kernel_preference_for_node, KernelKind, KernelPreference,
+};
 use crate::models::{LatencyResult, Node, SpeedTestSummary, GOOGLE_PROXY_TEST_KIND};
 use crate::proxy::verify_nodes_with_kernel_progress;
 use crate::proxy_probe::{ProxyProbeProgress, ProxyProbeResult};
@@ -499,7 +501,11 @@ pub async fn run_speedtest_pipeline(
     let mut result_kernels = HashMap::new();
 
     for node in actual_candidates {
-        match select_proxy_kernel(&node.protocol) {
+        let selected_kernel =
+            select_proxy_kernel_preference_for_node(&node, KernelPreference::Auto, true, false)
+                .map(|(k, _)| k)
+                .or_else(|_| select_proxy_kernel(&node.protocol));
+        match selected_kernel {
             Ok(KernelKind::Mihomo) => {
                 result_kernels.insert(node.id.clone(), KernelKind::Mihomo);
                 mihomo_nodes.push(node);

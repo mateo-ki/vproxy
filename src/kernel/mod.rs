@@ -554,7 +554,62 @@ pub fn is_node_incompatible_with_meow(node: &Node, has_tun: bool) -> Option<&'st
 /// 必须在选内核阶段就回退，不能等 vpcore 进程退出码 1）。
 ///
 /// xhttp/splithttp、httpupgrade、h2 传输层已由 VP-Core 1.7.4 原生支持，不再阻断。
+/// OpenVPN CBC/SHA1 等遗留套件由 VP-Core（Go 栈）解密会抛出 cannot decrypt peer's message，
+/// 仅支持 AEAD 套件（AES-GCM / ChaCha20-Poly1305），遗留套件平滑回退至 Mihomo。
 pub fn is_node_incompatible_with_vpcore(node: &Node) -> Option<&'static str> {
+    let proto = node.protocol.to_ascii_lowercase();
+    let config_type = node
+        .config
+        .get("type")
+        .and_then(|v| v.as_str())
+        .map(|t| t.to_ascii_lowercase())
+        .unwrap_or_default();
+
+    if proto == "openvpn" || config_type == "openvpn" {
+        let cipher = node
+            .config
+            .get("cipher")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim();
+        let auth = node
+            .config
+            .get("auth")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim();
+
+        let cipher_low = cipher.to_ascii_lowercase();
+        let auth_low = auth.to_ascii_lowercase();
+
+        // VP-Core 的 Go OpenVPN 实现仅支持 AEAD 套件（AES-GCM / ChaCha20-Poly1305）。
+        // 缺少 cipher（OpenVPN 遗留默认 BF-CBC / AES-256-CBC）、明确声明 CBC 系列或使用 SHA1 HMAC 的节点，
+        // 在 VP-Core 下会因 cannot decrypt peer's message 导致解密失败或超时，
+        // 必须回退至原生支持完整 OpenVPN 遗留加密套件的 Mihomo。
+        let is_aead = cipher_low.contains("gcm") || cipher_low.contains("poly1305");
+        let is_cbc =
+            cipher_low.contains("cbc") || cipher_low.contains("bf") || cipher_low == "none";
+        let is_sha1 = auth_low.contains("sha1");
+
+        let raw_low = node.raw.to_ascii_lowercase();
+        let raw_has_gcm = if !is_aead && cipher.is_empty() {
+            raw_low.contains("gcm") || raw_low.contains("poly1305")
+        } else {
+            false
+        };
+
+        let raw_is_cbc = raw_low.contains("cipher aes-128-cbc")
+            || raw_low.contains("cipher aes-256-cbc")
+            || raw_low.contains("cipher=aes-128-cbc")
+            || raw_low.contains("cipher=aes-256-cbc")
+            || raw_low.contains("auth sha1")
+            || raw_low.contains("auth=sha1");
+
+        if is_cbc || is_sha1 || raw_is_cbc || (!is_aead && !raw_has_gcm) {
+            return Some("OpenVPN CBC/SHA1 遗留加密套件（VP-Core 仅支持 AEAD 套件，无法解密）");
+        }
+    }
+
     let mut nets: Vec<String> = Vec::new();
     if let Some(net) = node.config.get("network").and_then(|v| v.as_str()) {
         nets.push(net.to_ascii_lowercase());
@@ -1948,5 +2003,85 @@ Use tags: with_gvisor
         .expect("VpCore 支持 masque 节点选定");
         assert_eq!(vpcore_res, KernelKind::VpCore);
         assert!(vpcore_notice.is_none());
+
+        // 4. OpenVPN CBC/SHA1 节点：指定 VpCore 偏好应自动平滑回退至 Mihomo
+        let ovpn_cbc_node = Node {
+            id: "ovpn-cbc".into(),
+            source_id: None,
+            protocol: "openvpn".into(),
+            name: "OpenVPN CBC Node".into(),
+            server: "1.2.3.4".into(),
+            port: 1194,
+            raw: "openvpn://...".into(),
+            config: serde_json::json!({
+                "type": "openvpn",
+                "cipher": "AES-128-CBC",
+                "auth": "SHA1",
+            }),
+            country: None,
+            latency_ms: None,
+            latency_ok: None,
+            download_kbps: None,
+            latency_kernel: None,
+            latency_test_kind: None,
+            latency_tested_at: None,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        };
+        let (cbc_res, cbc_notice) = select_proxy_kernel_preference_for_node_with(
+            &ovpn_cbc_node,
+            KernelPreference::VpCore,
+            true,
+            false,
+            available_with_vpcore,
+        )
+        .expect("OpenVPN CBC 回退至 Mihomo");
+        assert_eq!(cbc_res, KernelKind::Mihomo);
+        assert!(cbc_notice.as_ref().unwrap().contains("OpenVPN CBC/SHA1"));
+
+        // 5. OpenVPN CBC/SHA1 节点：Auto 偏好也应自动选定 Mihomo
+        let (auto_cbc_res, _) = select_proxy_kernel_preference_for_node_with(
+            &ovpn_cbc_node,
+            KernelPreference::Auto,
+            true,
+            false,
+            available_with_vpcore,
+        )
+        .expect("Auto 偏好下 OpenVPN CBC 应选定 Mihomo");
+        assert_eq!(auto_cbc_res, KernelKind::Mihomo);
+
+        // 6. OpenVPN AEAD(GCM) 节点：VpCore 偏好与 Auto 偏好均应选定 VpCore
+        let ovpn_gcm_node = Node {
+            id: "ovpn-gcm".into(),
+            source_id: None,
+            protocol: "openvpn".into(),
+            name: "OpenVPN GCM Node".into(),
+            server: "1.2.3.4".into(),
+            port: 1194,
+            raw: "openvpn://...".into(),
+            config: serde_json::json!({
+                "type": "openvpn",
+                "cipher": "AES-128-GCM",
+            }),
+            country: None,
+            latency_ms: None,
+            latency_ok: None,
+            download_kbps: None,
+            latency_kernel: None,
+            latency_test_kind: None,
+            latency_tested_at: None,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        };
+        let (gcm_res, gcm_notice) = select_proxy_kernel_preference_for_node_with(
+            &ovpn_gcm_node,
+            KernelPreference::VpCore,
+            true,
+            false,
+            available_with_vpcore,
+        )
+        .expect("VpCore 支持 OpenVPN GCM 节点");
+        assert_eq!(gcm_res, KernelKind::VpCore);
+        assert!(gcm_notice.is_none());
     }
 }
