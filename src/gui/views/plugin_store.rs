@@ -11,7 +11,6 @@ enum PluginCardAction {
     Install(&'static str),
     Uninstall(&'static str),
     DiscoverGists,
-    FetchVpnGate,
     ViewSources,
     ConfigGist,
 }
@@ -74,7 +73,6 @@ impl VpnApp {
                         PluginCardAction::Install(id) => self.install_plugin(id),
                         PluginCardAction::Uninstall(id) => self.uninstall_plugin(id),
                         PluginCardAction::DiscoverGists => self.discover_gists(),
-                        PluginCardAction::FetchVpnGate => self.fetch_vpngate_nodes(),
                         PluginCardAction::ViewSources => self.tab = Tab::Sources,
                         PluginCardAction::ConfigGist => self.show_gist_config_modal = true,
                     }
@@ -195,7 +193,6 @@ impl VpnApp {
                 } else {
                     let pull_label = match plugin.id {
                         "gist" => "⚡ 发现节点",
-                        "vpngate" => "⚡ 拉取节点",
                         _ => "⚡ 立即拉取",
                     };
                     if ui
@@ -205,7 +202,6 @@ impl VpnApp {
                     {
                         action = Some(match plugin.id {
                             "gist" => PluginCardAction::DiscoverGists,
-                            "vpngate" => PluginCardAction::FetchVpnGate,
                             _ => PluginCardAction::ViewSources,
                         });
                     }

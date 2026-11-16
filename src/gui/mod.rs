@@ -1760,14 +1760,8 @@ impl VpnApp {
         if let Err(e) = crate::plugin::save_installed_plugins(&self.installed_plugins) {
             tracing::warn!(error = %e, "保存已安装插件失败");
         }
-        match id {
-            "vpngate" => {
-                self.add_vpngate_source();
-            }
-            "gist" => {
-                self.add_gist_source();
-            }
-            _ => {}
+        if id == "gist" {
+            self.add_gist_source();
         }
         self.status = format!("插件「{id}」安装完成，已同步添加至订阅源！");
     }
@@ -1777,87 +1771,17 @@ impl VpnApp {
         if let Err(e) = crate::plugin::save_installed_plugins(&self.installed_plugins) {
             tracing::warn!(error = %e, "保存已安装插件失败");
         }
-        match id {
-            "vpngate" => {
-                if let Some(src) = self
-                    .sources
-                    .iter()
-                    .find(|s| s.url_template.contains("vpngate.net"))
-                {
-                    let sid = src.id.clone();
-                    self.delete_source(sid);
-                }
+        if id == "gist" {
+            if let Some(src) = self
+                .sources
+                .iter()
+                .find(|s| s.url_template == "gist://discover")
+            {
+                let sid = src.id.clone();
+                self.delete_source(sid);
             }
-            "gist" => {
-                if let Some(src) = self
-                    .sources
-                    .iter()
-                    .find(|s| s.url_template == "gist://discover")
-                {
-                    let sid = src.id.clone();
-                    self.delete_source(sid);
-                }
-            }
-            _ => {}
         }
         self.status = format!("插件「{id}」已卸载并移除关联订阅源。");
-    }
-
-    pub(crate) fn add_vpngate_source(&mut self) {
-        let vpngate_url = "https://www.vpngate.net/api/iphone/";
-        let vpngate_name = "VPN Gate 公共节点";
-        if let Some(existing) = self
-            .sources
-            .iter()
-            .find(|s| s.url_template.contains("vpngate.net"))
-        {
-            let id = existing.id.clone();
-            self.status = format!("VPN Gate 节点源已存在：{}，正在刷新...", existing.name);
-            self.fetch_one(id);
-            return;
-        }
-
-        let db = self.db.clone();
-        let tx = self.tx.clone();
-        self.busy = true;
-        self.status = "正在添加 VPN Gate 官方公共镜像源...".into();
-        self.rt.spawn(async move {
-            let res = match db
-                .create_source(crate::models::CreateSource {
-                    name: vpngate_name.into(),
-                    url_template: vpngate_url.into(),
-                    enabled: true,
-                    remark: Some(
-                        "日本筑波大学学术实验项目，每日更新全球志愿者免费 OpenVPN 节点".into(),
-                    ),
-                    user_agent: None,
-                })
-                .await
-            {
-                Ok(source) => {
-                    let _ = tx.send(BgMsg::SourceAdded(source.id, source.name));
-                    Ok("成功添加 VPN Gate 官方镜像源，正在拉取节点...".into())
-                }
-                Err(e) => Err(e.to_string()),
-            };
-            let _ = tx.send(BgMsg::OpDone {
-                result: res,
-                unlock: true,
-            });
-        });
-    }
-
-    pub(crate) fn fetch_vpngate_nodes(&mut self) {
-        if let Some(src) = self
-            .sources
-            .iter()
-            .find(|s| s.url_template.contains("vpngate.net"))
-        {
-            let id = src.id.clone();
-            self.fetch_one(id);
-        } else {
-            self.add_vpngate_source();
-        }
     }
 
     pub(crate) fn add_gist_source(&mut self) {
@@ -2257,10 +2181,6 @@ impl VpnApp {
             self.discover_gists();
             return;
         }
-        if id == crate::plugin::VPNGATE_SOURCE_ID {
-            self.fetch_vpngate_nodes();
-            return;
-        }
         if self.active_source_fetches.contains(&id) || self.tasks.is_source_active(&id) {
             self.status = "该订阅源正在拉取，请等待当前请求结束".into();
             return;
@@ -2315,10 +2235,6 @@ impl VpnApp {
                 .any(|s| s.id == id && s.url_template.starts_with("gist://"))
         {
             self.discover_gists();
-            return;
-        }
-        if id == crate::plugin::VPNGATE_SOURCE_ID {
-            self.fetch_vpngate_nodes();
             return;
         }
         let proxy_url = self

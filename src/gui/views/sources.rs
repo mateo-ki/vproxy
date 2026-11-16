@@ -145,20 +145,6 @@ impl VpnApp {
                 self.fetch_warp_masque_native();
             }
 
-            if self.is_plugin_installed("vpngate")
-                && ui
-                    .add_enabled(
-                        !self.busy,
-                        egui::Button::new(format!("⛩️ {}", self.tr("VPN Gate 节点"))),
-                    )
-                    .on_hover_text(
-                        "拉取日本筑波大学 VPN Gate 公共镜像节点（https://www.vpngate.net/api/iphone/）",
-                    )
-                    .clicked()
-            {
-                self.fetch_vpngate_nodes();
-            }
-
             if self.is_plugin_installed("gist") {
                 if ui
                     .add_enabled(!self.busy, egui::Button::new(format!("🔍 {}", self.tr("Gist 发现"))))
@@ -399,7 +385,7 @@ impl VpnApp {
                                             ui.label(RichText::new(badge).color(color));
                                             if s.is_imported() {
                                                 ui.label(RichText::new("本地源").small().color(theme::accent_strong()));
-                                            } else if s.url_template.starts_with("gist://") || s.url_template.contains("vpngate.net") {
+                                            } else if s.url_template.starts_with("gist://") {
                                                 ui.label(RichText::new("插件源").small().color(theme::accent()));
                                             }
                                             if s.push_disabled {
