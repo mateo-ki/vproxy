@@ -13,6 +13,11 @@ impl VpnApp {
                 Icon::Plug,
                 self.tr("活动节点列表"),
             ),
+            (
+                ExtensionsTab::PluginStore,
+                Icon::Package,
+                self.tr("插件商店"),
+            ),
         ];
 
         macos_segmented_tabs(ui, &mut self.extensions_tab, &tabs);
@@ -24,6 +29,9 @@ impl VpnApp {
             }
             ExtensionsTab::PortMappings => {
                 ui.push_id("tab_port_mappings", |ui| self.ui_proxy_port_mappings(ui));
+            }
+            ExtensionsTab::PluginStore => {
+                ui.push_id("tab_plugin_store", |ui| self.ui_plugin_store(ui));
             }
         };
     }

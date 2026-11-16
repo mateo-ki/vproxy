@@ -995,13 +995,17 @@ impl Collector {
     }
 
     pub async fn fetch_source(&self, source: &Source) -> FetchResult {
-        if source.is_imported() {
+        if source.is_imported() || source.url_template.starts_with("gist://") {
             return FetchResult {
                 source_id: source.id.clone(),
                 source_name: source.name.clone(),
                 resolved_url: source.url_template.clone(),
                 success: true,
-                message: "本地导入源无需拉取".to_string(),
+                message: if source.url_template.starts_with("gist://") {
+                    "Gist 发现源请使用「Gist 发现」单独执行".to_string()
+                } else {
+                    "本地导入源无需拉取".to_string()
+                },
                 node_count: source.last_node_count.max(0) as usize,
                 extracted_rules: Vec::new(),
             };

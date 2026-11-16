@@ -74,12 +74,13 @@ pub enum Tab {
     About,
 }
 
-/// 扩展功能页的分区标签：隐私安全、活动节点列表。
+/// 扩展功能页的分区标签：隐私安全、活动节点列表、插件商店。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ExtensionsTab {
     #[default]
     Security,
     PortMappings,
+    PluginStore,
 }
 
 /// 系统设置页的分区标签：通用设置、界面外观、订阅与测速、自愈网络、外部接口、系统清理。

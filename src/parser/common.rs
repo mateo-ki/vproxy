@@ -31,6 +31,13 @@ pub fn expand_url_template(template: &str) -> String {
     let m_short = if m_no0.is_empty() { "0" } else { m_no0 };
     let d_short = if d_no0.is_empty() { "0" } else { d_no0 };
 
+    let t = template.trim();
+    if (t.starts_with("https://www.vpngate.net") || t.starts_with("http://www.vpngate.net"))
+        && !t.contains("/api/iphone")
+    {
+        return "https://www.vpngate.net/api/iphone/".to_string();
+    }
+
     template
         .replace("{Ymd}", &ymd)
         .replace("{ymd}", &ymd_short)

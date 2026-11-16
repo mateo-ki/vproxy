@@ -2,6 +2,7 @@ mod clash;
 mod common;
 pub mod openrung;
 mod uri;
+pub mod vpngate;
 pub mod warp_masque;
 
 pub use clash::{
@@ -12,6 +13,7 @@ pub use common::{
 };
 pub use openrung::parse_openrung_json;
 pub use uri::parse_uri;
+pub use vpngate::parse_vpngate_csv;
 pub use warp_masque::parse_warp_masque_json;
 
 use crate::models::Node;
@@ -108,6 +110,16 @@ pub fn parse_subscription(content: &str, source_id: Option<&str>) -> Vec<Node> {
             if !nodes.is_empty() {
                 return dedup_nodes(nodes);
             }
+        }
+    }
+
+    // 0.2) Try VPN Gate CSV
+    if content.starts_with("*vpn_servers")
+        || (content.contains("#HostName,IP,Score") && content.contains("OpenVPN_ConfigData_Base64"))
+    {
+        let nodes = parse_vpngate_csv(content, source_id);
+        if !nodes.is_empty() {
+            return dedup_nodes(nodes);
         }
     }
 

@@ -28,6 +28,9 @@ enum SourceRowMenuAction {
 impl VpnApp {
     pub(crate) fn ui_sources(&mut self, ui: &mut Ui) {
         self.ui_clear_sources_confirm(ui.ctx());
+        if self.is_plugin_installed("gist") {
+            self.ui_gist_config_modal(ui.ctx());
+        }
 
         section_title(ui, self.tr("订阅源"), "多源汇聚 · 自动拉取 · 节点解析");
 
@@ -140,6 +143,37 @@ impl VpnApp {
                 .clicked()
             {
                 self.fetch_warp_masque_native();
+            }
+
+            if self.is_plugin_installed("vpngate")
+                && ui
+                    .add_enabled(
+                        !self.busy,
+                        egui::Button::new(format!("⛩️ {}", self.tr("VPN Gate 节点"))),
+                    )
+                    .on_hover_text(
+                        "拉取日本筑波大学 VPN Gate 公共镜像节点（https://www.vpngate.net/api/iphone/）",
+                    )
+                    .clicked()
+            {
+                self.fetch_vpngate_nodes();
+            }
+
+            if self.is_plugin_installed("gist") {
+                if ui
+                    .add_enabled(!self.busy, egui::Button::new(format!("🔍 {}", self.tr("Gist 发现"))))
+                    .on_hover_text("扫描 GitHub Gist 搜索结果，自动发现公开节点与订阅")
+                    .clicked()
+                {
+                    self.discover_gists();
+                }
+                if ui
+                    .button(format!("⚙️ {}", self.tr("Gist 配置")))
+                    .on_hover_text("配置 Gist 发现协议类型与翻页深度")
+                    .clicked()
+                {
+                    self.show_gist_config_modal = true;
+                }
             }
 
             let prune_enabled = !self.busy && !self.homogeneity_busy;
@@ -365,6 +399,8 @@ impl VpnApp {
                                             ui.label(RichText::new(badge).color(color));
                                             if s.is_imported() {
                                                 ui.label(RichText::new("本地源").small().color(theme::accent_strong()));
+                                            } else if s.url_template.starts_with("gist://") || s.url_template.contains("vpngate.net") {
+                                                ui.label(RichText::new("插件源").small().color(theme::accent()));
                                             }
                                             if s.push_disabled {
                                                 ui.label(RichText::new(self.tr("不推送")).small().color(theme::warning()));

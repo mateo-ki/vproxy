@@ -18,6 +18,7 @@ pub mod kernel;
 pub mod models;
 pub mod parser;
 pub mod platform;
+pub mod plugin;
 pub mod profile;
 pub mod proxy;
 pub mod proxy_probe;
