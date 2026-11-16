@@ -232,10 +232,14 @@ impl BackendCompiler for VpCoreCompiler {
                         }
                     }
                     if let Some(po) = p.as_object_mut() {
-                        let ty = po.get("type").and_then(|v| v.as_str()).unwrap_or("");
+                        let ty = po
+                            .get("type")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string();
                         // 补全所有支持 UDP 协议的节点 udp: true 标记 (特别是 Hysteria2 / Tuic / WireGuard / SS 等)
                         if matches!(
-                            ty,
+                            ty.as_str(),
                             "hysteria"
                                 | "hysteria2"
                                 | "hy2"
@@ -250,6 +254,32 @@ impl BackendCompiler for VpCoreCompiler {
                         ) && !po.contains_key("udp")
                         {
                             po.insert("udp".into(), serde_json::json!(true));
+                        }
+
+                        // Issue #13: 针对基于 UDP/QUIC 的协议 (Hysteria2/Tuic/WireGuard/Masque)，
+                        // 当开启 IPv6 或目标服务器为 IPv6 地址时，Windows PPPoE/局域网下默认 1500/1452 MTU
+                        // 会引发 WSAEMSGSIZE (10040) "数据报套接字上的消息大于内部缓冲区" 警告。
+                        // 钳制其最大 MTU: IPv6 环境设为 1280 (RFC 8200 标准 IPv6 保证尺寸)，IPv4 设为 1360 (留足封装开销)。
+                        if matches!(
+                            ty.as_str(),
+                            "hysteria" | "hysteria2" | "hy2" | "tuic" | "wireguard" | "masque"
+                        ) {
+                            let is_ipv6_dest = po
+                                .get("server")
+                                .and_then(|v| v.as_str())
+                                .is_some_and(|s| s.contains(':'));
+                            let safe_mtu = if plan.dns.ipv6 || is_ipv6_dest {
+                                1280
+                            } else {
+                                1360
+                            };
+                            if let Some(m) = po.get("mtu").and_then(|v| v.as_u64()) {
+                                if m > safe_mtu {
+                                    po.insert("mtu".into(), serde_json::json!(safe_mtu));
+                                }
+                            } else {
+                                po.insert("mtu".into(), serde_json::json!(safe_mtu));
+                            }
                         }
 
                         // 彻底清理重名 alias 字段，防止 serde 抛出 duplicate field `server_name` 错误
@@ -378,11 +408,14 @@ impl BackendCompiler for VpCoreCompiler {
 
             // TUN 模式：生成 vp_core 标准 TUN 字段与 Fake-IP DNS 联动
             if plan.inbounds.mode.has_tun() {
+                // Issue #13: 针对 TUN 模式，IPv6 双栈开启时 MTU 钳制至 1280 防止二层封装突破物理 MTU (1500/1492)；
+                // IPv4 设为业界标准安全尺寸 1400 (Sing-box/WireGuard 推荐)，确保 TCP MSS 正确协商，避免 10040 报错。
+                let tun_mtu = if plan.dns.ipv6 { 1280 } else { 1400 };
                 let mut tun_cfg = serde_json::json!({
                     "enable": true,
                     "address": "198.18.0.1",
                     "netmask": "255.255.0.0",
-                    "mtu": 1500,
+                    "mtu": tun_mtu,
                     "fake-ip-range": "198.18.0.0/16",
                     "auto-route": plan.inbounds.tun.auto_route,
                     "ring-capacity": 4194304,
@@ -1116,12 +1149,13 @@ rules:
         assert_eq!(val["dns"]["ipv6"], serde_json::json!(true));
         assert_eq!(val["dns"]["fake-ip-range6"], "fc00::/18");
 
-        // 2. 验证 TUN IPv6 双栈参数
+        // 2. 验证 TUN IPv6 双栈参数与 MTU 钳制（Issue #13）
         assert_eq!(val["tun"]["ipv6"], serde_json::json!(true));
         assert_eq!(val["tun"]["address6"], "fdfe:dcba:9876::1/64");
         assert_eq!(val["tun"]["fake-ip-range6"], "fc00::/18");
+        assert_eq!(val["tun"]["mtu"], 1280);
 
-        // 3. 验证 Hysteria2 包含 udp: true 及 ports
+        // 3. 验证 Hysteria2 包含 udp: true 及 ports 与 IPv6 下安全 MTU 1280
         let proxies = val["proxies"].as_array().expect("proxies");
         let hy2 = proxies
             .iter()
@@ -1129,6 +1163,24 @@ rules:
             .expect("hy2 proxy");
         assert_eq!(hy2["udp"], serde_json::json!(true));
         assert_eq!(hy2["ports"], "20000-30000");
+        assert_eq!(hy2["mtu"], 1280);
+
+        // 4. 验证在仅 IPv4 模式下 TUN MTU 为 1400，Hysteria2 MTU 为 1360
+        options.dns.ipv6 = false;
+        let plan_v4 = crate::proxy::ir::lower_options_to_ir(&options, Some(&node));
+        let val_v4 = VpCoreCompiler
+            .compile(&plan_v4)
+            .unwrap()
+            .as_json_value()
+            .unwrap();
+        assert_eq!(val_v4["tun"]["mtu"], 1400);
+        let hy2_v4 = val_v4["proxies"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|p| p["type"] == "hysteria2")
+            .unwrap();
+        assert_eq!(hy2_v4["mtu"], 1360);
     }
 
     #[test]
