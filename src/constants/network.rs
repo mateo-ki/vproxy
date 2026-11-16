@@ -45,6 +45,25 @@ pub const GIST_RAW_BASE: &str = "https://gist.githubusercontent.com";
 /// GitHub Raw 国内加速镜像列表
 pub const GITHUB_RAW_MIRRORS: &[&str] = &["gh-proxy.com", "ghfast.top"];
 
+/// VPN Gate 官方域名列表
+pub const VPNGATE_HOSTS: &[&str] = &["www.vpngate.net", "vpngate.net"];
+
+/// VPN Gate 镜像数据源列表（用于中国大陆等直连被阻断地区的并发竞速拉取）
+pub const VPNGATE_CSV_MIRRORS: &[(&str, &str)] = &[
+    (
+        "https://cdn.jsdelivr.net/gh/GeorgeXie2333/vpngate-list-mirror@latest/data/vpngate.csv",
+        "cdn.jsdelivr.net",
+    ),
+    (
+        "https://fastly.jsdelivr.net/gh/GeorgeXie2333/vpngate-list-mirror@latest/data/vpngate.csv",
+        "fastly.jsdelivr.net",
+    ),
+    (
+        "https://testingcf.jsdelivr.net/gh/GeorgeXie2333/vpngate-list-mirror@latest/data/vpngate.csv",
+        "testingcf.jsdelivr.net",
+    ),
+];
+
 /// Gist 自动发现专用 Source ID
 pub const GIST_DISCOVERY_SOURCE_ID: &str = "__gist_discovery__";
 

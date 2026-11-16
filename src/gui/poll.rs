@@ -628,6 +628,8 @@ impl VpnApp {
                                         || msg.contains("timeout")
                                         || msg.contains("connection")
                                         || msg.contains("error sending request")
+                                        || msg.contains("超时")
+                                        || msg.contains("连接")
                                     {
                                         format!(
                                             "订阅“{}”拉取失败（海外服务直连阻断）：{}；建议启动内核后点击「代理拉取」",

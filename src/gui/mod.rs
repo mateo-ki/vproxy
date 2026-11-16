@@ -2267,20 +2267,35 @@ impl VpnApp {
         }
         let collector = self.collector.clone();
         let tx = self.tx.clone();
-        let proxy_url = self.subscription_proxy_url();
+        let app_proxy = self.subscription_proxy_url();
         self.active_source_fetches.insert(id.clone());
         self.status = "正在拉取订阅源...".into();
         self.rt.spawn(async move {
+            let mut proxy_candidates: Vec<String> = Vec::new();
+            if let Some(url) = app_proxy {
+                proxy_candidates.push(url);
+            }
+            if let Some(url) =
+                tokio::task::spawn_blocking(crate::system_proxy::current_system_proxy_url)
+                    .await
+                    .ok()
+                    .flatten()
+            {
+                if !proxy_candidates.contains(&url) {
+                    proxy_candidates.push(url);
+                }
+            }
             let mut res = collector.fetch_one(&id).await.map_err(|e| e.to_string());
-            if let Some(proxy_url) = proxy_url {
-                let should_fallback = match &res {
-                    Ok(f) => !f.success,
-                    Err(_) => true,
-                };
-                if should_fallback {
-                    if let Ok(proxy_res) = collector.fetch_one_with_proxy(&id, &proxy_url).await {
+            let should_fallback = match &res {
+                Ok(f) => !f.success,
+                Err(_) => true,
+            };
+            if should_fallback {
+                for proxy_url in &proxy_candidates {
+                    if let Ok(proxy_res) = collector.fetch_one_with_proxy(&id, proxy_url).await {
                         if proxy_res.success {
                             res = Ok(proxy_res);
+                            break;
                         }
                     }
                 }
@@ -2306,8 +2321,11 @@ impl VpnApp {
             self.fetch_vpngate_nodes();
             return;
         }
-        let Some(proxy_url) = self.subscription_proxy_url() else {
-            self.status = "请先启动内核，再使用代理拉取订阅".into();
+        let proxy_url = self
+            .subscription_proxy_url()
+            .or_else(crate::system_proxy::current_system_proxy_url);
+        let Some(proxy_url) = proxy_url else {
+            self.status = "请先启动内核或开启系统代理，再使用代理拉取订阅".into();
             return;
         };
         if self.active_source_fetches.contains(&id) || self.tasks.is_source_active(&id) {
@@ -2333,7 +2351,7 @@ impl VpnApp {
     pub(crate) fn fetch_all(&mut self) {
         let collector = self.collector.clone();
         let tx = self.tx.clone();
-        let proxy_url = self.subscription_proxy_url();
+        let app_proxy = self.subscription_proxy_url();
         self.busy = true;
         self.status = "正在拉取全部启用源...".into();
         self.rt.spawn(async move {
@@ -2344,16 +2362,30 @@ impl VpnApp {
                 }))
                 .await
                 .map_err(|e| e.to_string());
-            if let Some(proxy_url) = proxy_url {
-                let should_fallback = match &res {
-                    Ok(list) => list.iter().any(|item| !item.success),
-                    Err(_) => true,
-                };
-                if should_fallback {
+            let should_fallback = match &res {
+                Ok(list) => list.iter().any(|item| !item.success),
+                Err(_) => true,
+            };
+            if should_fallback {
+                let mut proxy_candidates: Vec<String> = Vec::new();
+                if let Some(url) = app_proxy {
+                    proxy_candidates.push(url);
+                }
+                if let Some(url) =
+                    tokio::task::spawn_blocking(crate::system_proxy::current_system_proxy_url)
+                        .await
+                        .ok()
+                        .flatten()
+                {
+                    if !proxy_candidates.contains(&url) {
+                        proxy_candidates.push(url);
+                    }
+                }
+                for proxy_url in &proxy_candidates {
                     let progress_tx = tx.clone();
                     if let Ok(proxy_res) = collector
                         .fetch_all_enabled_with_proxy(
-                            &proxy_url,
+                            proxy_url,
                             Some(move |done, total| {
                                 let _ = progress_tx.send(BgMsg::FetchProgress { done, total });
                             }),
@@ -2361,6 +2393,7 @@ impl VpnApp {
                         .await
                     {
                         res = Ok(proxy_res);
+                        break;
                     }
                 }
             }
@@ -2369,8 +2402,11 @@ impl VpnApp {
     }
 
     pub(crate) fn fetch_all_via_proxy(&mut self) {
-        let Some(proxy_url) = self.subscription_proxy_url() else {
-            self.status = "请先启动内核，再使用代理拉取订阅".into();
+        let proxy_url = self
+            .subscription_proxy_url()
+            .or_else(crate::system_proxy::current_system_proxy_url);
+        let Some(proxy_url) = proxy_url else {
+            self.status = "请先启动内核或开启系统代理，再使用代理拉取订阅".into();
             return;
         };
         let collector = self.collector.clone();

@@ -41,7 +41,8 @@ static HOST_FETCH_LIMITS: Lazy<StdMutex<HashMap<String, Weak<tokio::sync::Semaph
 const PER_HOST_FETCH_CONCURRENCY: usize = 2;
 
 use crate::constants::network::{
-    GIST_RAW_BASE, GIST_SEARCH_HOST, GITHUB_RAW_HOST, GITHUB_RAW_MIRRORS,
+    GIST_RAW_BASE, GIST_SEARCH_HOST, GITHUB_RAW_HOST, GITHUB_RAW_MIRRORS, VPNGATE_CSV_MIRRORS,
+    VPNGATE_HOSTS,
 };
 /// 这些主机的 raw 内容可以被镜像前缀代理（gist raw 已实测与直连 size 一致；
 /// gist.github.com 的 HTML 搜索页镜像不代理，只能直连）。
@@ -1276,6 +1277,17 @@ fn fetch_candidates(resolved_url: &str, winner: Option<&str>) -> Vec<FetchCandid
             mirror: true,
         }));
     }
+    if VPNGATE_HOSTS.contains(&candidates[0].host.as_str()) {
+        candidates.extend(
+            VPNGATE_CSV_MIRRORS
+                .iter()
+                .map(|(url, host)| FetchCandidate {
+                    url: (*url).to_string(),
+                    host: (*host).to_string(),
+                    mirror: true,
+                }),
+        );
+    }
     if let Some(winner) = winner {
         let index = candidates.iter().position(|c| c.host == winner);
         if let Some(index) = index.filter(|index| *index > 0) {
@@ -1778,6 +1790,21 @@ mod tests {
         let other = fetch_candidates("https://example.com/sub.yaml", None);
         assert_eq!(other.len(), 1);
         assert!(!other[0].mirror);
+    }
+
+    #[test]
+    fn vpngate_urls_get_mirror_candidates() {
+        let raw = "https://www.vpngate.net/api/iphone/";
+        let candidates = fetch_candidates(raw, None);
+        assert_eq!(candidates.len(), 1 + VPNGATE_CSV_MIRRORS.len());
+        assert!(!candidates[0].mirror);
+        assert_eq!(candidates[0].url, raw);
+        assert_eq!(candidates[1].host, "cdn.jsdelivr.net");
+        assert!(candidates[1].mirror);
+
+        let reordered = fetch_candidates(raw, Some("cdn.jsdelivr.net"));
+        assert_eq!(reordered[0].host, "cdn.jsdelivr.net");
+        assert_eq!(reordered.len(), candidates.len());
     }
 
     #[tokio::test]
