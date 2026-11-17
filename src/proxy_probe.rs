@@ -286,6 +286,27 @@ async fn verify_nodes_with_mihomo_path(
                         outcome = Ok(cf_res);
                     }
                 }
+                // 二次复测取最小值：P2P 型网络（URnetwork 等）首次连接含组网协商，
+                // 冷路径首响应 1~2.5s、暖路径 ~0.6s——取两次最小值更贴近真实可用延迟。
+                // 常规机房节点两次几乎相同，无副作用（测速时长约 ×2）。
+                if let Ok((delay, target_label)) = outcome {
+                    let target_url = if target_label == "Cloudflare" {
+                        PROXY_CONNECTIVITY_FALLBACK_URL
+                    } else {
+                        PROXY_CONNECTIVITY_TEST_URL
+                    };
+                    if let Ok((second, _)) = probe_mihomo_target(
+                        &client,
+                        &url,
+                        timeout_ms.as_str(),
+                        target_url,
+                        target_label,
+                    )
+                    .await
+                    {
+                        outcome = Ok((delay.min(second), target_label));
+                    }
+                }
                 let result = match outcome {
                     Ok((delay, target)) => ProxyProbeResult {
                         id: proxy.id,
