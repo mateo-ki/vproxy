@@ -1,12 +1,12 @@
 {
-  "version": "1.16.14",
+  "version": "1.16.15",
   "description": "VProxy: A modern cross-platform proxy workstation with desktop GUI, multi-core compilers and HTTP API.",
   "homepage": "https://github.com/mateo-ki/vproxy",
   "license": "MIT",
   "architecture": {
     "64bit": {
-      "url": "https://github.com/mateo-ki/vproxy/releases/download/v1.16.14/vproxy-1.16.14-windows-x64-portable.zip",
-      "hash": "0819b1b6337f80152776c2f4757913c2d7afa837edaf5788e8b7c41d30f139f1"
+      "url": "https://github.com/mateo-ki/vproxy/releases/download/v1.16.15/vproxy-1.16.15-windows-x64-portable.zip",
+      "hash": "8e5e4e9b3d0c30627817fdf93aced7fdddfdd33c232b8b17d097443f6e183592"
     }
   },
   "bin": "vproxy.exe",
