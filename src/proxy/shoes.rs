@@ -266,7 +266,8 @@ async fn probe_batch(
             if child.try_wait().ok().flatten().is_some() {
                 return false;
             }
-            if TcpStream::connect(("127.0.0.1", ready_port)).await.is_ok() {
+            if let Ok(stream) = TcpStream::connect(("127.0.0.1", ready_port)).await {
+                let _ = stream.set_zero_linger();
                 return true;
             }
             tokio::time::sleep(Duration::from_millis(20)).await;
@@ -303,6 +304,7 @@ async fn probe_batch(
                 Ok(_permit) => match proxy {
                     Ok(proxy) => match reqwest::Client::builder()
                         .proxy(proxy)
+                        .http1_only()
                         .timeout(timeout)
                         .build()
                     {

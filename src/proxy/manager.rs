@@ -36,6 +36,23 @@ const RECOVERY_DELAYS: [Duration; 3] = [
     Duration::from_secs(15),
 ];
 
+/// 批量测速结束后对运行中代理内核的健康自检与自愈结果。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SpeedtestRecoveryOutcome {
+    /// 代理未运行、无活动内核进程或已被用户新操作取代，无需处理。
+    Skipped,
+    /// 测速结束后代理端到端连通正常，零打扰。
+    Healthy,
+    /// 检测到系统代理被外部篡改并已自动写回，端到端正常。
+    RearmedSystemProxy,
+    /// 测速后检测到代理无响应，清理僵尸连接后已恢复连通。
+    FlushedConnections,
+    /// 清理连接后仍不通，已自动平滑重启内核恢复网络。
+    RestartedKernel,
+    /// 自动重启恢复失败。
+    Failed(String),
+}
+
 #[derive(Debug)]
 pub struct ProxyWorkDir {
     root: PathBuf,
@@ -1100,6 +1117,130 @@ impl ProxyManager {
         (ok, started.elapsed().as_millis() as u64)
     }
 
+    /// 批量测速结束后对运行中代理执行健康自检与分层自愈：
+    /// 1. 先检查系统代理是否发生外部漂移（若漂移且已开启系统代理，写回恢复）；
+    /// 2. 对本地 mixed 端口做一次轻量端到端连通性探测，若正常则零打扰直接返回；
+    /// 3. 若探测失败，先通过控制器 `DELETE /connections` 清理测速风暴残留的僵尸/NAT 失效长连接并复测；
+    /// 4. 若清连接后仍不通，自动对当前活动节点执行一次平滑内核重启以彻底恢复浏览器网络。
+    pub async fn recover_after_speedtest(&self) -> SpeedtestRecoveryOutcome {
+        let request = self.current_request();
+        let (controller_port, controller_secret, mixed_port, mode, kernel, has_live_child) = {
+            let mut runtime = self.runtime.lock().await;
+            if !matches!(
+                runtime.status.state,
+                ProxyState::Running | ProxyState::Degraded
+            ) {
+                return SpeedtestRecoveryOutcome::Skipped;
+            }
+            let alive = runtime
+                .child
+                .as_mut()
+                .is_some_and(|child| child.try_wait().is_ok_and(|status| status.is_none()));
+            (
+                runtime.options.controller_port,
+                runtime.options.controller_secret.clone(),
+                runtime.options.mixed_port,
+                runtime.options.mode,
+                runtime.status.kernel,
+                alive,
+            )
+        };
+
+        if !has_live_child {
+            return SpeedtestRecoveryOutcome::Skipped;
+        }
+
+        // 1. 系统代理模式下顺手核对一次系统代理是否被外部篡改
+        let mut rearmed = false;
+        if mode.has_system() {
+            let expected = format!("127.0.0.1:{mixed_port}");
+            let control = self.system_proxy.clone();
+            let drifted = tokio::task::spawn_blocking(move || {
+                control
+                    .capture()
+                    .map(|snap| {
+                        !matches!(
+                            crate::system_proxy::classify_drift(&snap, &expected),
+                            crate::system_proxy::Drift::InSync
+                        )
+                    })
+                    .unwrap_or(false)
+            })
+            .await
+            .unwrap_or(false);
+            if drifted
+                && self.request_is_current(request)
+                && self.rearm_system_proxy().await.is_ok()
+            {
+                rearmed = true;
+            }
+        }
+
+        // 2. 轻量端到端健康探测：正常则零打扰退出
+        let (ok, _) = self.probe_health(Duration::from_secs(4)).await;
+        if ok {
+            return if rearmed {
+                SpeedtestRecoveryOutcome::RearmedSystemProxy
+            } else {
+                SpeedtestRecoveryOutcome::Healthy
+            };
+        }
+        if !self.request_is_current(request) {
+            return SpeedtestRecoveryOutcome::Skipped;
+        }
+
+        // 3. 探测失败：优先通过控制器清理所有僵尸/半开连接，让浏览器立刻建立新连接
+        let supports_controller = matches!(
+            kernel,
+            Some(KernelKind::Mihomo | KernelKind::VpCore | KernelKind::Meow | KernelKind::Shoes)
+        );
+        if supports_controller && controller_port > 0 {
+            if let Ok(client) = reqwest::Client::builder()
+                .no_proxy()
+                .timeout(Duration::from_secs(2))
+                .build()
+            {
+                let url = format!("http://127.0.0.1:{controller_port}/connections");
+                let _ = with_controller_auth(client.delete(&url), &controller_secret)
+                    .send()
+                    .await;
+            }
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            if !self.request_is_current(request) {
+                return SpeedtestRecoveryOutcome::Skipped;
+            }
+            let (ok_after_flush, _) = self.probe_health(Duration::from_secs(4)).await;
+            if ok_after_flush {
+                return SpeedtestRecoveryOutcome::FlushedConnections;
+            }
+        }
+
+        // 4. 清理连接后依然不通：在不与用户手动启停/切节点冲突的前提下自动平滑重启内核
+        let Ok(_operation) = self.operation.try_lock() else {
+            return SpeedtestRecoveryOutcome::Skipped;
+        };
+        if !self.request_is_current(request) {
+            return SpeedtestRecoveryOutcome::Skipped;
+        }
+        let active_node = {
+            let runtime = self.runtime.lock().await;
+            if !matches!(
+                runtime.status.state,
+                ProxyState::Running | ProxyState::Degraded
+            ) {
+                return SpeedtestRecoveryOutcome::Skipped;
+            }
+            runtime.current_node.clone()
+        };
+        let Some(node) = active_node else {
+            return SpeedtestRecoveryOutcome::Skipped;
+        };
+        match self.restart_inner(&node, None, false).await {
+            Ok(()) => SpeedtestRecoveryOutcome::RestartedKernel,
+            Err(error) => SpeedtestRecoveryOutcome::Failed(error.to_string()),
+        }
+    }
+
     /// 启动前注入 url-test 候选节点（不持久化，只影响本次生成的配置）。返回真正
     /// 能导出成 clash proxy 的个数：内核侧只有 >1 才会生成「自动选择」组。
     pub async fn set_url_test_candidates(&self, nodes: Vec<Node>) -> usize {
@@ -1542,6 +1683,7 @@ impl ProxyManager {
         let mode_str = routing_mode.as_controller_mode();
 
         let client = match reqwest::Client::builder()
+            .no_proxy()
             .timeout(Duration::from_millis(2500))
             .build()
         {
@@ -2618,6 +2760,7 @@ impl ProxyManager {
         }
 
         let client = match reqwest::Client::builder()
+            .no_proxy()
             .timeout(Duration::from_millis(1500))
             .build()
         {
@@ -3679,6 +3822,15 @@ mod recovery_tests {
             mode: ProxyMode::None,
             ..Default::default()
         })
+    }
+
+    #[tokio::test]
+    async fn recover_after_speedtest_skips_when_stopped() {
+        let manager = manager();
+        assert_eq!(
+            manager.recover_after_speedtest().await,
+            SpeedtestRecoveryOutcome::Skipped
+        );
     }
 
     #[tokio::test]

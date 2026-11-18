@@ -25,8 +25,14 @@ pub async fn connect_resolved(
         };
 
         match tokio::time::timeout(per_addr_budget, TcpStream::connect(addr)).await {
-            Ok(Ok(_stream)) => {
+            Ok(Ok(stream)) => {
                 let latency_ms = start.elapsed().as_millis() as i64;
+                // 预筛只测端口 TCP 可达性，不收发应用层数据。
+                // 设 SO_LINGER(0) 让关闭发 TCP RST 而非四次挥手 FIN，避免上万次预筛在 Windows
+                // （动态端口仅 16,384 个，TIME_WAIT 默认 120s）及家用光猫/路由器 NAT 表中堆积
+                // 大量 TIME_WAIT 残留，把运行中代理内核的长连接挤掉导致浏览器无网络。
+                let _ = stream.set_zero_linger();
+                drop(stream);
                 return Ok(latency_ms.max(1));
             }
             Ok(Err(e)) => last_error = format!("connect error: {e}"),
@@ -69,5 +75,25 @@ pub async fn probe_full_resolved(
             format!("{latency_ms} ms (TCP)"),
         ),
         Err(msg) => (false, None, None, msg),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::net::TcpListener;
+
+    #[tokio::test]
+    async fn connect_resolved_succeeds_with_zero_linger_probe() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let accept = tokio::spawn(async move {
+            let _ = listener.accept().await;
+        });
+        let latency = connect_resolved(vec![addr], Duration::from_secs(2))
+            .await
+            .unwrap();
+        assert!(latency >= 1);
+        let _ = accept.await;
     }
 }

@@ -1116,6 +1116,7 @@ pub async fn fetch_vpcore_explain(
     network: Option<&str>,
 ) -> Result<VpCoreRouteTrace, String> {
     let client = reqwest::Client::builder()
+        .no_proxy()
         .timeout(std::time::Duration::from_millis(2500))
         .build()
         .map_err(|e| format!("构建 HTTP 客户端失败: {e}"))?;

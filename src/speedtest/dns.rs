@@ -68,9 +68,18 @@ pub async fn resolve_targets_parallel(
         return resolved;
     }
 
+    // 限制系统 DNS 解析并发上限（最高 24 路），防止 128 路并发 getaddrinfo
+    // 冲垮 Windows Dnscache 与家用路由器 UDP/53 NAT 表。
+    const MAX_DNS_CONCURRENCY: usize = 24;
+    let dns_limit = Arc::new(Semaphore::new(
+        network_limit
+            .available_permits()
+            .clamp(1, MAX_DNS_CONCURRENCY),
+    ));
+
     let mut tasks = JoinSet::new();
     for (host, ports) in domains_to_resolve {
-        let limit = network_limit.clone();
+        let limit = dns_limit.clone();
         tasks.spawn(async move {
             let _permit = match limit.acquire_owned().await {
                 Ok(permit) => permit,

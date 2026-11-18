@@ -715,6 +715,7 @@ impl VpnApp {
                             }
                             self.request_full_reload();
                             crate::platform::trim_working_set();
+                            self.trigger_post_speedtest_recovery();
                         }
                         BgMsg::SpeedDone(Err(e)) => {
                             self.busy = false;
@@ -726,6 +727,40 @@ impl VpnApp {
                                 self.status = "测速已手动停止".into();
                             } else {
                                 self.status = format!("测速失败: {e}");
+                            }
+                            self.trigger_post_speedtest_recovery();
+                        }
+                        BgMsg::SpeedtestRecoveryDone(outcome) => {
+                            use crate::proxy::SpeedtestRecoveryOutcome;
+                            match outcome {
+                                SpeedtestRecoveryOutcome::Skipped
+                                | SpeedtestRecoveryOutcome::Healthy => {}
+                                SpeedtestRecoveryOutcome::RearmedSystemProxy => {
+                                    crate::startup_log("[测速后自检] 系统代理已自动写回恢复");
+                                    self.status = format!("{} · 系统代理已自动恢复", self.status);
+                                    self.reload_proxy();
+                                }
+                                SpeedtestRecoveryOutcome::FlushedConnections => {
+                                    crate::startup_log(
+                                        "[测速后自检] 检测到代理无响应，清理僵尸连接后已恢复连通",
+                                    );
+                                    self.status =
+                                        format!("{} · 已自动清理失效连接恢复网络", self.status);
+                                    self.reload_proxy();
+                                }
+                                SpeedtestRecoveryOutcome::RestartedKernel => {
+                                    crate::startup_log(
+                                        "[测速后自检] 清理连接后仍无响应，已自动重启代理内核恢复网络",
+                                    );
+                                    self.status =
+                                        "测速后检测到代理无响应，已自动重启内核恢复网络".into();
+                                    self.reload_proxy();
+                                }
+                                SpeedtestRecoveryOutcome::Failed(error) => {
+                                    crate::startup_log(&format!(
+                                        "[测速后自检] 自动重启代理内核恢复失败: {error}"
+                                    ));
+                                }
                             }
                         }
                         BgMsg::Kernels(kernels) => self.kernels = kernels,

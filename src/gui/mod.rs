@@ -1084,17 +1084,36 @@ impl VpnApp {
     }
 
     pub(crate) fn speed_opts(&self) -> SpeedTestOptions {
+        // 代理运行期间自动压低批量测速并发，避免上万节点同时建连打爆 Windows
+        // 动态端口池（仅 16,384 个）和家用光猫/路由器 NAT 表，把正在浏览网页的
+        // 代理长连接与 DoH 连接挤断。代理未运行时保持原有高并发全速。
+        let proxy_running = matches!(
+            self.proxy_status.state,
+            ProxyState::Running | ProxyState::Degraded
+        );
         let (concurrency, timeout_ms) = match self.speedtest_intensity {
             SpeedtestIntensity::Fast => (
-                self.settings.speedtest_concurrency.clamp(64, 128),
+                if proxy_running {
+                    self.settings.speedtest_concurrency.clamp(24, 48)
+                } else {
+                    self.settings.speedtest_concurrency.clamp(64, 128)
+                },
                 self.settings.speedtest_timeout_ms.min(1200),
             ),
             SpeedtestIntensity::Standard => (
-                self.settings.speedtest_concurrency.clamp(32, 96),
+                if proxy_running {
+                    self.settings.speedtest_concurrency.clamp(16, 32)
+                } else {
+                    self.settings.speedtest_concurrency.clamp(32, 96)
+                },
                 self.settings.speedtest_timeout_ms.max(1500),
             ),
             SpeedtestIntensity::Deep => (
-                (self.settings.speedtest_concurrency / 2).clamp(16, 48),
+                if proxy_running {
+                    (self.settings.speedtest_concurrency / 2).clamp(12, 24)
+                } else {
+                    (self.settings.speedtest_concurrency / 2).clamp(16, 48)
+                },
                 self.settings.speedtest_timeout_ms.max(3500),
             ),
         };
@@ -1112,6 +1131,24 @@ impl VpnApp {
             dedup_egress: self.settings.speedtest_dedup_egress,
             tcp_ping_only: self.settings.speedtest_tcp_ping_only,
         }
+    }
+
+    /// 测速结束（正常完成或取消）后，若代理正在运行，后台执行一次端到端健康自检与无感自愈。
+    pub(crate) fn trigger_post_speedtest_recovery(&mut self) {
+        if self.proxy_busy
+            || !matches!(
+                self.proxy_status.state,
+                ProxyState::Running | ProxyState::Degraded
+            )
+        {
+            return;
+        }
+        let manager = self.proxy_manager.clone();
+        let tx = self.tx.clone();
+        self.rt.spawn(async move {
+            let outcome = manager.recover_after_speedtest().await;
+            let _ = tx.send(BgMsg::SpeedtestRecoveryDone(outcome));
+        });
     }
 
     /// 后台事件常常连着要全量刷新（33 个源各一次），而一次 `reload_all` 要做上百次
@@ -6693,6 +6730,26 @@ mod tests {
         app.status = "正在关闭内核...".into();
         app.receive_proxy_runtime_status(recovered);
         assert_eq!(app.status, "正在关闭内核...");
+    }
+
+    #[test]
+    fn speed_opts_throttles_concurrency_while_proxy_is_running() {
+        let mut app = crate::gui::views::nodes::empty_pool_modal_tests::app_with_an_empty_library();
+        app.settings.speedtest_concurrency = 128;
+
+        app.proxy_status.state = ProxyState::Stopped;
+        app.speedtest_intensity = SpeedtestIntensity::Fast;
+        assert_eq!(app.speed_opts().concurrency, 128);
+        app.speedtest_intensity = SpeedtestIntensity::Standard;
+        assert_eq!(app.speed_opts().concurrency, 96);
+
+        app.proxy_status.state = ProxyState::Running;
+        app.speedtest_intensity = SpeedtestIntensity::Fast;
+        assert_eq!(app.speed_opts().concurrency, 48);
+        app.speedtest_intensity = SpeedtestIntensity::Standard;
+        assert_eq!(app.speed_opts().concurrency, 32);
+        app.speedtest_intensity = SpeedtestIntensity::Deep;
+        assert_eq!(app.speed_opts().concurrency, 24);
     }
 
     #[test]

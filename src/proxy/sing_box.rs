@@ -254,6 +254,7 @@ async fn probe_batch_with_sing_box(
                 Ok(_permit) => match reqwest::Proxy::all(format!("http://127.0.0.1:{port}")) {
                     Ok(proxy) => match reqwest::Client::builder()
                         .proxy(proxy)
+                        .http1_only()
                         .timeout(timeout)
                         .build()
                     {
@@ -337,7 +338,8 @@ async fn wait_for_sing_box_port(child: &mut Child, port: u16) -> bool {
         if let Ok(Some(_)) = child.try_wait() {
             return false;
         }
-        if TcpStream::connect(("127.0.0.1", port)).await.is_ok() {
+        if let Ok(stream) = TcpStream::connect(("127.0.0.1", port)).await {
+            let _ = stream.set_zero_linger();
             return true;
         }
         tokio::time::sleep(Duration::from_millis(50)).await;

@@ -19,7 +19,7 @@ pub use crate::constants::network::{PROXY_CONNECTIVITY_FALLBACK_URL, PROXY_CONNE
 /// TLS request to generate_204 through a real proxy. Kept moderate: too many concurrent
 /// real-proxy connections saturate consumer NICs/routers.
 const PROXY_CONCURRENCY: usize = 96;
-const MIHOMO_BATCH_CONCURRENCY: usize = 3;
+const MIHOMO_BATCH_CONCURRENCY: usize = 2;
 /// Concurrent `mihomo -t` config validations while isolating invalid proxies.
 const VALIDATE_CONCURRENCY: usize = 8;
 
@@ -78,9 +78,14 @@ pub async fn verify_nodes_with_mihomo_progress_limited(
     let mut batches = batches.into_iter();
     let mut tasks = JoinSet::new();
     let mut results = Vec::with_capacity(total);
+    let batch_concurrency = if network_limit.available_permits() <= 32 {
+        1
+    } else {
+        MIHOMO_BATCH_CONCURRENCY
+    };
     let mut completed_batches = 0usize;
     loop {
-        while tasks.len() < MIHOMO_BATCH_CONCURRENCY {
+        while tasks.len() < batch_concurrency {
             let Some(batch) = batches.next() else { break };
             let ids = batch.iter().map(|node| node.id.clone()).collect::<Vec<_>>();
             let mihomo = mihomo.clone();
@@ -211,6 +216,9 @@ async fn verify_nodes_with_mihomo_path(
     let mut child = command
         .spawn()
         .with_context(|| format!("启动 {} 失败", mihomo.display()))?;
+    if let Some(pid) = child.id() {
+        crate::platform::assign_child_process_id(pid);
+    }
 
     // Loading thousands of proxies into one instance can take well over 5s; scale the
     // controller wait with the proxy count so big sets are not misreported as failures.
@@ -231,6 +239,8 @@ async fn verify_nodes_with_mihomo_path(
 
     let client = reqwest::Client::builder()
         .no_proxy()
+        .http1_only()
+        .pool_max_idle_per_host(32)
         .connect_timeout(Duration::from_secs(2))
         .timeout(timeout + Duration::from_secs(2))
         .build()?;
@@ -604,7 +614,8 @@ async fn wait_for_controller(
         if let Ok(Some(_)) = child.try_wait() {
             return false;
         }
-        if TcpStream::connect(("127.0.0.1", port)).await.is_ok() {
+        if let Ok(stream) = TcpStream::connect(("127.0.0.1", port)).await {
+            let _ = stream.set_zero_linger();
             return true;
         }
         tokio::time::sleep(Duration::from_millis(20)).await;
@@ -628,10 +639,16 @@ pub async fn first_reachable(
     for (index, node) in candidates.into_iter().enumerate() {
         tasks.spawn(async move {
             let host = node.host.clone();
-            let reachable = matches!(
-                tokio::time::timeout(timeout, TcpStream::connect((host.as_str(), node.port))).await,
-                Ok(Ok(_))
-            );
+            let reachable =
+                match tokio::time::timeout(timeout, TcpStream::connect((host.as_str(), node.port)))
+                    .await
+                {
+                    Ok(Ok(stream)) => {
+                        let _ = stream.set_zero_linger();
+                        true
+                    }
+                    _ => false,
+                };
             (index, node, reachable)
         });
     }
