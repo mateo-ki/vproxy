@@ -3,10 +3,7 @@ use crate::kernel::{find_kernel_executable, KernelKind};
 use crate::models::Node;
 use crate::proxy::compiler::shoes::build_shoes_client_proxy;
 use crate::proxy::compiler::BackendCompiler;
-use crate::proxy_probe::{
-    ProxyProbeProgress, ProxyProbeResult, PROXY_CONNECTIVITY_FALLBACK_URL,
-    PROXY_CONNECTIVITY_TEST_URL,
-};
+use crate::proxy_probe::{probe_http_proxy_unified_delay, ProxyProbeProgress, ProxyProbeResult};
 use anyhow::{anyhow, Result};
 use serde_json::Value as JsonValue;
 use serde_yaml::{Mapping, Value as YamlValue};
@@ -298,7 +295,6 @@ async fn probe_batch(
                 .await
                 .map_err(|_| "测速并发控制已关闭".to_string());
             let proxy = reqwest::Proxy::all(format!("http://127.0.0.1:{port}"));
-            let started = tokio::time::Instant::now();
             let outcome = match _permit {
                 Err(error) => Err(error),
                 Ok(_permit) => match proxy {
@@ -308,40 +304,19 @@ async fn probe_batch(
                         .timeout(timeout)
                         .build()
                     {
-                        Ok(client) => {
-                            let first = client.get(PROXY_CONNECTIVITY_TEST_URL).send().await;
-                            match first {
-                                Ok(resp) if resp.status() == reqwest::StatusCode::NO_CONTENT => {
-                                    Ok("Google")
-                                }
-                                _ => {
-                                    match client.get(PROXY_CONNECTIVITY_FALLBACK_URL).send().await {
-                                        Ok(resp)
-                                            if resp.status() == reqwest::StatusCode::NO_CONTENT =>
-                                        {
-                                            Ok("Cloudflare")
-                                        }
-                                        Ok(resp) => Err(format!("HTTP {}", resp.status())),
-                                        Err(err) => Err(err.to_string()),
-                                    }
-                                }
-                            }
-                        }
+                        Ok(client) => probe_http_proxy_unified_delay(&client).await,
                         Err(error) => Err(error.to_string()),
                     },
                     Err(error) => Err(error.to_string()),
                 },
             };
             match outcome {
-                Ok(target) => {
-                    let latency = started.elapsed().as_millis().max(1) as i64;
-                    ProxyProbeResult {
-                        id: node.id,
-                        ok: true,
-                        latency_ms: Some(latency),
-                        message: format!("{latency} ms (Shoes 真实代理 · {target})"),
-                    }
-                }
+                Ok((latency, target)) => ProxyProbeResult {
+                    id: node.id,
+                    ok: true,
+                    latency_ms: Some(latency),
+                    message: format!("{latency} ms (Shoes 真实代理 · {target})"),
+                },
                 Err(error) => ProxyProbeResult {
                     id: node.id,
                     ok: false,

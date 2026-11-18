@@ -1383,6 +1383,7 @@ impl BackendCompiler for MihomoCompiler {
             "mode": mode_str,
             "log-level": "info",
             "ipv6": plan.dns.ipv6,
+            "unified-delay": true,
             // Keep Fake-IP mappings across core restarts. TCP sniffing also lets
             // Mihomo recover a domain from a browser's older Fake-IP cache.
             "profile": { "store-fake-ip": true },

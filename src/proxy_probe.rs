@@ -385,6 +385,64 @@ async fn verify_nodes_with_mihomo_path(
     Ok(results.into_iter().flatten().collect())
 }
 
+async fn probe_single_http_204(
+    client: &reqwest::Client,
+    target_url: &str,
+    target_name: &'static str,
+) -> std::result::Result<i64, String> {
+    let started = tokio::time::Instant::now();
+    let response = client
+        .get(target_url)
+        .send()
+        .await
+        .map_err(|error| format!("{target_name}: {error}"))?;
+    let status = response.status();
+    let _ = response.bytes().await;
+    if status == reqwest::StatusCode::NO_CONTENT {
+        Ok(started.elapsed().as_millis().max(1) as i64)
+    } else {
+        Err(format!("{target_name}: HTTP {status}"))
+    }
+}
+
+/// 经本地 HTTP 代理端口探测连通性并返回统一延迟（unified-delay 口径）：
+/// 1. 主目标失败回退时独立重新计时，不把主目标的超时等待算入回退延迟；
+/// 2. 首轮成功后在同一 HTTP/1.1 Keep-Alive 隧道上复测一次纯 RTT，剔除冷握手耗时，
+///    使 sing-box / xray / shoes 与 Mihomo `unified-delay: true`（FlClash 默认）口径一致。
+pub(crate) async fn probe_http_proxy_unified_delay(
+    client: &reqwest::Client,
+) -> std::result::Result<(i64, &'static str), String> {
+    probe_http_proxy_unified_delay_urls(
+        client,
+        PROXY_CONNECTIVITY_TEST_URL,
+        PROXY_CONNECTIVITY_FALLBACK_URL,
+    )
+    .await
+}
+
+async fn probe_http_proxy_unified_delay_urls(
+    client: &reqwest::Client,
+    primary_url: &str,
+    fallback_url: &str,
+) -> std::result::Result<(i64, &'static str), String> {
+    let (first_ms, target_url, target_name) =
+        match probe_single_http_204(client, primary_url, "Google").await {
+            Ok(ms) => (ms, primary_url, "Google"),
+            Err(primary_err) => {
+                match probe_single_http_204(client, fallback_url, "Cloudflare").await {
+                    Ok(ms) => (ms, fallback_url, "Cloudflare"),
+                    Err(_) => return Err(primary_err),
+                }
+            }
+        };
+
+    let unified_ms = match probe_single_http_204(client, target_url, target_name).await {
+        Ok(warm_ms) => first_ms.min(warm_ms),
+        Err(_) => first_ms,
+    };
+    Ok((unified_ms, target_name))
+}
+
 async fn probe_mihomo_target(
     client: &reqwest::Client,
     controller_url: &str,
@@ -465,6 +523,8 @@ fn build_mihomo_config(prepared: &[PreparedProxy], controller_port: u16) -> Valu
         "ipv6": false,
         "mode": "rule",
         "log-level": "warning",
+        // 开启统一延迟（与 FlClash / 主流 Clash 客户端一致）：剔除协议冷握手耗时，反映真实链路 RTT
+        "unified-delay": true,
         "proxies": proxy_configs,
         "proxy-groups": [{
             "name": "PROXY",
@@ -699,6 +759,83 @@ mod tests {
         assert_eq!(
             PROXY_CONNECTIVITY_TEST_URL,
             "https://www.google.com/generate_204"
+        );
+    }
+
+    #[test]
+    fn build_mihomo_config_enables_unified_delay() {
+        let proxies = vec![PreparedProxy {
+            index: 0,
+            id: "node-1".into(),
+            name: "node-1".into(),
+            config: json!({"name":"node-1","type":"http","server":"example.com","port":80}),
+        }];
+        let config = build_mihomo_config(&proxies, 19090);
+        assert_eq!(config.get("unified-delay"), Some(&json!(true)));
+    }
+
+    #[tokio::test]
+    async fn unified_delay_probe_resets_fallback_timer_and_uses_warm_rtt() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        // 模拟主目标耗时 140ms 后返回 503，回退目标首包 100ms、复测暖包立即返回 204
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let mut fallback_hits = 0usize;
+            for _ in 0..3 {
+                let Ok((mut stream, _)) = listener.accept().await else {
+                    break;
+                };
+                let mut buf = [0u8; 1024];
+                loop {
+                    let n = match stream.read(&mut buf).await {
+                        Ok(0) | Err(_) => break,
+                        Ok(n) => n,
+                    };
+                    let req = String::from_utf8_lossy(&buf[..n]);
+                    if req.starts_with("GET /primary ") {
+                        tokio::time::sleep(Duration::from_millis(140)).await;
+                        let _ = stream
+                            .write_all(b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                            .await;
+                        break;
+                    } else if req.starts_with("GET /fallback ") {
+                        fallback_hits += 1;
+                        if fallback_hits == 1 {
+                            tokio::time::sleep(Duration::from_millis(100)).await;
+                        }
+                        let _ = stream
+                            .write_all(b"HTTP/1.1 204 No Content\r\nConnection: keep-alive\r\n\r\n")
+                            .await;
+                        if fallback_hits >= 2 {
+                            return;
+                        }
+                    } else {
+                        break;
+                    }
+                }
+            }
+        });
+
+        let client = reqwest::Client::builder()
+            .no_proxy()
+            .http1_only()
+            .timeout(Duration::from_secs(3))
+            .build()
+            .unwrap();
+        let primary = format!("http://{addr}/primary");
+        let fallback = format!("http://{addr}/fallback");
+        let (delay_ms, target) = probe_http_proxy_unified_delay_urls(&client, &primary, &fallback)
+            .await
+            .unwrap();
+        let _ = server.await;
+
+        assert_eq!(target, "Cloudflare");
+        // 应反映回退目标第二次暖请求延迟（远小于 140ms 主目标失败耗时 + 100ms 首包耗时）
+        assert!(
+            delay_ms < 90,
+            "expected warm unified RTT < 90ms, got {delay_ms}ms"
         );
     }
 

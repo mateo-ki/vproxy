@@ -564,6 +564,7 @@ fn build_mihomo_config_legacy(node: &Node, options: MihomoConfigOptions) -> Resu
         "mode": mode_str,
         "log-level": "info",
         "ipv6": options.dns.ipv6,
+        "unified-delay": true,
         "proxies": candidate_proxies,
         "proxy-groups": proxy_groups,
         "dns": {

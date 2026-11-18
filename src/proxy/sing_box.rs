@@ -4,10 +4,7 @@ use super::{NetworkProtocol, ProxyMode, RoutingMode, RuleAction, RuleMatcher};
 use crate::kernel::{find_kernel_executable, KernelKind};
 use crate::models::Node;
 use crate::proxy::compiler::BackendCompiler;
-use crate::proxy_probe::{
-    ProxyProbeProgress, ProxyProbeResult, PROXY_CONNECTIVITY_FALLBACK_URL,
-    PROXY_CONNECTIVITY_TEST_URL,
-};
+use crate::proxy_probe::{probe_http_proxy_unified_delay, ProxyProbeProgress, ProxyProbeResult};
 use anyhow::{anyhow, Result};
 use serde_json::{json, Value};
 use std::path::Path;
@@ -248,7 +245,6 @@ async fn probe_batch_with_sing_box(
                 .acquire_owned()
                 .await
                 .map_err(|_| anyhow!("测速并发控制已关闭"));
-            let started = tokio::time::Instant::now();
             let outcome = match _permit {
                 Err(error) => Err(error.to_string()),
                 Ok(_permit) => match reqwest::Proxy::all(format!("http://127.0.0.1:{port}")) {
@@ -258,42 +254,19 @@ async fn probe_batch_with_sing_box(
                         .timeout(timeout)
                         .build()
                     {
-                        Ok(client) => {
-                            let mut probe = probe_connectivity_target(
-                                &client,
-                                PROXY_CONNECTIVITY_TEST_URL,
-                                "Google",
-                            )
-                            .await;
-                            if probe.is_err() {
-                                // 交叉探活：Google 遇阻或偶发单次抖动时，走 Cloudflare 交叉复验
-                                if let Ok(cf) = probe_connectivity_target(
-                                    &client,
-                                    PROXY_CONNECTIVITY_FALLBACK_URL,
-                                    "Cloudflare",
-                                )
-                                .await
-                                {
-                                    probe = Ok(cf);
-                                }
-                            }
-                            probe
-                        }
+                        Ok(client) => probe_http_proxy_unified_delay(&client).await,
                         Err(error) => Err(error.to_string()),
                     },
                     Err(error) => Err(error.to_string()),
                 },
             };
             match outcome {
-                Ok(target) => {
-                    let latency = started.elapsed().as_millis().max(1) as i64;
-                    ProxyProbeResult {
-                        id: node.id,
-                        ok: true,
-                        latency_ms: Some(latency),
-                        message: format!("{latency} ms (Sing-box 真实代理 · {target})"),
-                    }
-                }
+                Ok((latency, target)) => ProxyProbeResult {
+                    id: node.id,
+                    ok: true,
+                    latency_ms: Some(latency),
+                    message: format!("{latency} ms (Sing-box 真实代理 · {target})"),
+                },
                 Err(error) => ProxyProbeResult {
                     id: node.id,
                     ok: false,
@@ -313,23 +286,6 @@ async fn probe_batch_with_sing_box(
     let _ = child.wait().await;
     let _ = tokio::fs::remove_dir_all(directory).await;
     Ok(results)
-}
-
-async fn probe_connectivity_target(
-    client: &reqwest::Client,
-    target_url: &'static str,
-    target_name: &'static str,
-) -> std::result::Result<&'static str, String> {
-    let response = client
-        .get(target_url)
-        .send()
-        .await
-        .map_err(|error| format!("{target_name}: {error}"))?;
-    if response.status() == reqwest::StatusCode::NO_CONTENT {
-        Ok(target_name)
-    } else {
-        Err(format!("{target_name}: HTTP {}", response.status()))
-    }
 }
 
 async fn wait_for_sing_box_port(child: &mut Child, port: u16) -> bool {
