@@ -532,10 +532,6 @@ pub enum BgMsg {
         total: usize,
     },
     SpeedProgress(SpeedTestProgress),
-    SourceSpeedProgress {
-        done: usize,
-        total: usize,
-    },
     SpeedDone(Result<SpeedTestSummary, String>),
     /// 测速结束后的运行中代理自检与自愈结果。
     SpeedtestRecoveryDone(crate::proxy::SpeedtestRecoveryOutcome),

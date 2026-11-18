@@ -2643,8 +2643,8 @@ impl VpnApp {
             let result = speedtester
                 .test_all_sources_with_progress(
                     opts,
-                    Some(move |done, total| {
-                        let _ = progress_tx.send(BgMsg::SourceSpeedProgress { done, total });
+                    Some(move |progress| {
+                        let _ = progress_tx.send(BgMsg::SpeedProgress(progress));
                     }),
                 )
                 .await
@@ -6769,6 +6769,41 @@ mod tests {
         assert_eq!(
             format_speedtest_progress(&progress),
             "真实代理验证 · Xray 批次 2/4 1260/15656（8.0%） 成功 247 / 失败 1013，耗时 18.4s"
+        );
+    }
+
+    #[test]
+    fn formats_dns_resolve_progress_distinct_from_node_stages() {
+        let dns_progress = SpeedTestProgress {
+            phase: SpeedTestPhase::DnsResolve,
+            done: 500,
+            total: 2000,
+            ok: 0,
+            fail: 0,
+            elapsed: Duration::from_millis(3_200),
+            kernel: None,
+            batch_index: None,
+            batch_total: None,
+        };
+        assert_eq!(
+            format_speedtest_progress(&dns_progress),
+            "DNS 预解析 500/2000 个域名（25.0%），耗时 3.2s"
+        );
+
+        let tcp_progress = SpeedTestProgress {
+            phase: SpeedTestPhase::TcpPrefilter,
+            done: 3000,
+            total: 12000,
+            ok: 1200,
+            fail: 1800,
+            elapsed: Duration::from_millis(9_500),
+            kernel: None,
+            batch_index: None,
+            batch_total: None,
+        };
+        assert_eq!(
+            format_speedtest_progress(&tcp_progress),
+            "TCP预筛 3000/12000（25.0%） 成功 1200 / 失败 1800，耗时 9.5s"
         );
     }
 

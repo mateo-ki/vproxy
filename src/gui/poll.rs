@@ -649,9 +649,6 @@ impl VpnApp {
                         BgMsg::SpeedProgress(progress) => {
                             self.status = format_speedtest_progress(&progress);
                         }
-                        BgMsg::SourceSpeedProgress { done, total } => {
-                            self.status = format!("正在测试所有节点：已完成 {done}/{total} 个节点");
-                        }
                         BgMsg::FailoverTarget(outcome) => self.on_failover_target(outcome),
                         BgMsg::SpeedtestPingResult { ping_ms, jitter_ms } => {
                             self.speedtest_last_ping_ms = Some(ping_ms);

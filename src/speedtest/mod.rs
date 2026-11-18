@@ -75,6 +75,7 @@ pub struct SpeedTestOptions {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SpeedTestPhase {
+    DnsResolve,
     TcpPrefilter,
     RealProxy,
 }
@@ -155,14 +156,14 @@ impl SpeedTester {
     }
 
     pub async fn test_all_sources(&self, opts: SpeedTestOptions) -> Result<SpeedTestSummary> {
-        self.test_all_sources_with_progress(opts, None::<fn(usize, usize)>)
+        self.test_all_sources_with_progress(opts, None::<fn(SpeedTestProgress)>)
             .await
     }
 
     pub async fn test_all_sources_with_progress(
         &self,
         opts: SpeedTestOptions,
-        progress: Option<impl Fn(usize, usize) + Send + Sync>,
+        progress: Option<impl Fn(SpeedTestProgress) + Send + Sync>,
     ) -> Result<SpeedTestSummary> {
         self.test_all_sources_globally(opts, progress).await
     }
@@ -170,7 +171,7 @@ impl SpeedTester {
     async fn test_all_sources_globally(
         &self,
         opts: SpeedTestOptions,
-        progress: Option<impl Fn(usize, usize) + Send + Sync>,
+        progress: Option<impl Fn(SpeedTestProgress) + Send + Sync>,
     ) -> Result<SpeedTestSummary> {
         self.reset_cancel();
         let groups = self.db.list_node_groups(None, None, None).await?;
@@ -245,7 +246,9 @@ impl SpeedTester {
                 opts,
                 Some(move |state: SpeedTestProgress| {
                     let phase = match state.phase {
-                        SpeedTestPhase::TcpPrefilter => TaskPhase::TcpPrefilter,
+                        SpeedTestPhase::DnsResolve | SpeedTestPhase::TcpPrefilter => {
+                            TaskPhase::TcpPrefilter
+                        }
                         SpeedTestPhase::RealProxy => TaskPhase::GoogleVerify,
                     };
                     if state.done.is_multiple_of(200) || state.done >= state.total {
@@ -254,7 +257,7 @@ impl SpeedTester {
                         }
                     }
                     if let Some(progress) = progress_callback {
-                        progress(state.done, state.total);
+                        progress(state);
                     }
                 }),
                 Arc::new(Semaphore::new(opts.concurrency.clamp(1, 512) as usize)),
@@ -323,9 +326,6 @@ impl SpeedTester {
                 source_id,
                 format!("测速完成：成功 {ok}，失败 {fail}"),
             );
-        }
-        if let Some(progress) = progress.as_ref() {
-            progress(source_keys.len(), source_keys.len());
         }
         build_speedtest_summary(results)
     }

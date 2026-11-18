@@ -170,8 +170,7 @@ pub async fn run_speedtest_pipeline(
     // 1. 并发 DNS 预解析
     let dns_targets: Vec<(String, u16)> =
         nodes.iter().map(|n| (n.server.clone(), n.port)).collect();
-    // DNS 阶段也走同一进度通道（phase 仍记 TcpPrefilter），让域名多的池子
-    // 在预筛真正开始前就有可见的计数变化
+    // DNS 阶段走独立 DnsResolve 阶段上报，避免与后续 TCP 预筛的节点总数混淆
     let resolved = {
         let progress = progress.as_ref();
         resolve_targets_parallel(
@@ -181,7 +180,7 @@ pub async fn run_speedtest_pipeline(
             progress.map(|cb| {
                 move |done: usize, total: usize| {
                     cb(SpeedTestProgress {
-                        phase: SpeedTestPhase::TcpPrefilter,
+                        phase: SpeedTestPhase::DnsResolve,
                         done,
                         total,
                         ok: 0,

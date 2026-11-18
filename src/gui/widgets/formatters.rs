@@ -298,14 +298,23 @@ pub fn sort_label(v: &str) -> &'static str {
 }
 
 pub fn format_speedtest_progress(progress: &SpeedTestProgress) -> String {
-    let phase = match progress.phase {
-        SpeedTestPhase::TcpPrefilter => "TCP预筛",
-        SpeedTestPhase::RealProxy => "真实代理验证",
-    };
     let percent = if progress.total == 0 {
         100.0
     } else {
         progress.done as f64 * 100.0 / progress.total as f64
+    };
+    if progress.phase == SpeedTestPhase::DnsResolve {
+        return format!(
+            "DNS 预解析 {}/{} 个域名（{percent:.1}%），耗时 {:.1}s",
+            progress.done,
+            progress.total,
+            progress.elapsed.as_secs_f64()
+        );
+    }
+    let phase = match progress.phase {
+        SpeedTestPhase::DnsResolve => unreachable!(),
+        SpeedTestPhase::TcpPrefilter => "TCP预筛",
+        SpeedTestPhase::RealProxy => "真实代理验证",
     };
     let detail = match (progress.kernel, progress.batch_index, progress.batch_total) {
         (Some(kernel), Some(batch), Some(total)) => {
