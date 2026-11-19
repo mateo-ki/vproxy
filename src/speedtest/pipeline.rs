@@ -139,18 +139,17 @@ pub async fn run_speedtest_pipeline(
     let concurrency = opts.concurrency.clamp(1, 512) as usize;
     let (prefilter_timeout_ms, proxy_timeout_duration) = match opts.intensity {
         SpeedtestIntensity::Fast => (
-            opts.timeout_ms.clamp(800, 1500),
+            opts.timeout_ms.clamp(600, 1000),
             Duration::from_millis(3000),
         ),
-        // 预筛只是一次 TCP SYN：1.5s 内握手没回来基本就是死节点。以前把内核测速的
-        // 超时（用户可设 5s）原样带进预筛，死节点每个吃满 2.5~5s，几万节点的库
-        // 第一阶段要干等十几分钟——SYN 不值得这么耐心，这里独立封顶。
+        // 预筛只是一次 TCP SYN：1.2s 内握手没回来基本就是死节点（全球最远物理 RTT ≤350ms）。
+        // 以前封顶 1.5s 导致几千死节点白白空等数千秒；这里设为 800~1200ms，大幅加速淘汰僵尸节点。
         SpeedtestIntensity::Standard => (
-            opts.timeout_ms.clamp(1200, 1500),
+            opts.timeout_ms.clamp(800, 1200),
             Duration::from_millis(opts.timeout_ms.clamp(3_000, 15_000) as u64),
         ),
         SpeedtestIntensity::Deep => (
-            opts.timeout_ms.clamp(1500, 2500),
+            opts.timeout_ms.clamp(1200, 2000),
             Duration::from_millis(opts.timeout_ms.clamp(5_000, 25_000) as u64),
         ),
     };

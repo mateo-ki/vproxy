@@ -1094,27 +1094,27 @@ impl VpnApp {
         let (concurrency, timeout_ms) = match self.speedtest_intensity {
             SpeedtestIntensity::Fast => (
                 if proxy_running {
-                    self.settings.speedtest_concurrency.clamp(24, 48)
+                    self.settings.speedtest_concurrency.clamp(16, 128)
                 } else {
-                    self.settings.speedtest_concurrency.clamp(64, 128)
+                    self.settings.speedtest_concurrency.clamp(16, 256)
                 },
-                self.settings.speedtest_timeout_ms.min(1200),
+                self.settings.speedtest_timeout_ms.min(1000),
             ),
             SpeedtestIntensity::Standard => (
                 if proxy_running {
-                    self.settings.speedtest_concurrency.clamp(16, 32)
+                    self.settings.speedtest_concurrency.clamp(16, 128)
                 } else {
-                    self.settings.speedtest_concurrency.clamp(32, 96)
+                    self.settings.speedtest_concurrency.clamp(16, 192)
                 },
-                self.settings.speedtest_timeout_ms.max(1500),
+                self.settings.speedtest_timeout_ms.clamp(800, 2000),
             ),
             SpeedtestIntensity::Deep => (
                 if proxy_running {
-                    (self.settings.speedtest_concurrency / 2).clamp(12, 24)
+                    (self.settings.speedtest_concurrency / 2).clamp(8, 64)
                 } else {
-                    (self.settings.speedtest_concurrency / 2).clamp(16, 48)
+                    (self.settings.speedtest_concurrency / 2).clamp(8, 96)
                 },
-                self.settings.speedtest_timeout_ms.max(3500),
+                self.settings.speedtest_timeout_ms.max(2500),
             ),
         };
         SpeedTestOptions {
@@ -6741,15 +6741,15 @@ mod tests {
         app.speedtest_intensity = SpeedtestIntensity::Fast;
         assert_eq!(app.speed_opts().concurrency, 128);
         app.speedtest_intensity = SpeedtestIntensity::Standard;
-        assert_eq!(app.speed_opts().concurrency, 96);
+        assert_eq!(app.speed_opts().concurrency, 128);
 
         app.proxy_status.state = ProxyState::Running;
         app.speedtest_intensity = SpeedtestIntensity::Fast;
-        assert_eq!(app.speed_opts().concurrency, 48);
+        assert_eq!(app.speed_opts().concurrency, 128);
         app.speedtest_intensity = SpeedtestIntensity::Standard;
-        assert_eq!(app.speed_opts().concurrency, 32);
+        assert_eq!(app.speed_opts().concurrency, 128);
         app.speedtest_intensity = SpeedtestIntensity::Deep;
-        assert_eq!(app.speed_opts().concurrency, 24);
+        assert_eq!(app.speed_opts().concurrency, 64);
     }
 
     #[test]

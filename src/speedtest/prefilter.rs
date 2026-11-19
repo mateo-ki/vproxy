@@ -19,7 +19,7 @@ pub async fn connect_resolved(
 
         // 多 IP（如 CDN / 双栈）时合理切分单 IP 超时预算，防止首个静默 IP 占满全部时间导致次选可用 IP 连尝试机会都没有
         let per_addr_budget = if total_candidates > 1 && idx == 0 {
-            (timeout / 2).max(Duration::from_millis(600)).min(remaining)
+            (timeout / 2).max(Duration::from_millis(400)).min(remaining)
         } else {
             remaining
         };
