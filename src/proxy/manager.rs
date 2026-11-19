@@ -3730,6 +3730,7 @@ pub fn required_startup_ports(kernel: KernelKind, options: &MihomoConfigOptions)
     kernel_adapter(kernel).required_ports(options)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn verify_nodes_with_kernel_progress(
     kernel: KernelKind,
     nodes: Vec<Node>,
@@ -3738,6 +3739,7 @@ pub async fn verify_nodes_with_kernel_progress(
     network_limit: Arc<Semaphore>,
     batch_size: usize,
     conditional_isolation: bool,
+    test_url: Option<String>,
 ) -> Result<Vec<ProxyProbeResult>> {
     kernel_adapter(kernel)
         .verify_nodes(
@@ -3747,6 +3749,7 @@ pub async fn verify_nodes_with_kernel_progress(
             network_limit,
             batch_size,
             conditional_isolation,
+            test_url,
         )
         .await
 }

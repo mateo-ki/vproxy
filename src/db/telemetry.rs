@@ -54,6 +54,7 @@ pub struct TrafficDayRow {
 }
 
 /// 本地小时桶键："YYYY-MM-DD HH:00"（字典序即时间序，裁剪直接按字符串比较）。
+#[allow(dead_code)]
 pub fn traffic_hour_key(now: DateTime<Local>) -> String {
     now.format("%Y-%m-%d %H:00").to_string()
 }

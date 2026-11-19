@@ -53,7 +53,7 @@ impl Database {
                        exclude_keywords, failover_latency_ms,
                        speedtest_parallel_kernels, speedtest_persistent_kernel,
                        speedtest_reuse_minutes, speedtest_conditional_isolation,
-                       speedtest_download_top_n, speedtest_dedup_egress, speedtest_tcp_ping_only, bandwidth_guard, bandwidth_min_kbps,
+                       speedtest_download_top_n, speedtest_dedup_egress, speedtest_tcp_ping_only, speedtest_url, bandwidth_guard, bandwidth_min_kbps,
                        publisher_api, publisher_token, ui_theme, app_icon_style, ui_language, ui_scale, ui_dark, sidebar_expanded, kernel_source, firewall_auto_allow,
                        auto_failover, insider_channel, speedtest_auto_refill,
                        auto_prepare_kernel, speedtest_added_source,
@@ -122,6 +122,8 @@ impl Database {
             speedtest_tcp_ping_only: sqlx::Row::try_get::<i64, _>(&row, "speedtest_tcp_ping_only")
                 .unwrap_or(0)
                 != 0,
+            speedtest_url: sqlx::Row::try_get::<String, _>(&row, "speedtest_url")
+                .unwrap_or_else(|_| crate::models::default_speedtest_url()),
             bandwidth_guard: sqlx::Row::try_get::<i64, _>(&row, "bandwidth_guard").unwrap_or(0)
                 != 0,
             bandwidth_min_kbps: sqlx::Row::try_get::<i64, _>(&row, "bandwidth_min_kbps")
@@ -247,6 +249,12 @@ impl Database {
         if let Some(v) = input.speedtest_tcp_ping_only {
             s.speedtest_tcp_ping_only = v;
         }
+        if let Some(v) = input.speedtest_url {
+            let v = v.trim().to_string();
+            if !v.is_empty() {
+                s.speedtest_url = v;
+            }
+        }
         if let Some(v) = input.bandwidth_guard {
             s.bandwidth_guard = v;
         }
@@ -368,6 +376,7 @@ impl Database {
                  speedtest_download_top_n=?,
                  speedtest_dedup_egress=?,
                  speedtest_tcp_ping_only=?,
+                 speedtest_url=?,
                  bandwidth_guard=?,
                  bandwidth_min_kbps=?,
                  publisher_api=?,
@@ -415,6 +424,7 @@ impl Database {
         .bind(s.speedtest_download_top_n as i64)
         .bind(s.speedtest_dedup_egress as i64)
         .bind(s.speedtest_tcp_ping_only as i64)
+        .bind(&s.speedtest_url)
         .bind(s.bandwidth_guard as i64)
         .bind(s.bandwidth_min_kbps as i64)
         .bind(&s.publisher_api)

@@ -24,11 +24,33 @@ pub const PREVIOUS_DEFAULT_DOH: &str = "https://223.5.5.5/dns-query";
 /// 历史纯文本 DNS 默认列表
 pub const LEGACY_DEFAULT_PLAINTEXT: &[&str] = &["8.8.8.8", "114.114.114.114"];
 
+/// 代理连通性默认主探测目标 URL（Cloudflare HTTP，与主流客户端一致，全球 Anycast、无 TLS 握手开销）
+pub const DEFAULT_SPEEDTEST_URL: &str = "http://cp.cloudflare.com/generate_204";
+
+/// 代理连通性默认备用探测目标 URL（Google HTTPS）
+pub const DEFAULT_SPEEDTEST_FALLBACK_URL: &str = "https://www.google.com/generate_204";
+
 /// 代理连通性主探测目标 URL
-pub const PROXY_CONNECTIVITY_TEST_URL: &str = "https://www.google.com/generate_204";
+pub const PROXY_CONNECTIVITY_TEST_URL: &str = DEFAULT_SPEEDTEST_URL;
 
 /// 代理连通性备用探测目标 URL
-pub const PROXY_CONNECTIVITY_FALLBACK_URL: &str = "https://cp.cloudflare.com/generate_204";
+pub const PROXY_CONNECTIVITY_FALLBACK_URL: &str = DEFAULT_SPEEDTEST_FALLBACK_URL;
+
+/// 解析主探测目标与互补备用探测目标
+pub fn resolve_probe_urls(configured_url: Option<&str>) -> (String, String) {
+    let primary = configured_url
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .unwrap_or(DEFAULT_SPEEDTEST_URL)
+        .to_string();
+    let lower = primary.to_ascii_lowercase();
+    let fallback = if lower.contains("google") || lower.contains("gstatic") {
+        DEFAULT_SPEEDTEST_URL.to_string()
+    } else {
+        DEFAULT_SPEEDTEST_FALLBACK_URL.to_string()
+    };
+    (primary, fallback)
+}
 
 /// Google 代理测试类型标识
 pub const GOOGLE_PROXY_TEST_KIND: &str = "google_proxy";

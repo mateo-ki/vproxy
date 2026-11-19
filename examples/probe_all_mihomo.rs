@@ -56,6 +56,7 @@ async fn main() {
         Arc::new(tokio::sync::Semaphore::new(96)),
         8192,
         false,
+        None,
     )
     .await
     .expect("probe");

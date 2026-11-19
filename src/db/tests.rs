@@ -151,6 +151,7 @@ async fn persists_fetch_and_speedtest_concurrency_after_reconnect() {
             window_size: None,
             console_tabs: None,
             dashboard_ui_mode: None,
+            speedtest_url: None,
         })
         .await
         .unwrap();
@@ -171,6 +172,37 @@ async fn persists_fetch_and_speedtest_concurrency_after_reconnect() {
     assert_eq!(loaded.speedtest_concurrency, 173);
     assert_eq!(loaded.speedtest_reuse_minutes, 45);
     assert!(loaded.speedtest_conditional_isolation);
+
+    drop(reopened);
+    let _ = std::fs::remove_file(&path);
+    let _ = std::fs::remove_file(format!("{}-wal", path.display()));
+    let _ = std::fs::remove_file(format!("{}-shm", path.display()));
+}
+
+#[tokio::test]
+async fn persists_speedtest_url_setting() {
+    let path = std::env::temp_dir().join(format!("vproxy-speedtest-url-{}.db", Uuid::new_v4()));
+    let db = Database::connect(path.to_str().unwrap()).await.unwrap();
+
+    let initial = db.get_settings().await.unwrap();
+    assert_eq!(
+        initial.speedtest_url,
+        "http://cp.cloudflare.com/generate_204"
+    );
+
+    let saved = db
+        .update_settings(UpdateSettings {
+            speedtest_url: Some("https://www.google.com/generate_204".to_string()),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!(saved.speedtest_url, "https://www.google.com/generate_204");
+
+    drop(db);
+    let reopened = Database::connect(path.to_str().unwrap()).await.unwrap();
+    let loaded = reopened.get_settings().await.unwrap();
+    assert_eq!(loaded.speedtest_url, "https://www.google.com/generate_204");
 
     drop(reopened);
     let _ = std::fs::remove_file(&path);

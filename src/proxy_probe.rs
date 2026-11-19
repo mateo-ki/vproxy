@@ -61,6 +61,7 @@ pub async fn verify_nodes_with_mihomo_progress_limited(
     network_limit: Arc<Semaphore>,
     batch_size: usize,
     conditional_isolation: bool,
+    test_url: Option<String>,
 ) -> Result<Vec<ProxyProbeResult>> {
     if nodes.is_empty() {
         return Ok(Vec::new());
@@ -90,6 +91,7 @@ pub async fn verify_nodes_with_mihomo_progress_limited(
             let ids = batch.iter().map(|node| node.id.clone()).collect::<Vec<_>>();
             let mihomo = mihomo.clone();
             let network_limit = network_limit.clone();
+            let test_url = test_url.clone();
             tasks.spawn(async move {
                 let outcome = verify_nodes_with_mihomo_path(
                     batch,
@@ -98,6 +100,7 @@ pub async fn verify_nodes_with_mihomo_progress_limited(
                     None::<fn(ProxyProbeProgress)>,
                     network_limit,
                     conditional_isolation,
+                    test_url,
                 )
                 .await;
                 (ids, outcome)
@@ -140,6 +143,7 @@ async fn verify_nodes_with_mihomo_path(
     progress: Option<impl Fn(ProxyProbeProgress) + Send + Sync>,
     network_limit: Arc<Semaphore>,
     conditional_isolation: bool,
+    test_url: Option<String>,
 ) -> Result<Vec<ProxyProbeResult>> {
     let total = nodes.len();
     let started = tokio::time::Instant::now();
@@ -245,6 +249,14 @@ async fn verify_nodes_with_mihomo_path(
         .timeout(timeout + Duration::from_secs(2))
         .build()?;
     let timeout_ms = timeout.as_millis().clamp(1_000, 15_000).to_string();
+    let (primary_url, fallback_url) =
+        crate::constants::network::resolve_probe_urls(test_url.as_deref());
+    let primary_label = probe_target_label(&primary_url, "Google");
+    let fallback_label = if primary_label == "Google" {
+        "Cloudflare"
+    } else {
+        "Google"
+    };
     let prepared_all = prepared.clone();
     let mut iter = prepared.into_iter();
     let mut tasks = JoinSet::new();
@@ -257,6 +269,8 @@ async fn verify_nodes_with_mihomo_path(
             let client = client.clone();
             let timeout_ms = timeout_ms.clone();
             let network_limit = network_limit.clone();
+            let primary_url = primary_url.clone();
+            let fallback_url = fallback_url.clone();
             tasks.spawn(async move {
                 let _permit = match network_limit.acquire_owned().await {
                     Ok(permit) => permit,
@@ -278,25 +292,22 @@ async fn verify_nodes_with_mihomo_path(
                     &client,
                     &url,
                     timeout_ms.as_str(),
-                    PROXY_CONNECTIVITY_TEST_URL,
-                    "Google",
+                    &primary_url,
+                    primary_label,
                 )
                 .await;
-                if let Err(ref primary_err) = outcome {
-                    // 交叉探活：仅当非网络不可达/超时（如 Google 特定拦截、HTTP 非 204 等）时才走 Cloudflare 交叉复验
-                    // 若节点隧道本身超时或断开，直接判失败，避免死节点耗时翻倍
-                    if !is_connection_failure(primary_err) {
-                        if let Ok(cf_res) = probe_mihomo_target(
-                            &client,
-                            &url,
-                            timeout_ms.as_str(),
-                            PROXY_CONNECTIVITY_FALLBACK_URL,
-                            "Cloudflare",
-                        )
-                        .await
-                        {
-                            outcome = Ok(cf_res);
-                        }
+                if outcome.is_err() && primary_url != fallback_url {
+                    // 交叉探活：主目标探测失败时（无论阻断还是超时），走备用探测交叉复验
+                    if let Ok(cf_res) = probe_mihomo_target(
+                        &client,
+                        &url,
+                        timeout_ms.as_str(),
+                        &fallback_url,
+                        fallback_label,
+                    )
+                    .await
+                    {
+                        outcome = Ok(cf_res);
                     }
                 }
                 // 二次复测取最小值：P2P 型网络（URnetwork 等）首次连接含组网协商，
@@ -305,10 +316,10 @@ async fn verify_nodes_with_mihomo_path(
                 // 大库测速总时长基本不变。
                 if let Ok((delay, target_label)) = outcome {
                     if delay > 500 {
-                        let target_url = if target_label == "Cloudflare" {
-                            PROXY_CONNECTIVITY_FALLBACK_URL
+                        let target_url = if target_label == fallback_label {
+                            &fallback_url
                         } else {
-                            PROXY_CONNECTIVITY_TEST_URL
+                            &primary_url
                         };
                         if let Ok((second, _)) = probe_mihomo_target(
                             &client,
@@ -414,15 +425,13 @@ async fn probe_single_http_204(
 ///    使 sing-box / xray / shoes 与 Mihomo `unified-delay: true`（FlClash 默认）口径一致。
 pub(crate) async fn probe_http_proxy_unified_delay(
     client: &reqwest::Client,
+    test_url: Option<&str>,
 ) -> std::result::Result<(i64, &'static str), String> {
-    probe_http_proxy_unified_delay_urls(
-        client,
-        PROXY_CONNECTIVITY_TEST_URL,
-        PROXY_CONNECTIVITY_FALLBACK_URL,
-    )
-    .await
+    let (primary, fallback) = crate::constants::network::resolve_probe_urls(test_url);
+    probe_http_proxy_unified_delay_urls(client, &primary, &fallback).await
 }
 
+#[allow(dead_code)]
 pub(crate) fn is_connection_failure(err: &str) -> bool {
     let lower = err.to_ascii_lowercase();
     lower.contains("timeout")
@@ -448,22 +457,37 @@ pub(crate) fn is_connection_failure(err: &str) -> bool {
         || lower.contains("deadline")
 }
 
+pub(crate) fn probe_target_label(url: &str, default_if_unknown: &'static str) -> &'static str {
+    let lower = url.to_ascii_lowercase();
+    if lower.contains("google") || lower.contains("gstatic") {
+        "Google"
+    } else if lower.contains("cloudflare") || lower.contains("fallback") {
+        "Cloudflare"
+    } else {
+        default_if_unknown
+    }
+}
+
 async fn probe_http_proxy_unified_delay_urls(
     client: &reqwest::Client,
     primary_url: &str,
     fallback_url: &str,
 ) -> std::result::Result<(i64, &'static str), String> {
+    let primary_label = probe_target_label(primary_url, "Google");
+    let fallback_label = if primary_label == "Google" {
+        "Cloudflare"
+    } else {
+        "Google"
+    };
     let (first_ms, target_url, target_name) =
-        match probe_single_http_204(client, primary_url, "Google").await {
-            Ok(ms) => (ms, primary_url, "Google"),
+        match probe_single_http_204(client, primary_url, primary_label).await {
+            Ok(ms) => (ms, primary_url, primary_label),
             Err(primary_err) => {
-                // 如果主目标失败是因为网络连接超时/拒绝/断开，说明代理隧道本身不可达，
-                // 无需再向回退目标重试一次完整的超时，避免死节点耗时翻倍。
-                if is_connection_failure(&primary_err) {
+                if primary_url == fallback_url {
                     return Err(primary_err);
                 }
-                match probe_single_http_204(client, fallback_url, "Cloudflare").await {
-                    Ok(ms) => (ms, fallback_url, "Cloudflare"),
+                match probe_single_http_204(client, fallback_url, fallback_label).await {
+                    Ok(ms) => (ms, fallback_url, fallback_label),
                     Err(_) => return Err(primary_err),
                 }
             }
@@ -480,7 +504,7 @@ async fn probe_mihomo_target(
     client: &reqwest::Client,
     controller_url: &str,
     timeout_ms: &str,
-    target_url: &'static str,
+    target_url: &str,
     target_name: &'static str,
 ) -> std::result::Result<(i64, &'static str), String> {
     let response = client
@@ -790,10 +814,10 @@ mod tests {
     }
 
     #[test]
-    fn manual_probe_target_requires_google() {
+    fn manual_probe_target_default_is_cloudflare() {
         assert_eq!(
             PROXY_CONNECTIVITY_TEST_URL,
-            "https://www.google.com/generate_204"
+            "http://cp.cloudflare.com/generate_204"
         );
     }
 

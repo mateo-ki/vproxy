@@ -206,7 +206,59 @@ impl VpnApp {
                         if r5.drag_stopped() || r5.lost_focus() {
                             auto_save = true;
                         }
-                        ui.label(RichText::new("握手与 204 探针超时").small().color(theme::muted()));
+                        ui.label(RichText::new("握手与 204 探针超时（建议 2000~5000ms）").small().color(theme::muted()));
+                    });
+                });
+                ui.add_space(8.0);
+                ui.group(|ui| {
+                    ui.vertical(|ui| {
+                        ui.label(RichText::new("🎯 测速探测目标 URL").strong());
+                        let cur_url = self.edit_speedtest_url.trim().to_string();
+                        let selected_preset = match cur_url.as_str() {
+                            "http://cp.cloudflare.com/generate_204" => 0,
+                            "https://www.google.com/generate_204" => 1,
+                            "http://www.gstatic.com/generate_204" => 2,
+                            "https://cp.cloudflare.com/generate_204" => 3,
+                            _ => 4,
+                        };
+                        let selected_label = match selected_preset {
+                            0 => "Cloudflare HTTP (推荐 · 与 FlClash 一致)",
+                            1 => "Google HTTPS (官方严苛)",
+                            2 => "Google Gstatic HTTP",
+                            3 => "Cloudflare HTTPS",
+                            _ => "自定义 URL",
+                        };
+                        egui::ComboBox::from_id_salt("speedtest_url_preset")
+                            .selected_text(selected_label)
+                            .show_ui(ui, |ui| {
+                                if ui.selectable_label(selected_preset == 0, "Cloudflare HTTP (推荐 · 与 FlClash 一致)").clicked() {
+                                    self.edit_speedtest_url = "http://cp.cloudflare.com/generate_204".to_string();
+                                    auto_save = true;
+                                }
+                                if ui.selectable_label(selected_preset == 1, "Google HTTPS (官方严苛)").clicked() {
+                                    self.edit_speedtest_url = "https://www.google.com/generate_204".to_string();
+                                    auto_save = true;
+                                }
+                                if ui.selectable_label(selected_preset == 2, "Google Gstatic HTTP").clicked() {
+                                    self.edit_speedtest_url = "http://www.gstatic.com/generate_204".to_string();
+                                    auto_save = true;
+                                }
+                                if ui.selectable_label(selected_preset == 3, "Cloudflare HTTPS").clicked() {
+                                    self.edit_speedtest_url = "https://cp.cloudflare.com/generate_204".to_string();
+                                    auto_save = true;
+                                }
+                            });
+                        if selected_preset == 4 {
+                            let r = ui.add(
+                                egui::TextEdit::singleline(&mut self.edit_speedtest_url)
+                                    .hint_text("http://.../generate_204")
+                                    .desired_width(260.0),
+                            );
+                            if r.lost_focus() {
+                                auto_save = true;
+                            }
+                        }
+                        ui.label(RichText::new("主目标失败时自动走备用目标（Google / Cloudflare 互相复验）").small().color(theme::muted()));
                     });
                 });
             });

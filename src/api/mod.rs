@@ -692,6 +692,7 @@ async fn speedtest_one(
             download_top_n: s.speedtest_download_top_n,
             dedup_egress: s.speedtest_dedup_egress,
             tcp_ping_only: s.speedtest_tcp_ping_only,
+            speedtest_url: Some(s.speedtest_url),
         },
         Err(_) => SpeedTestOptions::default(),
     };
@@ -729,6 +730,7 @@ async fn speedtest_all(
         download_top_n: settings.speedtest_download_top_n,
         dedup_egress: settings.speedtest_dedup_egress,
         tcp_ping_only: settings.speedtest_tcp_ping_only,
+        speedtest_url: Some(settings.speedtest_url),
     };
     match st.speedtester.test_many(ids, opts).await {
         Ok(r) => Json(ApiResponse::ok(r)).into_response(),

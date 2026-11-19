@@ -284,6 +284,9 @@ pub struct AppSettings {
     /// 测速优化⑦：快速 TCP Ping 模式（仅测 TCP 连通性，跳过真实内核代理握手）。
     #[serde(default)]
     pub speedtest_tcp_ping_only: bool,
+    /// 测速探测目标 URL（默认与 FlClash / 主流客户端一致的 Cloudflare HTTP 204）。
+    #[serde(default = "default_speedtest_url")]
+    pub speedtest_url: String,
     /// 带宽保护（#5）：当前节点持续低于阈值 KB/s 时，交给选路调度器按劣化处理。
     #[serde(default)]
     pub bandwidth_guard: bool,
@@ -458,6 +461,10 @@ fn default_gist_queries() -> String {
     "vless//".to_string()
 }
 
+pub fn default_speedtest_url() -> String {
+    crate::constants::network::DEFAULT_SPEEDTEST_URL.to_string()
+}
+
 /// 允许的字体/界面缩放区间。界面上是 85%~140% 的滑杆，但 API/旧库里的值不一定落在
 /// 这个范围里 —— 越界的值会让窗口内容算成 0 高或撑到屏外，所以只在这一处收口。
 pub fn clamp_ui_scale(value: f32) -> f32 {
@@ -500,6 +507,7 @@ impl Default for AppSettings {
             speedtest_download_top_n: 0,
             speedtest_dedup_egress: false,
             speedtest_tcp_ping_only: false,
+            speedtest_url: default_speedtest_url(),
             bandwidth_guard: false,
             bandwidth_min_kbps: 0,
             publisher_api: String::new(),
@@ -555,6 +563,7 @@ pub struct UpdateSettings {
     pub speedtest_download_top_n: Option<u32>,
     pub speedtest_dedup_egress: Option<bool>,
     pub speedtest_tcp_ping_only: Option<bool>,
+    pub speedtest_url: Option<String>,
     pub bandwidth_guard: Option<bool>,
     pub bandwidth_min_kbps: Option<u32>,
     pub publisher_api: Option<String>,

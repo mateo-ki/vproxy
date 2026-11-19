@@ -52,7 +52,7 @@ pub struct SpeedTester {
     cancel: Arc<AtomicBool>,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub struct SpeedTestOptions {
     pub concurrency: u32,
     pub timeout_ms: u32,
@@ -71,6 +71,8 @@ pub struct SpeedTestOptions {
     pub dedup_egress: bool,
     /// 快速 TCP Ping 模式：跳过内核代理真实握手，仅测试网络连通性
     pub tcp_ping_only: bool,
+    /// 测速探测目标 URL（如 http://cp.cloudflare.com/generate_204）
+    pub speedtest_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -108,6 +110,7 @@ impl Default for SpeedTestOptions {
             download_top_n: 0,
             dedup_egress: false,
             tcp_ping_only: false,
+            speedtest_url: None,
         }
     }
 }
@@ -243,7 +246,7 @@ impl SpeedTester {
         let summary = self
             .run_speedtest(
                 representatives,
-                opts,
+                opts.clone(),
                 Some(move |state: SpeedTestProgress| {
                     let phase = match state.phase {
                         SpeedTestPhase::DnsResolve | SpeedTestPhase::TcpPrefilter => {

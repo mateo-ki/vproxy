@@ -36,6 +36,7 @@ pub async fn verify_nodes_with_shoes_progress_limited(
     timeout: Duration,
     progress: Option<impl Fn(ProxyProbeProgress) + Send + Sync>,
     network_limit: Arc<Semaphore>,
+    test_url: Option<String>,
 ) -> Result<Vec<ProxyProbeResult>> {
     if nodes.is_empty() {
         return Ok(Vec::new());
@@ -47,8 +48,14 @@ pub async fn verify_nodes_with_shoes_progress_limited(
     let mut results = Vec::with_capacity(total);
     let batch_total = shoes_batch_count(nodes.len());
     for (batch_index, batch) in nodes.chunks(SHOES_BATCH_SIZE).enumerate() {
-        let batch_results =
-            probe_batch_isolated(&binary, batch.to_vec(), timeout, network_limit.clone()).await;
+        let batch_results = probe_batch_isolated(
+            &binary,
+            batch.to_vec(),
+            timeout,
+            network_limit.clone(),
+            test_url.as_deref(),
+        )
+        .await;
         results.extend(batch_results);
         if let Some(progress) = progress.as_ref() {
             let ok = results.iter().filter(|result| result.ok).count();
@@ -71,11 +78,20 @@ async fn probe_batch_isolated(
     nodes: Vec<Node>,
     timeout: Duration,
     network_limit: Arc<Semaphore>,
+    test_url: Option<&str>,
 ) -> Vec<ProxyProbeResult> {
     if nodes.is_empty() {
         return Vec::new();
     }
-    match probe_batch(binary, nodes.clone(), timeout, network_limit.clone()).await {
+    match probe_batch(
+        binary,
+        nodes.clone(),
+        timeout,
+        network_limit.clone(),
+        test_url,
+    )
+    .await
+    {
         Ok(results) => results,
         Err(err) => {
             if nodes.len() <= 1 {
@@ -103,6 +119,7 @@ async fn probe_batch_isolated(
                 left.to_vec(),
                 timeout,
                 network_limit.clone(),
+                test_url,
             ))
             .await;
             let right_res = Box::pin(probe_batch_isolated(
@@ -110,6 +127,7 @@ async fn probe_batch_isolated(
                 right.to_vec(),
                 timeout,
                 network_limit,
+                test_url,
             ))
             .await;
             left_res.extend(right_res);
@@ -123,6 +141,7 @@ async fn probe_batch(
     nodes: Vec<Node>,
     timeout: Duration,
     network_limit: Arc<Semaphore>,
+    test_url: Option<&str>,
 ) -> Result<Vec<ProxyProbeResult>> {
     let mut ports = Vec::with_capacity(nodes.len());
     let mut reservations = Vec::with_capacity(nodes.len());
@@ -286,9 +305,11 @@ async fn probe_batch(
     }
 
     let mut tasks = JoinSet::new();
+    let test_url_owned = test_url.map(|s| s.to_string());
     for (index, node) in nodes.into_iter().enumerate() {
         let port = ports[index];
         let network_limit = network_limit.clone();
+        let test_url = test_url_owned.clone();
         tasks.spawn(async move {
             let _permit = network_limit
                 .acquire_owned()
@@ -304,7 +325,9 @@ async fn probe_batch(
                         .timeout(timeout)
                         .build()
                     {
-                        Ok(client) => probe_http_proxy_unified_delay(&client).await,
+                        Ok(client) => {
+                            probe_http_proxy_unified_delay(&client, test_url.as_deref()).await
+                        }
                         Err(error) => Err(error.to_string()),
                     },
                     Err(error) => Err(error.to_string()),

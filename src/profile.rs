@@ -351,6 +351,7 @@ pub async fn import_unified_profile(
                     window_size: Some(settings.window_size.clone()),
                     console_tabs: Some(settings.console_tabs.clone()),
                     dashboard_ui_mode: Some(settings.dashboard_ui_mode.clone()),
+                    speedtest_url: Some(settings.speedtest_url.clone()),
                 })
                 .await?;
             summary.settings_updated = true;

@@ -43,6 +43,7 @@ fn refill_opts(settings: &AppSettings) -> SpeedTestOptions {
         download_top_n: settings.speedtest_download_top_n,
         dedup_egress: settings.speedtest_dedup_egress,
         tcp_ping_only: settings.speedtest_tcp_ping_only,
+        speedtest_url: Some(settings.speedtest_url.clone()),
     }
 }
 
@@ -184,6 +185,7 @@ impl Scheduler {
                             download_top_n: settings.speedtest_download_top_n,
                             dedup_egress: settings.speedtest_dedup_egress,
                             tcp_ping_only: settings.speedtest_tcp_ping_only,
+                            speedtest_url: Some(settings.speedtest_url.clone()),
                         };
                         match self.speedtester.test_all_sources(opts).await {
                             Ok(sum) => {

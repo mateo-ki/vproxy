@@ -139,19 +139,18 @@ pub async fn run_speedtest_pipeline(
     let concurrency = opts.concurrency.clamp(1, 512) as usize;
     let (prefilter_timeout_ms, proxy_timeout_duration) = match opts.intensity {
         SpeedtestIntensity::Fast => (
-            opts.timeout_ms.clamp(600, 1000),
-            Duration::from_millis(2000),
+            (opts.timeout_ms / 2).clamp(500, 1500),
+            Duration::from_millis(opts.timeout_ms.clamp(800, 3000) as u64),
         ),
-        // 预筛只是一次 TCP SYN：1.2s 内握手没回来基本就是死节点（全球最远物理 RTT ≤350ms）。
-        // 以前封顶 1.5s 导致几千死节点白白空等数千秒；这里设为 800~1200ms，大幅加速淘汰僵尸节点。
-        // 真实握手阶段收紧超时上限（2.0s~3.5s），避免死节点拖垮整库测速进度。
+        // 用户设置的超时时间（例如 5000ms）在标准模式下真实生效，不再被硬编码截断；
+        // TCP 预筛超时按比例自适应（opts.timeout_ms / 3），放宽至 3000ms，避免 P2P 住宅节点在 TCP 阶段被误杀。
         SpeedtestIntensity::Standard => (
-            opts.timeout_ms.clamp(800, 1200),
-            Duration::from_millis(opts.timeout_ms.clamp(2000, 3500) as u64),
+            (opts.timeout_ms / 3).clamp(800, 3000),
+            Duration::from_millis(opts.timeout_ms.clamp(1000, 15000) as u64),
         ),
         SpeedtestIntensity::Deep => (
-            opts.timeout_ms.clamp(1200, 2000),
-            Duration::from_millis(opts.timeout_ms.clamp(3000, 8000) as u64),
+            (opts.timeout_ms / 2).clamp(1200, 5000),
+            Duration::from_millis(opts.timeout_ms.clamp(1500, 15000) as u64),
         ),
     };
 
@@ -543,8 +542,10 @@ pub async fn run_speedtest_pipeline(
 
     if opts.parallel_kernels {
         let mut kernel_tasks = JoinSet::new();
+        let speedtest_url = opts.speedtest_url.clone();
         if !mihomo_nodes.is_empty() {
             let limit = network_limit.clone();
+            let test_url = speedtest_url.clone();
             kernel_tasks.spawn(async move {
                 verify_nodes_with_kernel_progress(
                     KernelKind::Mihomo,
@@ -554,12 +555,14 @@ pub async fn run_speedtest_pipeline(
                     limit,
                     proxy_batch_size,
                     conditional_isolation,
+                    test_url,
                 )
                 .await
             });
         }
         if !sing_box_nodes.is_empty() {
             let limit = network_limit.clone();
+            let test_url = speedtest_url.clone();
             kernel_tasks.spawn(async move {
                 verify_nodes_with_kernel_progress(
                     KernelKind::SingBox,
@@ -569,12 +572,14 @@ pub async fn run_speedtest_pipeline(
                     limit,
                     proxy_batch_size,
                     conditional_isolation,
+                    test_url,
                 )
                 .await
             });
         }
         if !xray_nodes.is_empty() {
             let limit = network_limit.clone();
+            let test_url = speedtest_url.clone();
             kernel_tasks.spawn(async move {
                 verify_nodes_with_kernel_progress(
                     KernelKind::Xray,
@@ -584,12 +589,14 @@ pub async fn run_speedtest_pipeline(
                     limit,
                     proxy_batch_size,
                     conditional_isolation,
+                    test_url,
                 )
                 .await
             });
         }
         if !shoes_nodes.is_empty() {
             let limit = network_limit.clone();
+            let test_url = speedtest_url.clone();
             kernel_tasks.spawn(async move {
                 verify_nodes_with_kernel_progress(
                     KernelKind::Shoes,
@@ -599,12 +606,14 @@ pub async fn run_speedtest_pipeline(
                     limit,
                     proxy_batch_size,
                     conditional_isolation,
+                    test_url,
                 )
                 .await
             });
         }
         if !meow_nodes.is_empty() {
             let limit = network_limit.clone();
+            let test_url = speedtest_url.clone();
             kernel_tasks.spawn(async move {
                 verify_nodes_with_kernel_progress(
                     KernelKind::Meow,
@@ -614,12 +623,14 @@ pub async fn run_speedtest_pipeline(
                     limit,
                     proxy_batch_size,
                     conditional_isolation,
+                    test_url,
                 )
                 .await
             });
         }
         if !vpcore_nodes.is_empty() {
             let limit = network_limit.clone();
+            let test_url = speedtest_url.clone();
             kernel_tasks.spawn(async move {
                 verify_nodes_with_kernel_progress(
                     KernelKind::VpCore,
@@ -629,6 +640,7 @@ pub async fn run_speedtest_pipeline(
                     limit,
                     proxy_batch_size,
                     conditional_isolation,
+                    test_url,
                 )
                 .await
             });
@@ -658,6 +670,7 @@ pub async fn run_speedtest_pipeline(
             rejected_ok,
             proxy_total,
             started,
+            opts.speedtest_url.clone(),
         )
         .await?;
         let done_after_mihomo = rejected_done + mihomo_results.len();
@@ -677,6 +690,7 @@ pub async fn run_speedtest_pipeline(
                 ok_after_mihomo,
                 proxy_total,
                 started,
+                opts.speedtest_url.clone(),
             )
             .await?
         } else {
@@ -699,6 +713,7 @@ pub async fn run_speedtest_pipeline(
                 ok_after_sing_box,
                 proxy_total,
                 started,
+                opts.speedtest_url.clone(),
             )
             .await?
         } else {
@@ -721,6 +736,7 @@ pub async fn run_speedtest_pipeline(
                 ok_after_xray,
                 proxy_total,
                 started,
+                opts.speedtest_url.clone(),
             )
             .await?
         } else {
@@ -743,6 +759,7 @@ pub async fn run_speedtest_pipeline(
                 ok_after_shoes,
                 proxy_total,
                 started,
+                opts.speedtest_url.clone(),
             )
             .await?
         } else {
@@ -765,6 +782,7 @@ pub async fn run_speedtest_pipeline(
                 ok_after_meow,
                 proxy_total,
                 started,
+                opts.speedtest_url.clone(),
             )
             .await?
         } else {
@@ -921,6 +939,7 @@ async fn run_sequential_kernel<P>(
     rejected_ok: usize,
     proxy_total: usize,
     started: Instant,
+    test_url: Option<String>,
 ) -> Result<Vec<ProxyProbeResult>>
 where
     P: Fn(SpeedTestProgress) + Send + Sync,
@@ -949,6 +968,7 @@ where
             network_limit,
             proxy_batch_size,
             conditional_isolation,
+            test_url,
         )
         .await
     } else {
@@ -960,6 +980,7 @@ where
             network_limit,
             proxy_batch_size,
             conditional_isolation,
+            test_url,
         )
         .await
     }

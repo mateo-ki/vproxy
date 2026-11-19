@@ -321,6 +321,7 @@ pub struct VpnApp {
     pub(crate) edit_fetch_timeout_secs: u32,
     pub(crate) edit_speedtest_concurrency: u32,
     pub(crate) edit_timeout_ms: u32,
+    pub(crate) edit_speedtest_url: String,
     pub(crate) edit_speedtest_download: bool,
     pub(crate) edit_download_test_ms: u32,
     pub(crate) edit_http_server_enabled: bool,
@@ -830,6 +831,7 @@ impl VpnApp {
             edit_fetch_timeout_secs: 30,
             edit_speedtest_concurrency: 64,
             edit_timeout_ms: 2000,
+            edit_speedtest_url: crate::models::default_speedtest_url(),
             edit_speedtest_download: false,
             edit_download_test_ms: 800,
             edit_http_server_enabled: false,
@@ -1098,7 +1100,7 @@ impl VpnApp {
                 } else {
                     self.settings.speedtest_concurrency.clamp(16, 256)
                 },
-                self.settings.speedtest_timeout_ms.min(1000),
+                self.settings.speedtest_timeout_ms.clamp(500, 3000),
             ),
             SpeedtestIntensity::Standard => (
                 if proxy_running {
@@ -1106,7 +1108,7 @@ impl VpnApp {
                 } else {
                     self.settings.speedtest_concurrency.clamp(16, 192)
                 },
-                self.settings.speedtest_timeout_ms.clamp(800, 2000),
+                self.settings.speedtest_timeout_ms.clamp(500, 15000),
             ),
             SpeedtestIntensity::Deep => (
                 if proxy_running {
@@ -1114,7 +1116,7 @@ impl VpnApp {
                 } else {
                     (self.settings.speedtest_concurrency / 2).clamp(8, 96)
                 },
-                self.settings.speedtest_timeout_ms.max(2500),
+                self.settings.speedtest_timeout_ms.clamp(1000, 15000),
             ),
         };
         SpeedTestOptions {
@@ -1130,6 +1132,7 @@ impl VpnApp {
             download_top_n: self.settings.speedtest_download_top_n,
             dedup_egress: self.settings.speedtest_dedup_egress,
             tcp_ping_only: self.settings.speedtest_tcp_ping_only,
+            speedtest_url: Some(self.settings.speedtest_url.clone()),
         }
     }
 
@@ -5689,6 +5692,7 @@ impl VpnApp {
             speedtest_download_top_n: self.edit_speedtest_download_top_n,
             speedtest_dedup_egress: self.edit_speedtest_dedup_egress,
             speedtest_tcp_ping_only: self.edit_speedtest_tcp_ping_only,
+            speedtest_url: self.edit_speedtest_url.clone(),
             bandwidth_guard: self.edit_bandwidth_guard,
             bandwidth_min_kbps: self.edit_bandwidth_min_kbps,
             window_size: self.edit_window_size.clone(),
@@ -5737,6 +5741,7 @@ impl VpnApp {
         self.edit_speedtest_download_top_n = state.speedtest_download_top_n;
         self.edit_speedtest_dedup_egress = state.speedtest_dedup_egress;
         self.edit_speedtest_tcp_ping_only = state.speedtest_tcp_ping_only;
+        self.edit_speedtest_url = state.speedtest_url;
         self.edit_bandwidth_guard = state.bandwidth_guard;
         self.edit_bandwidth_min_kbps = state.bandwidth_min_kbps;
         self.edit_ui_theme = state.ui_theme.clone();
@@ -5781,6 +5786,7 @@ impl VpnApp {
             speedtest_download_top_n: Some(self.edit_speedtest_download_top_n),
             speedtest_dedup_egress: Some(self.edit_speedtest_dedup_egress),
             speedtest_tcp_ping_only: Some(self.edit_speedtest_tcp_ping_only),
+            speedtest_url: Some(self.edit_speedtest_url.clone()),
             bandwidth_guard: Some(self.edit_bandwidth_guard),
             bandwidth_min_kbps: Some(self.edit_bandwidth_min_kbps),
             ui_theme: Some(self.edit_ui_theme.clone()),

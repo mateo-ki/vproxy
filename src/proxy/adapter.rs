@@ -39,6 +39,7 @@ pub trait KernelAdapter: Send + Sync {
 
     fn batch_size(&self) -> usize;
 
+    #[allow(clippy::too_many_arguments)]
     fn verify_nodes<'a>(
         &'a self,
         nodes: Vec<Node>,
@@ -47,6 +48,7 @@ pub trait KernelAdapter: Send + Sync {
         network_limit: Arc<Semaphore>,
         batch_size: usize,
         conditional_isolation: bool,
+        test_url: Option<String>,
     ) -> Pin<Box<dyn std::future::Future<Output = Result<Vec<ProxyProbeResult>>> + Send + 'a>>;
 }
 
@@ -124,6 +126,7 @@ impl KernelAdapter for MihomoAdapter {
         256
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn verify_nodes<'a>(
         &'a self,
         nodes: Vec<Node>,
@@ -132,6 +135,7 @@ impl KernelAdapter for MihomoAdapter {
         network_limit: Arc<Semaphore>,
         batch_size: usize,
         conditional_isolation: bool,
+        test_url: Option<String>,
     ) -> Pin<Box<dyn std::future::Future<Output = Result<Vec<ProxyProbeResult>>> + Send + 'a>> {
         Box::pin(async move {
             crate::proxy_probe::verify_nodes_with_mihomo_progress_limited(
@@ -141,6 +145,7 @@ impl KernelAdapter for MihomoAdapter {
                 network_limit,
                 batch_size,
                 conditional_isolation,
+                test_url,
             )
             .await
         })
@@ -202,6 +207,7 @@ impl KernelAdapter for MeowAdapter {
         256
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn verify_nodes<'a>(
         &'a self,
         nodes: Vec<Node>,
@@ -210,6 +216,7 @@ impl KernelAdapter for MeowAdapter {
         network_limit: Arc<Semaphore>,
         batch_size: usize,
         conditional_isolation: bool,
+        test_url: Option<String>,
     ) -> Pin<Box<dyn std::future::Future<Output = Result<Vec<ProxyProbeResult>>> + Send + 'a>> {
         Box::pin(async move {
             crate::proxy_probe::verify_nodes_with_mihomo_progress_limited(
@@ -219,6 +226,7 @@ impl KernelAdapter for MeowAdapter {
                 network_limit,
                 batch_size,
                 conditional_isolation,
+                test_url,
             )
             .await
         })
@@ -275,6 +283,7 @@ impl KernelAdapter for SingBoxAdapter {
         64
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn verify_nodes<'a>(
         &'a self,
         nodes: Vec<Node>,
@@ -283,6 +292,7 @@ impl KernelAdapter for SingBoxAdapter {
         network_limit: Arc<Semaphore>,
         _batch_size: usize,
         _conditional_isolation: bool,
+        test_url: Option<String>,
     ) -> Pin<Box<dyn std::future::Future<Output = Result<Vec<ProxyProbeResult>>> + Send + 'a>> {
         Box::pin(async move {
             crate::proxy::sing_box::verify_nodes_with_sing_box_progress_limited(
@@ -290,6 +300,7 @@ impl KernelAdapter for SingBoxAdapter {
                 timeout,
                 progress.map(|callback| move |state| callback(state)),
                 network_limit,
+                test_url,
             )
             .await
         })
@@ -354,6 +365,7 @@ impl KernelAdapter for XrayAdapter {
         64
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn verify_nodes<'a>(
         &'a self,
         nodes: Vec<Node>,
@@ -362,6 +374,7 @@ impl KernelAdapter for XrayAdapter {
         network_limit: Arc<Semaphore>,
         _batch_size: usize,
         _conditional_isolation: bool,
+        test_url: Option<String>,
     ) -> Pin<Box<dyn std::future::Future<Output = Result<Vec<ProxyProbeResult>>> + Send + 'a>> {
         Box::pin(async move {
             crate::proxy::xray::verify_nodes_with_xray_progress_limited(
@@ -369,6 +382,7 @@ impl KernelAdapter for XrayAdapter {
                 timeout,
                 progress.map(|callback| move |state| callback(state)),
                 network_limit,
+                test_url,
             )
             .await
         })
@@ -424,6 +438,7 @@ impl KernelAdapter for ShoesAdapter {
         64
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn verify_nodes<'a>(
         &'a self,
         nodes: Vec<Node>,
@@ -432,6 +447,7 @@ impl KernelAdapter for ShoesAdapter {
         network_limit: Arc<Semaphore>,
         _batch_size: usize,
         _conditional_isolation: bool,
+        test_url: Option<String>,
     ) -> Pin<Box<dyn std::future::Future<Output = Result<Vec<ProxyProbeResult>>> + Send + 'a>> {
         Box::pin(async move {
             crate::proxy::shoes::verify_nodes_with_shoes_progress_limited(
@@ -439,6 +455,7 @@ impl KernelAdapter for ShoesAdapter {
                 timeout,
                 progress.map(|callback| move |state| callback(state)),
                 network_limit,
+                test_url,
             )
             .await
         })
@@ -505,6 +522,7 @@ impl KernelAdapter for VpCoreAdapter {
         1024
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn verify_nodes<'a>(
         &'a self,
         nodes: Vec<Node>,
@@ -513,6 +531,7 @@ impl KernelAdapter for VpCoreAdapter {
         network_limit: Arc<Semaphore>,
         batch_size: usize,
         conditional_isolation: bool,
+        test_url: Option<String>,
     ) -> Pin<Box<dyn std::future::Future<Output = Result<Vec<ProxyProbeResult>>> + Send + 'a>> {
         Box::pin(async move {
             crate::proxy_probe::verify_nodes_with_mihomo_progress_limited(
@@ -522,6 +541,7 @@ impl KernelAdapter for VpCoreAdapter {
                 network_limit,
                 batch_size,
                 conditional_isolation,
+                test_url,
             )
             .await
         })

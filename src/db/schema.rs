@@ -310,6 +310,12 @@ impl Database {
         .await?;
         self.ensure_column(
             "settings",
+            "speedtest_url",
+            "TEXT NOT NULL DEFAULT 'http://cp.cloudflare.com/generate_204'",
+        )
+        .await?;
+        self.ensure_column(
+            "settings",
             "http_server_enabled",
             "INTEGER NOT NULL DEFAULT 0",
         )
