@@ -5312,7 +5312,7 @@ impl VpnApp {
                     self.set_and_persist_selected_node(id, name.clone());
                     self.status = format!("已选中节点: {name}（点击「启动内核」即可开启）");
                 } else {
-                    self.status = format!("已聚焦节点: {name}（右键设为活动节点）");
+                    self.status = format!("已选中节点: {name}（双击或右键设为活动节点）");
                 }
             }
             NodeCardAction::Connect { id, name } => {

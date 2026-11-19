@@ -889,107 +889,115 @@ where
                     let start = row_idx * columns;
                     let end = (start + columns).min(nodes.len());
                     let row = &nodes[start..end];
-                    ui.columns(columns, |column_uis| {
-                        for (column_index, column_ui) in column_uis.iter_mut().enumerate() {
-                            let Some(node) = row.get(column_index) else {
-                                continue;
-                            };
-                            let is_active = selected_proxy_node_id == Some(&node.id);
-                            let is_focused = focused_node_id == Some(&node.id);
-                            let is_switching = switching_node_id == Some(&node.id);
-                            let source_name = source_resolver(node.source_id.as_deref());
-                            let card_tip = {
-                                let mut tip =
-                                    format!("{}\n{}:{}", node.name, node.server, node.port);
-                                if let Some(src) = source_name {
-                                    if !src.is_empty() {
-                                        tip.push_str(&format!("\n订阅源: {src}"));
+                    ui.push_id(row_idx, |ui| {
+                        ui.columns(columns, |column_uis| {
+                            for (column_index, column_ui) in column_uis.iter_mut().enumerate() {
+                                let Some(node) = row.get(column_index) else {
+                                    continue;
+                                };
+                                let is_active = selected_proxy_node_id == Some(&node.id);
+                                let is_focused = focused_node_id == Some(&node.id);
+                                let is_switching = switching_node_id == Some(&node.id);
+                                let source_name = source_resolver(node.source_id.as_deref());
+                                let card_tip = {
+                                    let mut tip =
+                                        format!("{}\n{}:{}", node.name, node.server, node.port);
+                                    if let Some(src) = source_name {
+                                        if !src.is_empty() {
+                                            tip.push_str(&format!("\n订阅源: {src}"));
+                                        }
                                     }
-                                }
-                                if let Some(ms) = node.latency_ms {
-                                    tip.push_str(&format!("\n延迟: {ms} ms"));
-                                }
-                                if is_active {
-                                    tip.push_str("\n当前活动出口（右键管理）");
-                                } else {
-                                    tip.push_str("\n左键点击选中，右键设为活动节点（双击亦可）");
-                                }
-                                tip
-                            };
-                            let response = compact_node_card(
-                                column_ui,
-                                node,
-                                source_name,
-                                is_active,
-                                is_focused,
-                                is_switching,
-                            )
-                            .on_hover_text(card_tip);
-                            let clicked = response.clicked();
-                            let double_clicked = response.double_clicked();
-                            response.context_menu(|ui| {
-                                if !is_active {
-                                    if ui.button("🚀 设为活动节点").clicked() {
-                                        card_action = Some(NodeCardAction::Connect {
-                                            id: node.id.clone(),
-                                            name: node.name.clone(),
-                                        });
+                                    if let Some(ms) = node.latency_ms {
+                                        tip.push_str(&format!("\n延迟: {ms} ms"));
+                                    }
+                                    if is_active {
+                                        tip.push_str("\n当前活动出口（右键管理）");
+                                    } else {
+                                        tip.push_str(
+                                            "\n左键点击选中，右键设为活动节点（双击亦可）",
+                                        );
+                                    }
+                                    tip
+                                };
+                                let response = compact_node_card(
+                                    column_ui,
+                                    node,
+                                    source_name,
+                                    is_active,
+                                    is_focused,
+                                    is_switching,
+                                )
+                                .on_hover_text(card_tip);
+                                let clicked = response.clicked();
+                                let double_clicked = response.double_clicked();
+                                response.context_menu(|ui| {
+                                    if !is_active {
+                                        if ui.button("🚀 设为活动节点").clicked() {
+                                            card_action = Some(NodeCardAction::Connect {
+                                                id: node.id.clone(),
+                                                name: node.name.clone(),
+                                            });
+                                            ui.close();
+                                        }
+                                    } else {
+                                        ui.label(
+                                            RichText::new("✓ 当前活动节点")
+                                                .small()
+                                                .color(theme::accent_strong()),
+                                        );
+                                    }
+                                    ui.separator();
+                                    if ui
+                                        .add_enabled(!is_busy, egui::Button::new("⚡ 测速节点"))
+                                        .clicked()
+                                    {
+                                        card_action =
+                                            Some(NodeCardAction::Speedtest(node.id.clone()));
                                         ui.close();
                                     }
-                                } else {
-                                    ui.label(
-                                        RichText::new("✓ 当前活动节点")
-                                            .small()
-                                            .color(theme::accent_strong()),
-                                    );
-                                }
-                                ui.separator();
-                                if ui
-                                    .add_enabled(!is_busy, egui::Button::new("⚡ 测速节点"))
-                                    .clicked()
-                                {
-                                    card_action = Some(NodeCardAction::Speedtest(node.id.clone()));
-                                    ui.close();
-                                }
-                                if ui
-                                    .add_enabled(!is_busy, egui::Button::new("📥 下载测速"))
-                                    .clicked()
-                                {
-                                    card_action =
-                                        Some(NodeCardAction::SpeedtestDownload(node.id.clone()));
-                                    ui.close();
-                                }
-                                if ui.button("ℹ️ 查看详情").clicked() {
-                                    card_action = Some(NodeCardAction::ShowDetail(node.id.clone()));
-                                    ui.close();
-                                }
-                                if ui.button("🛡️ IP 检测").clicked() {
-                                    card_action =
-                                        Some(NodeCardAction::CheckIpRisk(node.id.clone()));
-                                    ui.close();
-                                }
-                                if ui.button("🧭 路由追踪").clicked() {
-                                    card_action = Some(NodeCardAction::RouteTrace(node.id.clone()));
-                                    ui.close();
-                                }
-                                ui.separator();
-                                if ui.button("🗑️ 删除节点").clicked() {
-                                    card_action = Some(NodeCardAction::Delete(node.id.clone()));
-                                    ui.close();
-                                }
-                            });
-                            if double_clicked && !is_active {
-                                card_action = Some(NodeCardAction::Connect {
-                                    id: node.id.clone(),
-                                    name: node.name.clone(),
+                                    if ui
+                                        .add_enabled(!is_busy, egui::Button::new("📥 下载测速"))
+                                        .clicked()
+                                    {
+                                        card_action = Some(NodeCardAction::SpeedtestDownload(
+                                            node.id.clone(),
+                                        ));
+                                        ui.close();
+                                    }
+                                    if ui.button("ℹ️ 查看详情").clicked() {
+                                        card_action =
+                                            Some(NodeCardAction::ShowDetail(node.id.clone()));
+                                        ui.close();
+                                    }
+                                    if ui.button("🛡️ IP 检测").clicked() {
+                                        card_action =
+                                            Some(NodeCardAction::CheckIpRisk(node.id.clone()));
+                                        ui.close();
+                                    }
+                                    if ui.button("🧭 路由追踪").clicked() {
+                                        card_action =
+                                            Some(NodeCardAction::RouteTrace(node.id.clone()));
+                                        ui.close();
+                                    }
+                                    ui.separator();
+                                    if ui.button("🗑️ 删除节点").clicked() {
+                                        card_action = Some(NodeCardAction::Delete(node.id.clone()));
+                                        ui.close();
+                                    }
                                 });
-                            } else if clicked {
-                                card_action = Some(NodeCardAction::Select {
-                                    id: node.id.clone(),
-                                    name: node.name.clone(),
-                                });
+                                if double_clicked {
+                                    card_action = Some(NodeCardAction::Connect {
+                                        id: node.id.clone(),
+                                        name: node.name.clone(),
+                                    });
+                                } else if clicked {
+                                    card_action = Some(NodeCardAction::Select {
+                                        id: node.id.clone(),
+                                        name: node.name.clone(),
+                                    });
+                                }
                             }
-                        }
+                        });
                     });
                     ui.add_space(6.0);
                 }

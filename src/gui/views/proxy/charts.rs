@@ -1491,8 +1491,9 @@ impl VpnApp {
                             let mut menu_action: Option<NodeCardAction> = None;
                             let mut copied_text: Option<(String, String)> = None;
 
-                            for pair in nodes.chunks(cols) {
-                                ui.columns(cols, |column_uis| {
+                            for (pair_idx, pair) in nodes.chunks(cols).enumerate() {
+                                ui.push_id(pair_idx, |ui| {
+                                    ui.columns(cols, |column_uis| {
                                     for (k, node) in pair.iter().enumerate() {
                                         let column_ui = &mut column_uis[k];
                                         let is_active = if let Some(ref now) = group.now {
@@ -1604,7 +1605,7 @@ impl VpnApp {
                                             }
                                         });
 
-                                        if double_clicked && !is_active {
+                                        if double_clicked {
                                             clicked_node = Some(node.clone());
                                             force_manual = true;
                                         } else if clicked {
@@ -1616,8 +1617,9 @@ impl VpnApp {
                                         }
                                     }
                                 });
-                                ui.add_space(4.0);
-                            }
+                            });
+                            ui.add_space(4.0);
+                        }
 
                             if let Some(node) = clicked_node {
                                 if force_manual {
