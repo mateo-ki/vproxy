@@ -457,8 +457,8 @@ pub fn preferred_proxy_kernel(protocol: &str) -> Option<KernelKind> {
         // openvpn：VP-Core 1.7.7 起原生出站（TCP + AEAD/CBC，经 VPN Gate 实测），
         // 新版 mihomo 原生出站作为兜底
         "openvpn" => Some(KernelKind::VpCore),
-        "ssh" => Some(KernelKind::SingBox),
-        "hysteria2" | "hy2" | "tuic" | "anytls" | "wireguard" | "wg" => Some(KernelKind::SingBox),
+        "ssh" | "tuic" | "wireguard" | "wg" => Some(KernelKind::SingBox),
+        "hysteria2" | "hy2" | "anytls" => Some(KernelKind::Mihomo),
         protocol if KernelKind::Mihomo.supports_proxy_protocol(protocol) => {
             Some(KernelKind::Mihomo)
         }
@@ -1378,6 +1378,10 @@ Use tags: with_gvisor
         );
         assert_eq!(
             missing_with("hysteria2", KernelPreference::Auto, true, &[]),
+            Some(KernelKind::Mihomo)
+        );
+        assert_eq!(
+            missing_with("tuic", KernelPreference::Auto, true, &[]),
             Some(KernelKind::SingBox)
         );
         assert_eq!(
@@ -1573,10 +1577,20 @@ Use tags: with_gvisor
 
     #[test]
     fn proxy_kernel_preferences_are_protocol_specific() {
-        for protocol in ["ssr", "hysteria", "vless", "vmess", "trojan", "ss"] {
+        for protocol in [
+            "ssr",
+            "hysteria",
+            "hysteria2",
+            "hy2",
+            "anytls",
+            "vless",
+            "vmess",
+            "trojan",
+            "ss",
+        ] {
             assert_eq!(preferred_proxy_kernel(protocol), Some(KernelKind::Mihomo));
         }
-        for protocol in ["hysteria2", "hy2", "tuic", "anytls", "wireguard", "wg"] {
+        for protocol in ["tuic", "wireguard", "wg"] {
             assert_eq!(preferred_proxy_kernel(protocol), Some(KernelKind::SingBox));
         }
         assert_eq!(preferred_proxy_kernel("snell"), Some(KernelKind::Shoes));

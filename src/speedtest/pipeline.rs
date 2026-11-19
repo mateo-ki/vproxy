@@ -140,17 +140,18 @@ pub async fn run_speedtest_pipeline(
     let (prefilter_timeout_ms, proxy_timeout_duration) = match opts.intensity {
         SpeedtestIntensity::Fast => (
             opts.timeout_ms.clamp(600, 1000),
-            Duration::from_millis(3000),
+            Duration::from_millis(2000),
         ),
         // 预筛只是一次 TCP SYN：1.2s 内握手没回来基本就是死节点（全球最远物理 RTT ≤350ms）。
         // 以前封顶 1.5s 导致几千死节点白白空等数千秒；这里设为 800~1200ms，大幅加速淘汰僵尸节点。
+        // 真实握手阶段收紧超时上限（2.0s~3.5s），避免死节点拖垮整库测速进度。
         SpeedtestIntensity::Standard => (
             opts.timeout_ms.clamp(800, 1200),
-            Duration::from_millis(opts.timeout_ms.clamp(3_000, 15_000) as u64),
+            Duration::from_millis(opts.timeout_ms.clamp(2000, 3500) as u64),
         ),
         SpeedtestIntensity::Deep => (
             opts.timeout_ms.clamp(1200, 2000),
-            Duration::from_millis(opts.timeout_ms.clamp(5_000, 25_000) as u64),
+            Duration::from_millis(opts.timeout_ms.clamp(3000, 8000) as u64),
         ),
     };
 

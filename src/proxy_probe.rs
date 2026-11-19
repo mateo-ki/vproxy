@@ -282,18 +282,21 @@ async fn verify_nodes_with_mihomo_path(
                     "Google",
                 )
                 .await;
-                if outcome.is_err() {
-                    // 交叉探活：Google 遇阻或偶发单次抖动时，走 Cloudflare 交叉复验
-                    if let Ok(cf_res) = probe_mihomo_target(
-                        &client,
-                        &url,
-                        timeout_ms.as_str(),
-                        PROXY_CONNECTIVITY_FALLBACK_URL,
-                        "Cloudflare",
-                    )
-                    .await
-                    {
-                        outcome = Ok(cf_res);
+                if let Err(ref primary_err) = outcome {
+                    // 交叉探活：仅当非网络不可达/超时（如 Google 特定拦截、HTTP 非 204 等）时才走 Cloudflare 交叉复验
+                    // 若节点隧道本身超时或断开，直接判失败，避免死节点耗时翻倍
+                    if !is_connection_failure(primary_err) {
+                        if let Ok(cf_res) = probe_mihomo_target(
+                            &client,
+                            &url,
+                            timeout_ms.as_str(),
+                            PROXY_CONNECTIVITY_FALLBACK_URL,
+                            "Cloudflare",
+                        )
+                        .await
+                        {
+                            outcome = Ok(cf_res);
+                        }
                     }
                 }
                 // 二次复测取最小值：P2P 型网络（URnetwork 等）首次连接含组网协商，
@@ -420,6 +423,31 @@ pub(crate) async fn probe_http_proxy_unified_delay(
     .await
 }
 
+pub(crate) fn is_connection_failure(err: &str) -> bool {
+    let lower = err.to_ascii_lowercase();
+    lower.contains("timeout")
+        || lower.contains("timed out")
+        || lower.contains("time out")
+        || lower.contains("504")
+        || lower.contains("connection refused")
+        || lower.contains("connection reset")
+        || lower.contains("reset by peer")
+        || lower.contains("network is unreachable")
+        || lower.contains("no route to host")
+        || lower.contains("broken pipe")
+        || lower.contains("eof")
+        || lower.contains("proxy connection")
+        || lower.contains("failed to connect")
+        || lower.contains("connectex")
+        || lower.contains("10060")
+        || lower.contains("10061")
+        || lower.contains("10054")
+        || lower.contains("10065")
+        || lower.contains("10051")
+        || lower.contains("10053")
+        || lower.contains("deadline")
+}
+
 async fn probe_http_proxy_unified_delay_urls(
     client: &reqwest::Client,
     primary_url: &str,
@@ -429,6 +457,11 @@ async fn probe_http_proxy_unified_delay_urls(
         match probe_single_http_204(client, primary_url, "Google").await {
             Ok(ms) => (ms, primary_url, "Google"),
             Err(primary_err) => {
+                // 如果主目标失败是因为网络连接超时/拒绝/断开，说明代理隧道本身不可达，
+                // 无需再向回退目标重试一次完整的超时，避免死节点耗时翻倍。
+                if is_connection_failure(&primary_err) {
+                    return Err(primary_err);
+                }
                 match probe_single_http_204(client, fallback_url, "Cloudflare").await {
                     Ok(ms) => (ms, fallback_url, "Cloudflare"),
                     Err(_) => return Err(primary_err),
@@ -456,8 +489,10 @@ async fn probe_mihomo_target(
         .send()
         .await
         .map_err(|error| format!("{target_name}: {error}"))?;
-    if !response.status().is_success() {
-        return Err(format!("{target_name}: HTTP {}", response.status()));
+    let status = response.status();
+    if !status.is_success() {
+        let text = response.text().await.unwrap_or_default();
+        return Err(format!("{target_name}: HTTP {status} {text}"));
     }
     let body = response
         .json::<Value>()
@@ -895,5 +930,26 @@ mod tests {
         assert_eq!(rejected[0].0.id, "invalid");
         assert!(!rejected[0].1.is_empty());
         let _ = tokio::fs::remove_dir_all(work_dir).await;
+    }
+
+    #[test]
+    fn test_is_connection_failure_distinguishes_dead_nodes_from_http_blocks() {
+        // 连接不可达/超时/断开：属于死节点，应当跳过回退目标探测
+        assert!(is_connection_failure("operation timed out"));
+        assert!(is_connection_failure("connection refused"));
+        assert!(is_connection_failure("Google: HTTP 504 Gateway Timeout"));
+        assert!(is_connection_failure("proxy connection closed"));
+        assert!(is_connection_failure(
+            "connectex: A connection attempt failed"
+        ));
+        assert!(is_connection_failure("os error 10060"));
+        assert!(is_connection_failure("network is unreachable"));
+
+        // HTTP 状态码拦截（如 Google 403 / 429 / 503 等）：说明隧道畅通但目标受阻，需走回退目标
+        assert!(!is_connection_failure("Google: HTTP 403 Forbidden"));
+        assert!(!is_connection_failure("Google: HTTP 429 Too Many Requests"));
+        assert!(!is_connection_failure(
+            "Google: HTTP 503 Service Unavailable"
+        ));
     }
 }
