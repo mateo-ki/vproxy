@@ -712,6 +712,9 @@ impl VpnApp {
                             }
                             self.request_full_reload();
                             crate::platform::trim_working_set();
+                            if !self.speedtester.is_cancelled() {
+                                self.export_alive_nodes_snapshot();
+                            }
                             self.trigger_post_speedtest_recovery();
                         }
                         BgMsg::SpeedDone(Err(e)) => {

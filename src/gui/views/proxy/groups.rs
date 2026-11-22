@@ -744,6 +744,27 @@ pub fn node_matches_group(
     node_matches_group_depth(node, group_name, kernel_groups, 0)
 }
 
+/// 调度抽屉的地区筛选命中判断（OTHER = 常用七个地区之外都算）。
+/// country 调用方已做大写归一。
+pub fn group_drawer_region_hit(country: &str, region_key: &str) -> bool {
+    if region_key == "all" {
+        true
+    } else if region_key == "OTHER" {
+        !["HK", "JP", "US", "SG", "TW", "KR", "GB", "DE"].contains(&country)
+    } else {
+        country == region_key
+    }
+}
+
+/// 节点归属地区码：country 优先，缺了按名称猜，再大写归一。
+pub fn group_drawer_country_of(node: &NodeSummary) -> String {
+    node.country
+        .clone()
+        .or_else(|| crate::parser::guess_country(&node.name))
+        .unwrap_or_default()
+        .to_ascii_uppercase()
+}
+
 fn node_matches_group_depth(
     node: &NodeSummary,
     group_name: &str,
@@ -995,6 +1016,36 @@ pub(crate) fn visible_group_names(
 #[cfg(test)]
 mod editor_tests {
     use super::*;
+
+    #[test]
+    fn group_drawer_region_hit_matches_codes_and_other_bucket() {
+        assert!(group_drawer_region_hit("JP", "all"));
+        assert!(group_drawer_region_hit("JP", "JP"));
+        assert!(!group_drawer_region_hit("JP", "HK"));
+        // 常用七地区之外都归 OTHER
+        assert!(group_drawer_region_hit("TR", "OTHER"));
+        assert!(group_drawer_region_hit("AR", "OTHER"));
+        assert!(!group_drawer_region_hit("US", "OTHER"));
+        assert!(!group_drawer_region_hit("GB", "OTHER"));
+        // 归一交给 group_drawer_country_of：小写国家码先变大写再判
+        let node = NodeSummary {
+            id: "n1".into(),
+            source_id: None,
+            protocol: "ss".into(),
+            name: "测试节点".into(),
+            server: "1.2.3.4".into(),
+            port: 443,
+            country: Some("jp".into()),
+            latency_ms: None,
+            latency_ok: None,
+            download_kbps: None,
+            latency_kernel: None,
+            latency_test_kind: None,
+            latency_tested_at: None,
+            updated_at: chrono::Utc::now(),
+        };
+        assert_eq!(group_drawer_country_of(&node), "JP");
+    }
 
     fn editor_frame(
         ctx: &egui::Context,

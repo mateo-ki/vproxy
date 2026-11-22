@@ -1376,6 +1376,11 @@ impl VpnApp {
                     let mut group_nodes: Vec<crate::models::NodeSummary> = candidate_pool
                         .iter()
                         .filter(|n| node_matches_group(n, &group.name, &self.kernel_groups))
+                        // 订阅源筛选（None = 全部源）
+                        .filter(|n| match &self.group_drawer_source {
+                            Some(source_id) => n.source_id.as_deref() == Some(source_id.as_str()),
+                            None => true,
+                        })
                         .cloned()
                         .collect();
 
@@ -1392,6 +1397,35 @@ impl VpnApp {
 
                     ui.horizontal(|ui| {
                         ui.add_space(16.0);
+                        // 订阅源下拉过滤（全部源 / 各订阅源）
+                        let source_label = match &self.group_drawer_source {
+                            Some(source_id) => self
+                                .sources
+                                .iter()
+                                .find(|s| &s.id == source_id)
+                                .map(|s| s.name.clone())
+                                .unwrap_or_else(|| "未知订阅源".into()),
+                            None => "全部订阅源".into(),
+                        };
+                        egui::ComboBox::from_id_salt(("group_drawer_source", group.name.clone()))
+                            .selected_text(
+                                RichText::new(source_label).size(10.5),
+                            )
+                            .width(120.0)
+                            .show_ui(ui, |ui| {
+                                ui.selectable_value(
+                                    &mut self.group_drawer_source,
+                                    None,
+                                    "全部订阅源",
+                                );
+                                for source in &self.sources {
+                                    ui.selectable_value(
+                                        &mut self.group_drawer_source,
+                                        Some(source.id.clone()),
+                                        source.name.clone(),
+                                    );
+                                }
+                            });
                         ui.add(
                             egui::TextEdit::singleline(&mut self.group_drawer_filter)
                                 .hint_text("筛选节点")
@@ -1405,20 +1439,11 @@ impl VpnApp {
                             let match_count = group_nodes
                                 .iter()
                                 .filter(|n| {
-                                    let country = n
-                                        .country
-                                        .clone()
-                                        .or_else(|| crate::parser::guess_country(&n.name))
-                                        .unwrap_or_default()
-                                        .to_ascii_uppercase();
-                                    let region_hit = if region_key == "all" {
-                                        true
-                                    } else if region_key == "OTHER" {
-                                        !["HK", "JP", "US", "SG", "TW", "KR", "GB", "DE"]
-                                            .contains(&country.as_str())
-                                    } else {
-                                        &country == region_key
-                                    };
+                                    let country = super::groups::group_drawer_country_of(n);
+                                    let region_hit = super::groups::group_drawer_region_hit(
+                                        &country,
+                                        region_key,
+                                    );
                                     let name_hit = filter.is_empty()
                                         || n.name.to_lowercase().contains(&filter);
                                     region_hit && name_hit
@@ -1431,6 +1456,59 @@ impl VpnApp {
                                 .size(10.0)
                                 .color(theme::muted()),
                         );
+                        // 测试当前筛选命中的节点（复用测速管线，进度与取消共用主界面）
+                        let filtered_ids: Vec<String> = group_nodes
+                            .iter()
+                            .filter(|n| {
+                                let country = super::groups::group_drawer_country_of(n);
+                                let region_hit = super::groups::group_drawer_region_hit(
+                                    &country,
+                                    region_key,
+                                );
+                                let name_hit = filter.is_empty()
+                                    || n.name.to_lowercase().contains(&filter);
+                                region_hit && name_hit
+                            })
+                            .map(|n| n.id.clone())
+                            .collect();
+                        let test_count = filtered_ids.len();
+                        let can_test = !self.speedtest_busy && test_count > 0;
+                        let test_btn = egui::Button::new(
+                            RichText::new(format!("⚡ 测试({test_count})"))
+                                .size(10.5)
+                                .strong()
+                                .color(if can_test {
+                                    theme::accent_strong()
+                                } else {
+                                    theme::muted()
+                                }),
+                        )
+                        .fill(if can_test {
+                            theme::accent_bg()
+                        } else {
+                            theme::sidebar()
+                        })
+                        .stroke(Stroke::new(
+                            1.0_f32,
+                            if can_test {
+                                theme::accent()
+                            } else {
+                                theme::border_subtle()
+                            },
+                        ))
+                        .corner_radius(CornerRadius::same(10));
+                        if ui
+                            .add_enabled(can_test, test_btn)
+                            .on_hover_text(
+                                "对当前筛选命中的节点发起并发测速（测完后可用节点会自动导出到 data/exports）",
+                            )
+                            .clicked()
+                        {
+                            self.speedtest_ids(
+                                Some(filtered_ids),
+                                &format!("正在测试筛选命中的 {test_count} 个节点..."),
+                            );
+                        }
                     });
                     ui.add_space(4.0);
                     let avail_scroll_h = (ui.available_height() - 4.0).max(50.0);
@@ -1444,20 +1522,11 @@ impl VpnApp {
                             let nodes: Vec<crate::models::NodeSummary> = group_nodes
                                 .into_iter()
                                 .filter(|n| {
-                                    let country = n
-                                        .country
-                                        .clone()
-                                        .or_else(|| crate::parser::guess_country(&n.name))
-                                        .unwrap_or_default()
-                                        .to_ascii_uppercase();
-                                    let region_hit = if region_key == "all" {
-                                        true
-                                    } else if region_key == "OTHER" {
-                                        !["HK", "JP", "US", "SG", "TW", "KR", "GB", "DE"]
-                                            .contains(&country.as_str())
-                                    } else {
-                                        country == region_key
-                                    };
+                                    let country = super::groups::group_drawer_country_of(n);
+                                    let region_hit = super::groups::group_drawer_region_hit(
+                                        &country,
+                                        &region_key,
+                                    );
                                     let name_hit = filter.is_empty()
                                         || n.name.to_lowercase().contains(&filter);
                                     region_hit && name_hit
