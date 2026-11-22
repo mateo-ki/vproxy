@@ -613,9 +613,12 @@ impl VpnApp {
                         );
                     }
                 } else {
+                    // 运行中也允许更新：Windows 运行中的 exe 可改名（vpcore.exe →
+                    // .backup 后新文件落回原路径），更新完成后自动重启代理换新内核。
+                    // 该链路在 update_kernel_from / KernelUpdated 里已完整实现。
+                    let kernel_in_use = self.proxy_status.kernel_in_use(kernel.kind);
                     let can_update = release.is_some_and(|release| release.update_available)
-                        && !self.kernel_busy
-                        && !self.proxy_status.kernel_in_use(kernel.kind);
+                        && !self.kernel_busy;
                     let btn_label = if !kernel.available {
                         "📥 下载内核"
                     } else if can_update {
@@ -645,6 +648,14 @@ impl VpnApp {
                         .clicked()
                     {
                         *update_kind = Some(kernel.kind);
+                    }
+                    if can_update && kernel_in_use {
+                        ui.add_space(2.0);
+                        ui.label(
+                            RichText::new("内核运行中：更新完成后将自动重启代理以启用新内核")
+                                .small()
+                                .color(theme::muted()),
+                        );
                     }
                 }
             });
