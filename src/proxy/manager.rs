@@ -2564,25 +2564,46 @@ impl ProxyManager {
                             rt.options.routing_mode == RoutingMode::Direct,
                         )
                     };
-                    if let Err(dead_error) = verify_selected_outbound_alive(
-                        controller_port,
-                        &controller_secret,
-                        PROXY_CONNECTIVITY_TEST_URL,
-                        allow_direct,
-                    )
-                    .await
-                    {
-                        let mut rt = runtime_clone.lock().await;
-                        if rt.generation == generation && rt.status.state == ProxyState::Running {
-                            let message = format!("节点连通性验证未通过: {dead_error}");
-                            tracing::warn!(
-                                kernel = %kernel_name,
-                                %message,
-                                "出站活性复查未通过，置为降级运行"
-                            );
-                            rt.apply_connectivity_result(generation, Some(message));
+                    let outbound_check = || {
+                        verify_selected_outbound_alive(
+                            controller_port,
+                            &controller_secret,
+                            PROXY_CONNECTIVITY_TEST_URL,
+                            allow_direct,
+                        )
+                    };
+                    if let Err(first_error) = outbound_check().await {
+                        // 冷启动的节点 DNS/首次握手偏慢，单发一枪容易把不稳节点
+                        // 误判死（实测：冷启动 408 → 用户手动重启代理后才恢复）。
+                        // 隔 4 秒重试一次，仍失败才降级；期间代理已被停止则不再判定。
+                        tokio::time::sleep(Duration::from_secs(4)).await;
+                        if runtime_clone.lock().await.generation != generation {
+                            return;
                         }
-                        return;
+                        match outbound_check().await {
+                            Ok(()) => {
+                                tracing::info!(
+                                    kernel = %kernel_name,
+                                    first_error = %first_error,
+                                    "出站活性复查首次失败，重试后通过（冷启动抖动），按运行中处理"
+                                );
+                            }
+                            Err(dead_error) => {
+                                let mut rt = runtime_clone.lock().await;
+                                if rt.generation == generation
+                                    && rt.status.state == ProxyState::Running
+                                {
+                                    let message = format!("节点连通性验证未通过: {dead_error}");
+                                    tracing::warn!(
+                                        kernel = %kernel_name,
+                                        %message,
+                                        "出站活性复查重试后仍未通过，置为降级运行"
+                                    );
+                                    rt.apply_connectivity_result(generation, Some(message));
+                                }
+                                return;
+                            }
+                        }
                     }
                     runtime_clone
                         .lock()
