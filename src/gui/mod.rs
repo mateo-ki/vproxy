@@ -32,6 +32,7 @@ pub mod poll;
 pub mod prepare;
 pub mod telemetry_view;
 pub mod theme;
+pub mod toast;
 pub mod types;
 pub mod view_models;
 pub mod views;
@@ -277,6 +278,9 @@ pub struct VpnApp {
     pub(crate) form_remark: String,
     pub(crate) form_user_agent: String,
     pub(crate) show_source_form: bool,
+    /// 订阅源弹窗内的即时校验错误（名称/链接为空），关弹窗或重开时清空。
+    /// 以前只写底部状态栏——弹窗开着时根本看不见，用户误以为「无法保存」。
+    pub(crate) source_form_error: Option<String>,
     /// Ctrl+V 全局粘贴的识别结果，Some 就弹框（弹框自己负责清空这条）。
     pub(crate) paste_outcome: Option<crate::gui::paste::PasteOutcome>,
     /// 诊断壳（VPN_PARSER_DIAG）下上一条 `DIAGUI ...` 轨迹，用来只在变化时写日志。
@@ -421,6 +425,12 @@ pub struct VpnApp {
     pub(crate) last_traffic_poll: std::time::Instant,
     pub(crate) last_groups_poll: std::time::Instant,
     pub(crate) last_log_poll: std::time::Instant,
+    pub(crate) last_status_poll: std::time::Instant,
+    pub(crate) status_polling: bool,
+    /// 右上角通知条：关键错误的显式出口（状态栏是单槽会被覆盖，见 toast.rs 注释）。
+    pub(crate) toasts: toast::ToastCenter,
+    /// 端口映射里目标节点已失效的映射 id（prime 解析失败且无同名节点可改绑）。
+    pub(crate) port_mapping_broken: HashSet<String>,
     pub(crate) traffic_polling: bool,
     /// 内核各 proxy-group 的实时状态（名字/类型/当前成员）。
     pub(crate) kernel_groups: Vec<KernelGroup>,
@@ -805,6 +815,7 @@ impl VpnApp {
             form_remark: String::new(),
             form_user_agent: String::new(),
             show_source_form: false,
+            source_form_error: None,
             paste_outcome: None,
             diag_trace: None,
             parked: false,
@@ -876,7 +887,11 @@ impl VpnApp {
             last_traffic_poll: std::time::Instant::now(),
             last_groups_poll: std::time::Instant::now() - std::time::Duration::from_secs(60),
             last_log_poll: std::time::Instant::now() - std::time::Duration::from_secs(60),
+            last_status_poll: std::time::Instant::now() - std::time::Duration::from_secs(60),
             traffic_polling: false,
+            status_polling: false,
+            toasts: toast::ToastCenter::default(),
+            port_mapping_broken: HashSet::new(),
             kernel_groups: Vec::new(),
             proxy_selected_group: "全部".to_string(),
             proxy_view: None,
@@ -1333,6 +1348,20 @@ impl VpnApp {
         });
     }
 
+    /// 轻量状态轮询：只取 ProxyStatus，不拉 config/日志。意义在于让管理器的
+    /// `status()` 看门狗真正跑起来——内核退出（含被外部杀死）只有 status() 里的
+    /// try_wait 才能发现；此前 GUI 只在点「检查更新」时才调它，内核死了界面永远
+    /// 显示 Running，无人恢复。
+    pub(crate) fn poll_proxy_status(&mut self) {
+        let manager = self.proxy_manager.clone();
+        let request = manager.current_request();
+        let tx = self.tx.clone();
+        self.rt.spawn(async move {
+            let status = manager.status().await;
+            let _ = tx.send(BgMsg::ProxyStatus { request, status });
+        });
+    }
+
     pub(crate) fn reload_proxy(&mut self) {
         let manager = self.proxy_manager.clone();
         let request = manager.current_request();
@@ -1504,6 +1533,7 @@ impl VpnApp {
         self.form_enabled = true;
         self.form_remark.clear();
         self.form_user_agent = "clash.meta".to_string();
+        self.source_form_error = None;
         self.show_source_form = true;
     }
 
@@ -1517,6 +1547,7 @@ impl VpnApp {
             .user_agent
             .clone()
             .unwrap_or_else(|| "clash.meta".to_string());
+        self.source_form_error = None;
         self.show_source_form = true;
     }
 
@@ -1560,13 +1591,17 @@ impl VpnApp {
     pub(crate) fn save_source_form(&mut self) {
         let is_ungrouped = self.editing_id.as_deref() == Some(crate::db::UNGROUPED_SOURCE_ID);
         if self.form_name.trim().is_empty() {
+            // 错误必须落在弹窗里：底部状态栏被弹窗挡着，用户只看到「保存没反应」。
+            self.source_form_error = Some("名称不能为空，请填写后再保存".into());
             self.status = "名称不能为空".into();
             return;
         }
         if !is_ungrouped && self.form_url.trim().is_empty() {
+            self.source_form_error = Some("订阅链接或本地文件路径不能为空，请填写后再保存".into());
             self.status = "订阅链接或本地文件路径不能为空".into();
             return;
         }
+        self.source_form_error = None;
         let db = self.db.clone();
         let tx = self.tx.clone();
         let editing = self.editing_id.clone();
@@ -3457,7 +3492,7 @@ impl VpnApp {
             .map(|t| t.contains("proxy-groups:") || t.contains("proxy-groups :"))
             .unwrap_or(false);
         let url_test_size = self.proxy_config.url_test_size;
-        let port_mappings = self.proxy_config.port_mappings.clone();
+        let mut port_mappings = self.proxy_config.port_mappings.clone();
         let chain_options = self.proxy_config.clone();
         let candidate_blacklist = self.router.blacklisted(std::time::Instant::now());
         let node_id = id.clone();
@@ -3482,7 +3517,8 @@ impl VpnApp {
                         &candidate_blacklist,
                     )
                     .await;
-                    Self::prime_port_mapping_candidates(&db, &manager, &port_mappings).await;
+                    Self::prime_port_mapping_candidates(&db, &manager, &mut port_mappings, &tx)
+                        .await;
                     Self::prime_chain_proxy_candidates(&db, &manager, &chain_options).await;
                     if !manager.request_is_current(request) {
                         return;
@@ -3541,26 +3577,108 @@ impl VpnApp {
         }
     }
 
-    /// 注入一节点一端口多端口映射的目标节点数据
+    /// 注入一节点一端口多端口映射的目标节点数据。
+    ///
+    /// 解析链：先按保存的 node_id 直查；订阅重新拉取会给同名节点生成全新 UUID，
+    /// 旧 ID 查不到时按 node_name 兜底改绑（就地改写 `port_mappings` 并持久化回
+    /// 配置，下次启动直接命中）；连同名节点都没有才算失效——失效映射绝不允许
+    /// 静默回落到主节点（那会让用户以为在走日本，实际出口是主节点），本轮跳过
+    /// 该端口并把 id 报给界面标记「失效」。
+    ///
+    /// `port_mappings` 必须可变：改绑要就地写回，调用方后续的整包保存才会带着
+    /// 新 ID，否则用户碰一下开关就把旧 ID 写回 DB，改绑在新旧之间来回抖动。
     async fn prime_port_mapping_candidates(
         db: &Database,
         manager: &ProxyManager,
-        port_mappings: &[crate::proxy::PortMapping],
+        port_mappings: &mut [crate::proxy::PortMapping],
+        tx: &Sender<BgMsg>,
     ) {
         if port_mappings.is_empty() {
             manager.set_port_mapping_nodes(Vec::new()).await;
+            let _ = tx.send(BgMsg::PortMappingValidity {
+                broken_ids: Vec::new(),
+                rebinds: Vec::new(),
+            });
             return;
         }
         let mut items = Vec::new();
-        for m in port_mappings {
+        let mut broken_ids = Vec::new();
+        let mut rebinds = Vec::new();
+        for m in port_mappings.iter_mut() {
             if !m.enabled {
                 continue;
             }
-            if let Ok(Some(node)) = db.get_node(&m.node_id).await {
-                items.push((m.port, node));
+            let resolved = match db.get_node(&m.node_id).await {
+                Ok(Some(node)) => Some(node),
+                Ok(None) => match db.find_node_by_name(&m.node_name).await {
+                    Ok(Some(node)) => {
+                        tracing::info!(
+                            port = m.port,
+                            old_id = %m.node_id,
+                            new_id = %node.id,
+                            name = %m.node_name,
+                            "端口映射目标节点 ID 已失效，按同名节点自动改绑"
+                        );
+                        // 双写：持久化（下次启动直接命中）+ 就地改写（调用方
+                        // 后续的整包保存带着新 ID，不会把旧 ID 写回去）。
+                        if let Err(error) =
+                            Self::rebind_port_mapping_node(db, &m.id, &node.id).await
+                        {
+                            tracing::warn!(
+                                %error,
+                                port = m.port,
+                                "端口映射自动改绑持久化失败（本次会话内仍生效）"
+                            );
+                        }
+                        rebinds.push((m.id.clone(), node.id.clone()));
+                        m.node_id = node.id.clone();
+                        Some(node)
+                    }
+                    other => {
+                        if let Err(error) = other {
+                            tracing::warn!(%error, port = m.port, "按名称查找映射目标节点失败");
+                        }
+                        None
+                    }
+                },
+                Err(error) => {
+                    tracing::warn!(%error, port = m.port, "读取映射目标节点失败");
+                    None
+                }
+            };
+            match resolved {
+                Some(node) => items.push((m.port, node)),
+                None => {
+                    tracing::warn!(
+                        port = m.port,
+                        name = %m.node_name,
+                        id = %m.node_id,
+                        "端口映射目标节点已失效，本轮跳过该端口的转发监听"
+                    );
+                    broken_ids.push(m.id.clone());
+                }
             }
         }
         manager.set_port_mapping_nodes(items).await;
+        let _ = tx.send(BgMsg::PortMappingValidity {
+            broken_ids,
+            rebinds,
+        });
+    }
+
+    /// 把按名称改绑的结果持久化回代理配置，保证下次启动按新 ID 直接命中。
+    async fn rebind_port_mapping_node(
+        db: &Database,
+        mapping_id: &str,
+        node_id: &str,
+    ) -> anyhow::Result<()> {
+        let mut config = db.get_proxy_config().await?;
+        let Some(mapping) = config.port_mappings.iter_mut().find(|m| m.id == mapping_id) else {
+            return Ok(());
+        };
+        mapping.node_id = node_id.to_string();
+        db.update_proxy_config(&config).await?;
+        Ok(())
     }
 
     /// 注入链式代理前置中继节点与落地出口节点（跨订阅源/未分组全库直查预热）
@@ -3755,6 +3873,8 @@ impl VpnApp {
         self.proxy_config.rules = optimize_traffic_rules(&self.proxy_config.rules);
         let manager = self.proxy_manager.clone();
         let db = self.db.clone();
+        // prime 会就地改绑失效映射的 node_id（同名兜底），改写发生在
+        // apply_and_save_proxy_config 内部的 options 上，后续保存带着新 ID。
         let options = self.prepare_proxy_config_options();
         // 运行中改了工作模式（系统代理/TUN 组合变化）：登记待应用标记，等保存完成
         // （ProxyConfigSaved 回清 proxy_busy）后再走 apply_proxy_mode_change —— 热切换
@@ -3771,7 +3891,7 @@ impl VpnApp {
         self.proxy_busy = true;
         self.status = "正在保存分流配置并应用...".into();
         self.rt.spawn(async move {
-            let result = Self::apply_and_save_proxy_config(&db, &manager, options).await;
+            let result = Self::apply_and_save_proxy_config(&db, &manager, options, &tx).await;
             let _ = tx.send(BgMsg::ProxyConfigSaved(result));
         });
     }
@@ -3779,11 +3899,12 @@ impl VpnApp {
     async fn apply_and_save_proxy_config(
         db: &Database,
         manager: &ProxyManager,
-        options: MihomoConfigOptions,
+        mut options: MihomoConfigOptions,
+        tx: &Sender<BgMsg>,
     ) -> Result<ProxyConfigSaveResult, String> {
         let _save = manager.lock_configuration_save().await;
         let previous = manager.config_snapshot().await;
-        Self::prime_port_mapping_candidates(db, manager, &options.port_mappings).await;
+        Self::prime_port_mapping_candidates(db, manager, &mut options.port_mappings, tx).await;
         Self::prime_chain_proxy_candidates(db, manager, &options).await;
         let applied = match manager.reload_config(options.clone()).await {
             Ok(applied) => applied,
@@ -3811,10 +3932,12 @@ impl VpnApp {
     pub(crate) fn save_proxy_config_quiet(&mut self) {
         let manager = self.proxy_manager.clone();
         let db = self.db.clone();
+        // prime 会就地改绑失效映射的 node_id（同名兜底），改写发生在
+        // apply_and_save_proxy_config 内部的 options 上，后续保存带着新 ID。
         let options = self.prepare_proxy_config_options();
         let tx = self.tx.clone();
         self.rt.spawn(async move {
-            let result = Self::apply_and_save_proxy_config(&db, &manager, options).await;
+            let result = Self::apply_and_save_proxy_config(&db, &manager, options, &tx).await;
             let _ = tx.send(BgMsg::ProxyConfigQuietSaved(result));
         });
     }
@@ -4305,7 +4428,8 @@ impl VpnApp {
         let db = self.db.clone();
         let manager = self.proxy_manager.clone();
         let mode = self.proxy_config.mode;
-        let options = self.prepare_proxy_config_options();
+        // prime 会就地改绑失效映射的 node_id，本次启动/热重载带着新 ID。
+        let mut options = self.prepare_proxy_config_options();
         let candidate_blacklist = self.router.blacklisted(std::time::Instant::now());
         let tx = self.tx.clone();
         let starting_msg = "正在启动内核...".to_string();
@@ -4338,8 +4462,13 @@ impl VpnApp {
                         &candidate_blacklist,
                     )
                     .await;
-                    Self::prime_port_mapping_candidates(&db, &manager, &options.port_mappings)
-                        .await;
+                    Self::prime_port_mapping_candidates(
+                        &db,
+                        &manager,
+                        &mut options.port_mappings,
+                        &tx,
+                    )
+                    .await;
                     Self::prime_chain_proxy_candidates(&db, &manager, &options).await;
                     if !manager.request_is_current(operation.request) {
                         return;
@@ -4573,6 +4702,15 @@ impl VpnApp {
             }
         }
         self.note_proxy_state_transition(status.state);
+        // 内核被外部杀死/自行退出时，看门狗会把状态打成 Degraded 并在 message 里
+        // 带上退出码——这种"静默死亡"必须弹条，否则用户只看到代理莫名断了。
+        if matches!(status.state, ProxyState::Degraded | ProxyState::Stopped)
+            && self.proxy_status.state == ProxyState::Running
+            && status.message.contains("已退出")
+        {
+            self.toasts
+                .push(crate::gui::toast::ToastKind::Error, status.message.clone());
+        }
         self.proxy_status = status;
     }
 
@@ -5974,6 +6112,9 @@ impl VpnApp {
             ROUND_CORNERS.call_once(|| {
                 crate::platform::round_window_corners();
                 crate::platform::ensure_window_sysmenu_and_minimizebox();
+                // 启动就查一次"幽灵标题栏"：它会让 egui 画布整体下移、点击跟着偏移
+                // （黑边 + 错位 + 标题栏按钮点不中），存在就当场剥掉。
+                crate::platform::audit_window_frame();
             });
         }
         self.frame_count = self.frame_count.saturating_add(1);
@@ -6078,7 +6219,17 @@ impl VpnApp {
         }
         self.apply_ui_scale(ctx);
 
-        if self.proxy_status.state == ProxyState::Running {
+        // 状态轮询必须无条件跑（含缓存的 Stopped）：内核是否真的活着只有管理器的
+        // status() 看门狗知道；此前 GUI 缓存停在 Stopped 时闸门恒为假，内核被人杀掉
+        // 也永远无人发现。status() 本身只是锁 + try_wait，2 秒一次可忽略。
+        if !self.status_polling
+            && self.last_status_poll.elapsed() >= std::time::Duration::from_secs(2)
+        {
+            self.status_polling = true;
+            self.last_status_poll = std::time::Instant::now();
+            self.poll_proxy_status();
+        }
+        if self.proxy_status.state != ProxyState::Stopped {
             if !self.traffic_polling
                 && self.last_traffic_poll.elapsed() >= std::time::Duration::from_millis(1000)
             {
@@ -6466,6 +6617,9 @@ impl eframe::App for VpnApp {
                 crate::startup_log(self.diag_trace.as_deref().unwrap_or_default());
             }
         }
+
+        // 右上角通知条：最后画，保证盖在所有面板之上（Area 自身也是 Foreground 层）。
+        self.toasts.ui(ctx);
     }
 
     fn save(&mut self, _storage: &mut dyn eframe::Storage) {
@@ -7697,5 +7851,181 @@ mod status_bar_room_tests {
                 "{width} 宽时动作组本来就不该移动：右界 {group_right:.1} vs 内容区 {content_right:.1}"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod port_mapping_prime_tests {
+    use super::*;
+    use crate::models::Node;
+    use std::time::Duration;
+
+    fn node(id: &str, name: &str) -> Node {
+        Node {
+            id: id.into(),
+            source_id: None,
+            protocol: "vless".into(),
+            name: name.into(),
+            server: "127.0.0.1".into(),
+            port: 443,
+            raw: "vless://...".into(),
+            config: "{}".into(),
+            country: None,
+            latency_ms: None,
+            latency_ok: None,
+            download_kbps: None,
+            latency_kernel: None,
+            latency_test_kind: None,
+            latency_tested_at: None,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        }
+    }
+
+    fn wait_for_validity(
+        rx: &std::sync::mpsc::Receiver<BgMsg>,
+    ) -> (Vec<String>, Vec<(String, String)>) {
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while std::time::Instant::now() < deadline {
+            if let Ok(BgMsg::PortMappingValidity {
+                broken_ids,
+                rebinds,
+            }) = rx.try_recv()
+            {
+                return (broken_ids, rebinds);
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        panic!("5 秒内未收到 PortMappingValidity 消息");
+    }
+
+    #[tokio::test]
+    async fn prime_rebinds_stale_mapping_by_name_and_persists() {
+        // 回归：目标节点 ID 失效但同名节点还在 → prime 必须自动改绑、持久化回
+        // 配置、并把 rebinds 报给界面同步缓存（否则整包保存会把旧 ID 写回去）。
+        let dir = std::env::temp_dir().join(format!("vproxy-prime-{}", uuid::Uuid::new_v4()));
+        let _ = std::fs::create_dir_all(&dir);
+        let db_path = dir.join("test.db");
+        let db = Database::connect(db_path.to_str().unwrap()).await.unwrap();
+
+        let source_id = db
+            .create_source(crate::models::CreateSource {
+                name: "Prime Source".into(),
+                url_template: "https://example.com/sub".into(),
+                enabled: true,
+                remark: None,
+                user_agent: None,
+            })
+            .await
+            .unwrap()
+            .id;
+        let fresh = node("fresh-node-id", "日本1");
+        db.replace_source_nodes(&source_id, &[fresh]).await.unwrap();
+        db.rebuild_node_index().await.unwrap();
+
+        let mut mappings = vec![crate::proxy::PortMapping {
+            id: "m1".into(),
+            port: 10820,
+            node_id: "stale-id".into(),
+            node_name: "日本1".into(),
+            enabled: true,
+        }];
+        let options = MihomoConfigOptions {
+            port_mappings: mappings.clone(),
+            port_mapping_nodes: Vec::new(),
+            ..Default::default()
+        };
+        let manager = ProxyManager::new(options.clone());
+        // rebind_port_mapping_node 从库里读配置再改写：先把带映射的初始配置落库，
+        // 否则改绑找不到 m1 会静默跳过持久化（生产环境配置总是先保存过）。
+        db.update_proxy_config(&options).await.unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+
+        VpnApp::prime_port_mapping_candidates(&db, &manager, &mut mappings, &tx).await;
+
+        // 有效性消息：无失效 + 一条改绑
+        let (broken_ids, rebinds) = wait_for_validity(&rx);
+        assert!(broken_ids.is_empty(), "同名节点可改绑时不得判失效");
+        assert_eq!(
+            rebinds,
+            vec![("m1".to_string(), "fresh-node-id".to_string())]
+        );
+
+        // 管理器已注入解析出的节点实体
+        let config = manager.config().await;
+        assert_eq!(config.port_mapping_nodes.len(), 1);
+
+        // 就地改写 + 持久化：下次启动按新 ID 直接命中
+        assert_eq!(mappings[0].node_id, "fresh-node-id");
+        let saved = db.get_proxy_config().await.unwrap();
+        assert_eq!(saved.port_mappings[0].node_id, "fresh-node-id");
+
+        drop(manager);
+        drop(db);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn prime_marks_unresolvable_mapping_broken_without_fallback() {
+        // ID 失效且同名节点也不存在：不得注入任何节点实体（编译器就不会回落
+        // 主节点），并上报失效 id 给界面标记。
+        let dir =
+            std::env::temp_dir().join(format!("vproxy-prime-broken-{}", uuid::Uuid::new_v4()));
+        let _ = std::fs::create_dir_all(&dir);
+        let db_path = dir.join("test.db");
+        let db = Database::connect(db_path.to_str().unwrap()).await.unwrap();
+
+        let source_id = db
+            .create_source(crate::models::CreateSource {
+                name: "Prime Broken Source".into(),
+                url_template: "https://example.com/sub".into(),
+                enabled: true,
+                remark: None,
+                user_agent: None,
+            })
+            .await
+            .unwrap()
+            .id;
+        let other = node("other-node-id", "美国2");
+        db.replace_source_nodes(&source_id, &[other]).await.unwrap();
+        db.rebuild_node_index().await.unwrap();
+
+        let mut mappings = vec![crate::proxy::PortMapping {
+            id: "m-broken".into(),
+            port: 10820,
+            node_id: "stale-id".into(),
+            node_name: "日本1".into(),
+            enabled: true,
+        }];
+        let options = MihomoConfigOptions {
+            port_mappings: mappings.clone(),
+            port_mapping_nodes: Vec::new(),
+            ..Default::default()
+        };
+        let manager = ProxyManager::new(options.clone());
+        db.update_proxy_config(&options).await.unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+
+        VpnApp::prime_port_mapping_candidates(&db, &manager, &mut mappings, &tx).await;
+
+        let (broken_ids, rebinds) = wait_for_validity(&rx);
+        assert_eq!(broken_ids, vec!["m-broken".to_string()]);
+        assert!(rebinds.is_empty(), "找不到同名节点时不得改绑");
+
+        let config = manager.config().await;
+        assert!(
+            config.port_mapping_nodes.is_empty(),
+            "失效映射不得注入任何节点实体（编译器因此不回落主节点）"
+        );
+        assert_eq!(mappings[0].node_id, "stale-id", "未改绑时不得改写原 ID");
+        let saved = db.get_proxy_config().await.unwrap();
+        assert_eq!(
+            saved.port_mappings[0].node_id, "stale-id",
+            "库里也不得被改写"
+        );
+
+        drop(manager);
+        drop(db);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

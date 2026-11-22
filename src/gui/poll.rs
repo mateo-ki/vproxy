@@ -996,6 +996,26 @@ impl VpnApp {
                             if self.proxy_manager.request_is_current(request) {
                                 self.receive_proxy_runtime_status(status);
                             }
+                            // 周期轮询的完成回调：无论请求是否仍当前，都要允许下一轮。
+                            self.status_polling = false;
+                        }
+                        BgMsg::PortMappingValidity {
+                            broken_ids,
+                            rebinds,
+                        } => {
+                            self.port_mapping_broken = broken_ids.into_iter().collect();
+                            // 改绑要同步进缓存的映射列表：否则用户碰一下开关，
+                            // 整包保存会把旧 ID 写回 DB，改绑在新旧之间来回抖动。
+                            for (mapping_id, node_id) in rebinds {
+                                if let Some(mapping) = self
+                                    .proxy_config
+                                    .port_mappings
+                                    .iter_mut()
+                                    .find(|m| m.id == mapping_id)
+                                {
+                                    mapping.node_id = node_id;
+                                }
+                            }
                         }
                         BgMsg::ProxyMaintenanceDone { request, status } => {
                             // A user operation started while the poll was pending;
@@ -1281,7 +1301,14 @@ impl VpnApp {
                                     self.request_full_reload();
                                     crate::platform::trim_working_set();
                                 }
-                                Err(e) => self.status = format!("操作失败: {e}"),
+                                Err(e) => {
+                                    let message = format!("操作失败: {e}");
+                                    // 后台操作失败必须弹条：状态栏是单槽，会被下一轮
+                                    // 轮询/心跳消息覆盖，用户永远来不及看。
+                                    self.toasts
+                                        .push(crate::gui::toast::ToastKind::Error, message.clone());
+                                    self.status = message;
+                                }
                             }
                         }
                         BgMsg::NodeDetail(Ok(n)) => {

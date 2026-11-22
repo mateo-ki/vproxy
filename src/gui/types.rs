@@ -450,6 +450,16 @@ impl RuleDraftKind {
 #[allow(clippy::large_enum_variant)]
 pub enum BgMsg {
     Sources(Result<Vec<Source>, String>),
+    /// 端口映射解析结果：
+    /// - `broken_ids`：目标节点 ID 失效且找不到同名节点的映射 id，界面把「启用」
+    ///   改成「失效」提示重选；
+    /// - `rebinds`：按同名节点自动改绑成功的 (映射 id, 新节点 id)，界面要同步
+    ///   缓存——否则用户碰一下开关就把旧 ID 整包写回 DB，改绑在新旧之间来回抖动。
+    PortMappingValidity {
+        broken_ids: Vec<String>,
+        rebinds: Vec<(String, String)>,
+    },
+    /// 节点落地 IP 的机房/风控画像。
     /// 节点落地 IP 的机房/风控画像。
     IpRisk(Result<crate::ip_risk::IpRisk, String>, bool),
     /// 出口 IP 画像，第一个字段是它属于哪个节点（自动查=当前运行节点，手动=被实测的节点）。

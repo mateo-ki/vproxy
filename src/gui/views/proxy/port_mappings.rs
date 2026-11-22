@@ -159,17 +159,37 @@ impl VpnApp {
 
             for (idx, mapping) in self.proxy_config.port_mappings.iter_mut().enumerate() {
                 ui.horizontal(|ui| {
+                    // 目标节点失效（订阅重新拉取后节点 ID 变化、且找不到同名节点）：
+                    // 内核侧不会转发该端口，必须显式标出来提示重选，而不是挂着「启用」。
+                    let broken = self.port_mapping_broken.contains(&mapping.id);
                     // 启用/停用按钮
-                    let status_text = if mapping.enabled { "● 启用" } else { "○ 停用" };
-                    let btn_fill = if mapping.enabled {
+                    let status_text = if broken {
+                        "⚠ 失效"
+                    } else if mapping.enabled {
+                        "● 启用"
+                    } else {
+                        "○ 停用"
+                    };
+                    let btn_fill = if broken {
+                        theme::danger_bg()
+                    } else if mapping.enabled {
                         theme::accent_bg()
                     } else {
                         theme::panel_hover()
                     };
-                    let btn_color = if mapping.enabled {
+                    let btn_color = if broken {
+                        theme::danger()
+                    } else if mapping.enabled {
                         theme::accent_strong()
                     } else {
                         theme::muted()
+                    };
+                    let hover = if broken {
+                        "目标节点已失效（订阅更新后节点 ID 变化、且找不到同名节点）。\n该端口当前不会被转发，请删除后重新添加映射并选择节点。"
+                    } else if mapping.enabled {
+                        "点击停用该端口映射"
+                    } else {
+                        "点击启用该端口映射"
                     };
                     if ui
                         .add(
@@ -178,11 +198,7 @@ impl VpnApp {
                             )
                             .fill(btn_fill),
                         )
-                        .on_hover_text(if mapping.enabled {
-                            "点击停用该端口映射"
-                        } else {
-                            "点击启用该端口映射"
-                        })
+                        .on_hover_text(hover)
                         .clicked()
                     {
                         mapping.enabled = !mapping.enabled;

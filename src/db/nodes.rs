@@ -604,6 +604,24 @@ impl Database {
         Ok(ids)
     }
 
+    /// 按名称精确找回节点：订阅重新拉取时每个节点都会生成全新 UUID（见
+    /// parser/mod.rs 的 build_node），端口映射这类持久化引用在库重建后就按旧 ID
+    /// 查不到了——但同名节点还在，用它兜底改绑。多个同名时取 updated_at 最新的。
+    pub async fn find_node_by_name(&self, name: &str) -> Result<Option<Node>> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Ok(None);
+        }
+        let summaries = self.load_all_node_summaries().await?;
+        let mut candidates: Vec<&crate::models::NodeSummary> =
+            summaries.iter().filter(|node| node.name == name).collect();
+        candidates.sort_by_key(|node| std::cmp::Reverse(node.updated_at));
+        match candidates.first() {
+            Some(summary) => self.get_node(&summary.id).await,
+            None => Ok(None),
+        }
+    }
+
     pub async fn get_node(&self, id: &str) -> Result<Option<Node>> {
         // 先查主库 node_index 索引表看它归属哪个 source_id，毫秒级直接命中分库，免去并发扫 40+ 个分片库
         let known_scope: Option<Option<String>> =
@@ -1934,6 +1952,81 @@ mod tests {
         // 测试缓存失效机制：写操作应瞬间失效缓存
         db.invalidate_node_index().await;
         assert!(db.get_cached_node_summaries().await.is_none());
+
+        drop(db);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn find_node_by_name_matches_exact_name_and_misses_others() {
+        // 端口映射的同名兜底改绑依赖这个查询：名称完全一致才命中，查不到就是 None。
+        let dir = std::env::temp_dir().join(format!("vpn-byname-{}", Uuid::new_v4()));
+        let _ = std::fs::create_dir_all(&dir);
+        let db_path = dir.join("test.db");
+        let db = Database::connect(db_path.to_str().unwrap()).await.unwrap();
+
+        let source_id = db
+            .create_source(crate::models::CreateSource {
+                name: "ByName Source".into(),
+                url_template: "https://example.com/sub".into(),
+                enabled: true,
+                remark: None,
+                user_agent: None,
+            })
+            .await
+            .unwrap()
+            .id;
+
+        // 注意：replace_source_nodes 按 node_fingerprint（协议+server+port）去重，
+        // fixture 两个节点必须用不同的 server/port，否则会被合并成一个。
+        let mk = |id: &str, name: &str, server: &str, port: u16| Node {
+            id: id.into(),
+            source_id: Some(source_id.clone()),
+            protocol: "vless".into(),
+            name: name.into(),
+            server: server.into(),
+            port,
+            raw: "vless://...".into(),
+            config: "{}".into(),
+            country: None,
+            latency_ms: None,
+            latency_ok: None,
+            download_kbps: None,
+            latency_kernel: None,
+            latency_test_kind: None,
+            latency_tested_at: None,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+        db.replace_source_nodes(
+            &source_id,
+            &[
+                mk("node-jp", "日本1", "10.0.0.1", 443),
+                mk("node-us", "美国2", "10.0.0.2", 8443),
+            ],
+        )
+        .await
+        .unwrap();
+        db.rebuild_node_index().await.unwrap();
+
+        let hit = db
+            .find_node_by_name("日本1")
+            .await
+            .unwrap()
+            .expect("同名节点应命中");
+        assert_eq!(hit.id, "node-jp");
+        assert_eq!(hit.name, "日本1");
+
+        assert!(
+            db.find_node_by_name("日本11").await.unwrap().is_none(),
+            "前缀相同但名称不同的节点不得命中"
+        );
+        assert!(db
+            .find_node_by_name("不存在的节点")
+            .await
+            .unwrap()
+            .is_none());
+        assert!(db.find_node_by_name("").await.unwrap().is_none());
 
         drop(db);
         let _ = std::fs::remove_dir_all(&dir);
