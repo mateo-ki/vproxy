@@ -608,6 +608,8 @@ pub(crate) struct ProxyRuntime {
     pub(crate) stable_since: Option<tokio::time::Instant>,
     last_route_available: Option<bool>,
     recovery_waiting_for_route: bool,
+    /// 降级自愈的下次复查时间：节点抖动恢复后自动解除降级，无需手动重启代理。
+    pub(crate) outbound_recheck_at: Option<tokio::time::Instant>,
 }
 
 impl ProxyRuntime {
@@ -653,6 +655,9 @@ impl ProxyRuntime {
                 self.status.state = ProxyState::Degraded;
                 self.status.last_error = Some(message.clone());
                 self.status.message = message;
+                // 45 秒后允许降级自愈复查：节点抖动恢复后自动解除降级。
+                self.outbound_recheck_at =
+                    Some(tokio::time::Instant::now() + Duration::from_secs(45));
             }
             None if self.status.state == ProxyState::Degraded
                 && self
@@ -664,6 +669,7 @@ impl ProxyRuntime {
                 self.status.state = ProxyState::Running;
                 self.status.last_error = None;
                 self.status.message = "代理连通性已恢复，内核继续运行".into();
+                self.outbound_recheck_at = None;
             }
             _ => {}
         }
@@ -884,6 +890,7 @@ impl ProxyManager {
                 stable_since: None,
                 last_route_available: None,
                 recovery_waiting_for_route: false,
+                outbound_recheck_at: None,
             })),
             operation: Arc::new(Mutex::new(())),
             request_epoch: Arc::new(AtomicU64::new(0)),
@@ -1041,6 +1048,70 @@ impl ProxyManager {
             let _ = work_dir.cleanup().await;
         }
         self.runtime.lock().await.status.clone()
+    }
+
+    /// 降级自愈：探活降级（内核活着）后周期性重做出站活性复查，节点抖动恢复
+    /// 就自动切回 Running——用户不必再"重启一次代理才正常"。
+    /// 45 秒一次；复查期间被停止/重启则静默放弃。返回恢复提示消息。
+    pub async fn recheck_outbound_if_due(&self) -> Option<String> {
+        let generation = {
+            let runtime = self.runtime.lock().await;
+            if runtime.status.state != ProxyState::Degraded || !runtime.status.local_proxy_ready {
+                return None;
+            }
+            match runtime.outbound_recheck_at {
+                Some(due) if tokio::time::Instant::now() >= due => runtime.generation,
+                _ => return None,
+            }
+        };
+        let (controller_port, controller_secret, allow_direct, kernel_name) = {
+            let runtime = self.runtime.lock().await;
+            if runtime.generation != generation {
+                return None;
+            }
+            (
+                runtime.options.controller_port,
+                runtime.options.controller_secret.clone(),
+                runtime.options.routing_mode == RoutingMode::Direct,
+                runtime
+                    .status
+                    .kernel
+                    .map(KernelKind::display_name)
+                    .unwrap_or("代理内核")
+                    .to_string(),
+            )
+        };
+        match verify_selected_outbound_alive(
+            controller_port,
+            &controller_secret,
+            PROXY_CONNECTIVITY_TEST_URL,
+            allow_direct,
+        )
+        .await
+        {
+            Ok(()) => {
+                let mut runtime = self.runtime.lock().await;
+                if runtime.generation != generation || runtime.status.state != ProxyState::Degraded
+                {
+                    return None;
+                }
+                runtime.outbound_recheck_at = None;
+                let generation_now = runtime.generation;
+                runtime.apply_connectivity_result(generation_now, None);
+                let message = "出站探活已恢复，降级自动解除".to_string();
+                tracing::info!(kernel = %kernel_name, "降级自愈：出站探活恢复，切回运行中");
+                Some(message)
+            }
+            Err(_) => {
+                let mut runtime = self.runtime.lock().await;
+                if runtime.generation == generation && runtime.status.state == ProxyState::Degraded
+                {
+                    runtime.outbound_recheck_at =
+                        Some(tokio::time::Instant::now() + Duration::from_secs(45));
+                }
+                None
+            }
+        }
     }
 
     pub async fn config(&self) -> MihomoConfigOptions {

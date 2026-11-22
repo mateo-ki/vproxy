@@ -596,8 +596,34 @@ fn main() -> Result<()> {
         ));
     }
 
+    // 上次会话被杀/崩溃退出会留下"系统代理仍指向本应用端口、端口却没人监听"
+    // 的残留（实测表现为重启软件后彻底断网，还得手动点一次启动）。检测到这个
+    // 指纹时，即使非登录启动也自动恢复连接，等价于把用户的上次意图接回来。
+    // 注意：这个检测必须在 self_heal_stale_system_proxy 之前——自愈看到"死代理
+    // 配置"会把 ProxyEnable 清零，把这里的指纹抹掉，自动恢复就永远不触发
+    // （2026-11-23 实测：杀掉重启必现）。端口与下方自愈调用保持一致（9980），
+    // proxy_options 此时还没从库里加载。
+    #[cfg(feature = "gui")]
+    let proxy_killed_last_session = proxy_left_engaged_after_kill(9980);
+    #[cfg(not(feature = "gui"))]
+    let proxy_killed_last_session = false;
+    if proxy_killed_last_session {
+        tracing::warn!(
+            port = 9980,
+            "检测到上次会话异常退出残留的系统代理指向本应用端口，本次启动自动恢复代理连接"
+        );
+    }
+
     if !diag {
-        platform::self_heal_stale_system_proxy(9980);
+        // 已检测到杀进程残留、即将自动恢复代理时跳过自愈：此时的"死代理配置"
+        // 马上就会由恢复的内核接管，清零开关反而让浏览器走直连断网。
+        #[cfg(feature = "gui")]
+        let skip_stale_proxy_heal = proxy_killed_last_session;
+        #[cfg(not(feature = "gui"))]
+        let skip_stale_proxy_heal = false;
+        if !skip_stale_proxy_heal {
+            platform::self_heal_stale_system_proxy(9980);
+        }
         platform::self_heal_stale_dns();
     }
 
@@ -714,17 +740,8 @@ fn main() -> Result<()> {
     // 上次会话被杀/崩溃退出会留下"系统代理仍指向本应用端口、端口却没人监听"
     // 的残留（实测表现为重启软件后彻底断网，还得手动点一次启动）。检测到这个
     // 指纹时，即使非登录启动也自动恢复连接，等价于把用户的上次意图接回来。
-    // 注意 cfg 只门控紧随的那条语句，所以两条 let 都要单独写 cfg。
-    #[cfg(feature = "gui")]
-    let proxy_killed_last_session = proxy_left_engaged_after_kill(proxy_options.mixed_port);
-    #[cfg(not(feature = "gui"))]
-    let proxy_killed_last_session = false;
-    if proxy_killed_last_session {
-        tracing::warn!(
-            port = proxy_options.mixed_port,
-            "检测到上次会话异常退出残留的系统代理指向本应用端口，本次启动自动恢复代理连接"
-        );
-    }
+    // 检测本身已在 self_heal 之前完成（见上方 proxy_killed_last_session），
+    // 这里只把结果接进登录/自动恢复门控。
     #[cfg(feature = "gui")]
     let login_proxy_node = auto_connect_node_id(
         cli.login_startup,

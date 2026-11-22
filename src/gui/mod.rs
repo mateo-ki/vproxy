@@ -1390,6 +1390,10 @@ impl VpnApp {
         self.rt.spawn(async move {
             let status = manager.status().await;
             let _ = tx.send(BgMsg::ProxyStatus { request, status });
+            // 降级自愈：45 秒一次重做出站探活，节点恢复即自动解除降级。
+            if let Some(message) = manager.recheck_outbound_if_due().await {
+                let _ = tx.send(BgMsg::Status(message));
+            }
         });
     }
 

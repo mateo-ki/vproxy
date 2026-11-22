@@ -10,7 +10,7 @@ fn default_hop_ports() -> String {
 }
 
 pub fn is_node_connectivity_failure(message: &str) -> bool {
-    message.contains("节点连通性验证失败")
+    message.contains("节点连通性验证失败") || message.contains("节点连通性验证未通过")
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
