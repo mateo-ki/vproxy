@@ -40,20 +40,21 @@ pub fn can_paint(is_visible: bool, iconic: bool, parked: bool) -> bool {
 #[cfg(windows)]
 mod imp {
     use super::{is_parked_rect, Spot, PARKED_X, PARKED_Y};
-    use windows_sys::Win32::Foundation::{BOOL, HWND, LPARAM, RECT};
+    use windows_sys::Win32::Foundation::{BOOL, HWND, LPARAM, POINT, RECT};
     use windows_sys::Win32::Graphics::Gdi::{
-        RedrawWindow, RDW_ALLCHILDREN, RDW_FRAME, RDW_INVALIDATE, RDW_UPDATENOW,
+        ClientToScreen, RedrawWindow, RDW_ALLCHILDREN, RDW_FRAME, RDW_INVALIDATE, RDW_UPDATENOW,
     };
     use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
     use windows_sys::Win32::System::Threading::GetCurrentProcessId;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        BringWindowToTop, EnumWindows, GetClassNameW, GetSystemMetrics, GetWindowLongPtrW,
-        GetWindowRect, GetWindowThreadProcessId, IsIconic, LoadImageW, PostMessageW, SendMessageW,
-        SetForegroundWindow, SetWindowLongPtrW, SetWindowPos, ShowWindow, GWL_EXSTYLE, GWL_STYLE,
-        HWND_TOP, IMAGE_ICON, LR_DEFAULTCOLOR, LR_SHARED, SM_CXICON, SM_CXSMICON, SM_CYICON,
-        SM_CYSMICON, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
-        SWP_SHOWWINDOW, SW_RESTORE, SW_SHOW, WM_NULL, WM_PAINT, WM_SETICON, WS_EX_APPWINDOW,
-        WS_EX_TOOLWINDOW, WS_MINIMIZEBOX, WS_SYSMENU,
+        BringWindowToTop, EnumWindows, GetClassNameW, GetClientRect, GetSystemMetrics,
+        GetWindowLongPtrW, GetWindowRect, GetWindowThreadProcessId, IsIconic, LoadImageW,
+        PostMessageW, SendMessageW, SetForegroundWindow, SetWindowLongPtrW, SetWindowPos,
+        ShowWindow, GWL_EXSTYLE, GWL_STYLE, HWND_TOP, IMAGE_ICON, LR_DEFAULTCOLOR, LR_SHARED,
+        SM_CXICON, SM_CXSMICON, SM_CYICON, SM_CYSMICON, SWP_FRAMECHANGED, SWP_NOACTIVATE,
+        SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW, SW_RESTORE, SW_SHOW, WM_NULL,
+        WM_PAINT, WM_SETICON, WS_CAPTION, WS_EX_APPWINDOW, WS_EX_TOOLWINDOW, WS_MINIMIZEBOX,
+        WS_SYSMENU,
     };
 
     /// winit 给真实窗口用的类名；事件窗口 / IME 助手窗口都另有其名，必须排掉。
@@ -121,6 +122,70 @@ mod imp {
         match find_main().and_then(rect_of) {
             Some(r) => is_parked_rect(r.left, r.top),
             None => false,
+        }
+    }
+
+    /// 窗口框架自检：无边框窗口顶部若被啃掉一块真实非客户区（「幽灵标题栏」），egui 画布
+    /// 会整体下移、指针坐标跟着偏移，表现就是窗口顶部一条黑边 + 自绘标题栏按钮点不中
+    /// （用户看到的是「UI 错位 / 保存没反应 / 最小化失效」三件套）。
+    ///
+    /// 注意 winit 在无边框窗口上**故意保留** `WS_CAPTION | WS_THICKFRAME`（给 DWM 阴影/圆角
+    /// 用，视觉靠 WM_NCCALCSIZE 抹掉），所以**不能见样式位就剥**：只有客户区相对外框真的
+    /// 缩进超过容差（幽灵区实际存在）才动样式位。几何快照永远写进 startup.log，远程机器
+    /// 出问题时拿着日志就能对出画布错位多少像素。
+    /// 只许在拥有窗口的 UI 线程调用（SetWindowLongPtrW 改样式不是线程安全的）。
+    pub fn audit_window_frame() {
+        let Some(hwnd) = find_main() else {
+            return;
+        };
+        unsafe {
+            let style = GetWindowLongPtrW(hwnd, GWL_STYLE);
+            let mut win = RECT {
+                left: 0,
+                top: 0,
+                right: 0,
+                bottom: 0,
+            };
+            let mut client = RECT {
+                left: 0,
+                top: 0,
+                right: 0,
+                bottom: 0,
+            };
+            if GetWindowRect(hwnd, &mut win) == 0 || GetClientRect(hwnd, &mut client) == 0 {
+                return;
+            }
+            // GetClientRect 是 0 基坐标，先把客户区左上角换算到屏幕坐标，才好和外框比。
+            let mut origin = POINT { x: 0, y: 0 };
+            ClientToScreen(hwnd, &mut origin);
+            let nc_left = origin.x - win.left;
+            let nc_top = origin.y - win.top;
+            let nc_right = win.right - (origin.x + client.right - client.left);
+            let nc_bottom = win.bottom - (origin.y + client.bottom - client.top);
+            // 容差 4px：THICKFRAME 的 1px 量子化边不算幽灵区。
+            const PHANTOM_TOLERANCE: i32 = 4;
+            let phantom = nc_top > PHANTOM_TOLERANCE || nc_left > PHANTOM_TOLERANCE;
+            if phantom && style & (WS_CAPTION as isize) != 0 {
+                SetWindowLongPtrW(hwnd, GWL_STYLE, style & !(WS_CAPTION as isize));
+                SetWindowPos(
+                    hwnd,
+                    std::ptr::null_mut(),
+                    0,
+                    0,
+                    0,
+                    0,
+                    SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
+                );
+                crate::startup_log(&format!(
+                    "[窗口] 自检：幽灵标题栏（顶部 {nc_top}px / 左侧 {nc_left}px），剥掉 WS_CAPTION 并重算框架（hwnd={hwnd:?}，style=0x{style:X}）"
+                ));
+            } else {
+                crate::startup_log(&format!(
+                    "[窗口] 自检：无幽灵区（顶 {nc_top}px / 左 {nc_left}px / 右 {nc_right}px / 底 {nc_bottom}px，外框 {}x{}，style=0x{style:X}）",
+                    win.right - win.left,
+                    win.bottom - win.top,
+                ));
+            }
         }
     }
 
@@ -264,6 +329,7 @@ mod imp {
             );
             PostMessageW(hwnd, WM_PAINT, 0, 0);
         }
+        audit_window_frame();
         set_skip_taskbar(hwnd, false);
         crate::startup_log(&format!(
             "[托盘] 窗口已还原到 {} , {}（{}x{}，已恢复任务栏显示并强制重绘）",
@@ -351,6 +417,7 @@ mod imp {
                 "[窗口] 已触发 restore_and_repaint_main_window hwnd={:?}",
                 hwnd
             ));
+            audit_window_frame();
         }
     }
 
@@ -366,8 +433,8 @@ mod imp {
 
 #[cfg(windows)]
 pub use imp::{
-    ensure_window_sysmenu_and_minimizebox, park, restore_and_repaint_main_window, unpark,
-    wake_main_window_message_loop,
+    audit_window_frame, ensure_window_sysmenu_and_minimizebox, park,
+    restore_and_repaint_main_window, unpark, wake_main_window_message_loop,
 };
 
 #[cfg(not(windows))]
@@ -387,6 +454,9 @@ pub fn unpark(_spot: Spot) -> bool {
 
 #[cfg(not(windows))]
 pub fn ensure_window_sysmenu_and_minimizebox() {}
+
+#[cfg(not(windows))]
+pub fn audit_window_frame() {}
 
 #[cfg(not(windows))]
 pub fn restore_and_repaint_main_window() {}
