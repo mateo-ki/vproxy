@@ -60,6 +60,13 @@ pub struct ProxyWorkDir {
     kernel: KernelKind,
 }
 
+/// 截取日志尾部至多 `max_lines` 行（纯函数，供尸检快照复用）。
+fn crash_log_tail(content: &str, max_lines: usize) -> String {
+    let lines: Vec<&str> = content.lines().collect();
+    let start = lines.len().saturating_sub(max_lines);
+    lines[start..].join("\n")
+}
+
 impl ProxyWorkDir {
     pub async fn create(kernel: KernelKind) -> Result<Self> {
         let base_dir = crate::data_root().join("run");
@@ -114,6 +121,40 @@ impl ProxyWorkDir {
         })
     }
 
+    /// 内核异常退出时把运行日志尾部快照到应用日志目录，再由调用方清理 run 目录。
+    /// 不留尸检，exit code 1 之类的死因永远查不出来（2026-11-22 实测踩过：
+    /// 看门狗检测到退出后 run 目录当场被清，vpcore.log 连同答案一起消失）。
+    pub(crate) async fn preserve_crash_log(&self, exit_status: &str) {
+        let Ok(content) = tokio::fs::read_to_string(self.log_path()).await else {
+            return;
+        };
+        if content.trim().is_empty() {
+            return;
+        }
+        let body = crash_log_tail(&content, 400);
+        let dir = crate::data_root().join("logs");
+        if tokio::fs::create_dir_all(&dir).await.is_err() {
+            return;
+        }
+        let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
+        let path = dir.join(format!(
+            "kernel-crash-{}-{}.log",
+            self.kernel.directory_name(),
+            stamp
+        ));
+        let header = format!(
+            "内核 {} 异常退出（{exit_status}）于 {}，以下为其运行日志尾部快照：\n",
+            self.kernel.display_name(),
+            chrono::Local::now().format("%Y-%m-%d %H:%M:%S")
+        );
+        if tokio::fs::write(&path, format!("{header}{body}\n"))
+            .await
+            .is_ok()
+        {
+            tracing::warn!(crash_log = %path.display(), "已保存内核异常退出日志快照");
+        }
+    }
+
     pub async fn cleanup(self) -> Result<()> {
         if self.root.exists() {
             tokio::fs::remove_dir_all(self.root).await?;
@@ -144,6 +185,8 @@ impl ProxyChild {
     }
 
     pub async fn kill(&mut self) -> std::io::Result<()> {
+        // 谁在杀内核必须留痕：之前内核启动几秒后无声消失，没有这行日志就无从定位调用方。
+        tracing::warn!(pid = self.id(), "正在终止代理内核进程");
         match self {
             Self::Standard(child) => child.kill().await,
             Self::Elevated(child) => child.kill().await,
@@ -970,6 +1013,11 @@ impl ProxyManager {
                 runtime.recovery_waiting_for_route = runtime.recovery_pending;
                 runtime.stable_since = None;
                 let message = format!("{kernel_name} 已退出: {exit_status}");
+                tracing::warn!(
+                    kernel = %kernel_name,
+                    %exit_status,
+                    "看门狗检测到代理内核进程退出"
+                );
                 runtime.status.state = if runtime.system_proxy_snapshot.is_some() {
                     ProxyState::Degraded
                 } else {
@@ -979,12 +1027,17 @@ impl ProxyManager {
                 runtime.status.system_proxy_enabled = runtime.system_proxy_snapshot.is_some();
                 runtime.status.last_error = Some(message.clone());
                 runtime.status.message = message;
-                runtime.work_dir.take()
+                runtime
+                    .work_dir
+                    .take()
+                    .map(|work_dir| (work_dir, exit_status.to_string()))
             } else {
                 None
             }
         };
-        if let Some(work_dir) = cleanup {
+        if let Some((work_dir, exit_status)) = cleanup {
+            // 先尸检再清理：run 目录一删，死因就永远查不到了。
+            work_dir.preserve_crash_log(&exit_status).await;
             let _ = work_dir.cleanup().await;
         }
         self.runtime.lock().await.status.clone()
@@ -2501,6 +2554,36 @@ impl ProxyManager {
                         rt.apply_connectivity_result(generation, Some(message));
                     }
                 } else {
+                    // 去假绿第二道：204 经 DIRECT 回退也能通，通过后再向内核
+                    // API 确认主选路出站真的活着（死节点时如实降级，不再全绿）。
+                    let (controller_port, controller_secret, allow_direct) = {
+                        let rt = runtime_clone.lock().await;
+                        (
+                            rt.options.controller_port,
+                            rt.options.controller_secret.clone(),
+                            rt.options.routing_mode == RoutingMode::Direct,
+                        )
+                    };
+                    if let Err(dead_error) = verify_selected_outbound_alive(
+                        controller_port,
+                        &controller_secret,
+                        PROXY_CONNECTIVITY_TEST_URL,
+                        allow_direct,
+                    )
+                    .await
+                    {
+                        let mut rt = runtime_clone.lock().await;
+                        if rt.generation == generation && rt.status.state == ProxyState::Running {
+                            let message = format!("节点连通性验证未通过: {dead_error}");
+                            tracing::warn!(
+                                kernel = %kernel_name,
+                                %message,
+                                "出站活性复查未通过，置为降级运行"
+                            );
+                            rt.apply_connectivity_result(generation, Some(message));
+                        }
+                        return;
+                    }
                     runtime_clone
                         .lock()
                         .await
@@ -2525,6 +2608,7 @@ impl ProxyManager {
     }
 
     pub async fn stop_for_request(&self, request: u64) -> Result<()> {
+        tracing::warn!(request, "收到代理停止请求");
         {
             let mut runtime = self.runtime.lock().await;
             if !self.request_is_current(request) {
@@ -3605,6 +3689,128 @@ pub async fn verify_local_proxy(port: u16, timeout: Duration) -> Result<()> {
         "本地代理无法访问测试地址: {}",
         last_errors.join("；")
     ))
+}
+
+/// 出站活性复查的判定结果。204 探活经内核的 DIRECT 回退也能通（2026-11-22 实测：
+/// 死节点时 VP-Core「组 PROXY 全部成员连接失败……回退 fallback 出站 DIRECT」，
+/// cp.cloudflare.com 的 204 经直连拿到，界面全程假绿），所以 204 通过后还要用
+/// 这里决定主选路出站是否真的活着。
+#[derive(Debug, PartialEq, Eq)]
+enum OutboundVerdict {
+    /// 无需复查：Direct 模式、用户显式选了 DIRECT、内核 API 不认识的结构——保守放行。
+    Skip,
+    /// 主选路当前出站是 DIRECT（用户显式选择，不是故障——只记日志不降级）。
+    ExplicitDirect,
+    /// 需要对这个出站节点（已解嵌套组引用）发起真实探活。
+    Probe(String),
+}
+
+/// 纯判据：从 /proxies 快照解析主选路组 PROXY 的当前出站，最多解三层嵌套组
+/// （PROXY → url-test 组 → 节点）。任何结构不认识的地方都保守放行。
+fn outbound_alive_verdict(snapshot: &Value, allow_direct: bool) -> OutboundVerdict {
+    if allow_direct {
+        return OutboundVerdict::Skip;
+    }
+    let Some(proxies) = snapshot.get("proxies").and_then(Value::as_object) else {
+        return OutboundVerdict::Skip;
+    };
+    let Some(group) = proxies.get("PROXY") else {
+        return OutboundVerdict::Skip;
+    };
+    let mut current = group
+        .get("now")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    if current.is_empty() {
+        return OutboundVerdict::Skip;
+    }
+    if current == "DIRECT" {
+        return OutboundVerdict::ExplicitDirect;
+    }
+    for _ in 0..3 {
+        let Some(next) = proxies
+            .get(&current)
+            .and_then(|node| node.get("now"))
+            .and_then(Value::as_str)
+            .filter(|name| !name.is_empty())
+        else {
+            break;
+        };
+        if next == current {
+            break;
+        }
+        current = next.to_string();
+        if current == "DIRECT" {
+            return OutboundVerdict::ExplicitDirect;
+        }
+    }
+    OutboundVerdict::Probe(current)
+}
+
+/// 204 探活通过后的第二道检查：向内核 external-controller 确认主选路出站，
+/// 并直接对出站节点发起真实探活（这条路径不走组，不会被 DIRECT 回退掩盖）。
+/// 任何 API 不可达 / 端点缺失（404）都保守放行——第二道检查只收假绿，不添乱。
+async fn verify_selected_outbound_alive(
+    controller_port: u16,
+    secret: &str,
+    test_url: &str,
+    allow_direct: bool,
+) -> Result<()> {
+    use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
+
+    let Ok(client) = reqwest::Client::builder()
+        .no_proxy()
+        .timeout(Duration::from_secs(6))
+        .build()
+    else {
+        return Ok(());
+    };
+    let base = format!("http://127.0.0.1:{controller_port}");
+    let snapshot: Value = match with_controller_auth(client.get(format!("{base}/proxies")), secret)
+        .send()
+        .await
+    {
+        Ok(response) if response.status().is_success() => match response.json().await {
+            Ok(value) => value,
+            Err(_) => return Ok(()),
+        },
+        Ok(response) => {
+            tracing::debug!(
+                status = %response.status(),
+                "内核 /proxies 不可用，跳过出站活性复查"
+            );
+            return Ok(());
+        }
+        Err(_) => return Ok(()),
+    };
+    match outbound_alive_verdict(&snapshot, allow_direct) {
+        OutboundVerdict::Skip => Ok(()),
+        OutboundVerdict::ExplicitDirect => {
+            tracing::info!("主选路组 PROXY 当前出站是 DIRECT（用户显式选择），跳过出站探活");
+            Ok(())
+        }
+        OutboundVerdict::Probe(leaf) => {
+            let encoded = utf8_percent_encode(&leaf, NON_ALPHANUMERIC).to_string();
+            let target = utf8_percent_encode(test_url, NON_ALPHANUMERIC).to_string();
+            let url = format!("{base}/proxies/{encoded}/delay?timeout=5000&url={target}");
+            match with_controller_auth(client.get(&url), secret).send().await {
+                Ok(response) if response.status().is_success() => Ok(()),
+                // 404 = 内核没实现 delay 探活端点，不能据此判死。
+                Ok(response) if response.status() == reqwest::StatusCode::NOT_FOUND => {
+                    tracing::debug!("内核不支持 /proxies/*/delay 端点，跳过出站探活");
+                    Ok(())
+                }
+                Ok(response) => Err(anyhow!(
+                    "当前出站「{leaf}」探活失败（HTTP {}）：节点已失效，204 检查是经 DIRECT 回退通过的假绿",
+                    response.status()
+                )),
+                Err(error) => Err(anyhow!(
+                    "当前出站「{leaf}」探活失败: {error}：节点已失效，204 检查是经 DIRECT 回退通过的假绿"
+                )),
+            }
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -5128,5 +5334,210 @@ mod config_reload_tests {
             "ambiguous reload must remove its staged config after recovery"
         );
         tokio::fs::remove_dir_all(root).await.unwrap();
+    }
+}
+
+/// 出站活性复查（去假绿）与内核尸检日志的测试。放在全平台 mod：unix-only 的
+/// config_reload_tests 在 Windows 下不编译，放那里等于没有测试（踩过一次）。
+#[cfg(test)]
+mod outbound_alive_tests {
+    use super::*;
+    use tokio::io::AsyncWriteExt;
+
+    #[test]
+    fn outbound_verdict_probes_current_node_through_nested_groups() {
+        let snapshot = serde_json::json!({ "proxies": {
+            "PROXY": { "now": "自动选择" },
+            "自动选择": { "now": "🇯🇵 日本1" },
+            "🇯🇵 日本1": { "history": [] }
+        }});
+        assert_eq!(
+            outbound_alive_verdict(&snapshot, false),
+            OutboundVerdict::Probe("🇯🇵 日本1".to_string())
+        );
+    }
+
+    #[test]
+    fn outbound_verdict_skips_direct_mode_unknown_shapes_and_explicit_direct() {
+        let direct = serde_json::json!({ "proxies": { "PROXY": { "now": "DIRECT" } } });
+        assert_eq!(outbound_alive_verdict(&direct, true), OutboundVerdict::Skip);
+        assert_eq!(
+            outbound_alive_verdict(&direct, false),
+            OutboundVerdict::ExplicitDirect
+        );
+        // 组缺失 / 结构不认识 / 无 now 字段：保守放行，绝不能把好配置误判死。
+        assert_eq!(
+            outbound_alive_verdict(&serde_json::json!({ "proxies": {} }), false),
+            OutboundVerdict::Skip
+        );
+        assert_eq!(
+            outbound_alive_verdict(&serde_json::json!(null), false),
+            OutboundVerdict::Skip
+        );
+        assert_eq!(
+            outbound_alive_verdict(&serde_json::json!({ "proxies": { "PROXY": {} } }), false),
+            OutboundVerdict::Skip
+        );
+    }
+
+    #[test]
+    fn crash_log_tail_keeps_the_last_lines_only() {
+        let content: String = (0..1000).map(|i| format!("line-{i}\n")).collect();
+        let tail = crash_log_tail(&content, 400);
+        assert!(tail.starts_with("line-600"));
+        assert!(tail.ends_with("line-999"));
+        assert_eq!(crash_log_tail("only-one", 400), "only-one");
+        assert_eq!(crash_log_tail("", 400), "");
+    }
+
+    async fn read_request_path(stream: &mut tokio::net::TcpStream) -> String {
+        let mut buf = Vec::new();
+        let mut chunk = [0u8; 2048];
+        loop {
+            let count = tokio::io::AsyncReadExt::read(&mut *stream, &mut chunk)
+                .await
+                .unwrap();
+            assert_ne!(count, 0);
+            buf.extend_from_slice(&chunk[..count]);
+            if buf.windows(4).any(|s| s == b"\r\n\r\n") {
+                break;
+            }
+        }
+        let head = String::from_utf8_lossy(&buf).to_string();
+        head.split_whitespace()
+            .nth(1)
+            .unwrap_or_default()
+            .to_string()
+    }
+
+    fn http_response(status_line: &str, body: &str) -> String {
+        format!(
+            "{status_line}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        )
+    }
+
+    #[tokio::test]
+    async fn outbound_alive_check_probes_current_node_with_percent_encoding() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let snapshot = serde_json::json!({
+            "proxies": { "PROXY": { "now": "日本1" }, "日本1": {} }
+        });
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let path = read_request_path(&mut stream).await;
+            assert!(path.starts_with("/proxies"), "实际路径: {path}");
+            let body = snapshot.to_string();
+            stream
+                .write_all(http_response("HTTP/1.1 200 OK", &body).as_bytes())
+                .await
+                .unwrap();
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let path = read_request_path(&mut stream).await;
+            assert!(
+                path.starts_with("/proxies/%E6%97%A5%E6%9C%AC1/delay"),
+                "节点名必须被百分号编码且带上探活参数: {path}"
+            );
+            assert!(path.contains("timeout=5000"), "缺少探活超时参数: {path}");
+            stream
+                .write_all(http_response("HTTP/1.1 200 OK", "{\"delay\":120}").as_bytes())
+                .await
+                .unwrap();
+        });
+        let result = verify_selected_outbound_alive(
+            port,
+            "alive-secret",
+            PROXY_CONNECTIVITY_TEST_URL,
+            false,
+        )
+        .await;
+        assert!(result.is_ok(), "活节点不应报错: {result:?}");
+        tokio::time::timeout(Duration::from_secs(5), server)
+            .await
+            .unwrap()
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn outbound_alive_check_flags_dead_node_as_connectivity_failure() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let snapshot = serde_json::json!({
+            "proxies": { "PROXY": { "now": "死节点" }, "死节点": {} }
+        });
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let _ = read_request_path(&mut stream).await;
+            let body = snapshot.to_string();
+            stream
+                .write_all(http_response("HTTP/1.1 200 OK", &body).as_bytes())
+                .await
+                .unwrap();
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let _ = read_request_path(&mut stream).await;
+            // 内核对死节点的 delay 探活返回 504（超时家族）。
+            stream
+                .write_all(http_response("HTTP/1.1 504 Gateway Timeout", "{}").as_bytes())
+                .await
+                .unwrap();
+        });
+        let result =
+            verify_selected_outbound_alive(port, "dead-secret", PROXY_CONNECTIVITY_TEST_URL, false)
+                .await;
+        let error = result.unwrap_err().to_string();
+        assert!(error.contains("探活失败"), "必须点明死因: {error}");
+        assert!(error.contains("假绿"), "必须说清 204 为什么还能通: {error}");
+        tokio::time::timeout(Duration::from_secs(5), server)
+            .await
+            .unwrap()
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn outbound_alive_check_skips_kernels_without_delay_endpoint() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let snapshot = serde_json::json!({
+            "proxies": { "PROXY": { "now": "节点A" }, "节点A": {} }
+        });
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let _ = read_request_path(&mut stream).await;
+            let body = snapshot.to_string();
+            stream
+                .write_all(http_response("HTTP/1.1 200 OK", &body).as_bytes())
+                .await
+                .unwrap();
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let _ = read_request_path(&mut stream).await;
+            // 不实现 delay 端点的内核返回 404：不能据此判死。
+            stream
+                .write_all(http_response("HTTP/1.1 404 Not Found", "{}").as_bytes())
+                .await
+                .unwrap();
+        });
+        let result =
+            verify_selected_outbound_alive(port, "no-endpoint", PROXY_CONNECTIVITY_TEST_URL, false)
+                .await;
+        assert!(
+            result.is_ok(),
+            "404 只代表端点缺失，不得误判节点死亡: {result:?}"
+        );
+        tokio::time::timeout(Duration::from_secs(5), server)
+            .await
+            .unwrap()
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn outbound_alive_check_skips_unreachable_controller() {
+        // 没有内核监听 controller 端口：整道检查必须静默放行。
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        drop(listener);
+        let result =
+            verify_selected_outbound_alive(port, "s", PROXY_CONNECTIVITY_TEST_URL, false).await;
+        assert!(result.is_ok(), "API 不可达时保守放行: {result:?}");
     }
 }

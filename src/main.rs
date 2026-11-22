@@ -8,6 +8,8 @@ use clap::Parser;
 use std::sync::Arc;
 use tokio::runtime::Runtime;
 use tracing::info;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::EnvFilter;
 use uuid::Uuid;
 use vproxy::api::AppState;
@@ -330,6 +332,45 @@ fn handle_command(cmd: Commands) -> Result<()> {
     Ok(())
 }
 
+/// 判定一个日志文件名是否属于"该清理"的滚动日志：只认 `vproxy.log.<日期>` 这类
+/// 滚动产物，当天主文件 `vproxy.log` 永不清理；修改时间早于期限才算过期。
+/// 拆成纯函数是为了可测（std 没法改文件的 mtime）。
+fn is_stale_rotated_log(
+    file_name: &str,
+    modified: std::time::SystemTime,
+    cutoff: std::time::SystemTime,
+) -> bool {
+    let is_rotated = file_name.starts_with("vproxy.log.") && file_name != "vproxy.log";
+    is_rotated && modified < cutoff
+}
+
+/// 清理超过 `keep_days` 天的滚动日志文件（`vproxy.log.YYYY-MM-DD`）。
+/// 当天的 `vproxy.log` 由 tracing-appender 直接写，永不清理；早于期限的按
+/// 文件修改时间删。纯启动期调用，静默失败不阻塞主流程。
+fn prune_old_logs(log_dir: &std::path::Path, keep_days: u64) {
+    let Ok(entries) = std::fs::read_dir(log_dir) else {
+        return;
+    };
+    let cutoff = std::time::SystemTime::now()
+        - std::time::Duration::from_secs(keep_days.saturating_mul(86_400));
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let file_name = match path.file_name().and_then(|name| name.to_str()) {
+            Some(name) => name,
+            None => continue,
+        };
+        let stale = entry
+            .metadata()
+            .ok()
+            .and_then(|meta| meta.modified().ok())
+            .is_some_and(|modified| is_stale_rotated_log(file_name, modified, cutoff));
+        if stale {
+            startup_log(&format!("清理过期日志文件: {}", path.display()));
+            let _ = std::fs::remove_file(&path);
+        }
+    }
+}
+
 fn main() -> Result<()> {
     // launchd must enter the daemon before GUI logging, HOME discovery or DB access.
     #[cfg(target_os = "macos")]
@@ -412,9 +453,26 @@ fn main() -> Result<()> {
         }
     }
 
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
+    // 日志双层落盘：stdout（保持 CLI/headless 原行为）+ data/logs/vproxy.log.日期。
+    // 此前 GUI 模式下 tracing 输出随窗口消失，管理器对内核的每个动作（启停/杀进程/
+    // 退出检测）都无处可查——排查"内核启动后无声消失"这类问题时只能靠猜。
+    // WorkerGuard 必须存活整个进程周期，否则非阻塞写入线程退出时丢尾部日志。
+    let log_dir = crate::data_root().join("logs");
+    let _ = std::fs::create_dir_all(&log_dir);
+    prune_old_logs(&log_dir, 7);
+    let file_appender = tracing_appender::rolling::daily(&log_dir, "vproxy.log");
+    let (file_writer, log_guard) = tracing_appender::non_blocking(file_appender);
+    static LOG_GUARD: std::sync::OnceLock<tracing_appender::non_blocking::WorkerGuard> =
+        std::sync::OnceLock::new();
+    LOG_GUARD.set(log_guard).ok();
+    let log_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    tracing_subscriber::registry()
+        .with(log_filter)
+        .with(tracing_subscriber::fmt::layer())
+        .with(
+            tracing_subscriber::fmt::layer()
+                .with_ansi(false)
+                .with_writer(file_writer),
         )
         .init();
 
@@ -653,13 +711,30 @@ fn main() -> Result<()> {
         startup_log("登录自动启动已关闭，本次登录入口正常退出");
         return Ok(());
     }
+    // 上次会话被杀/崩溃退出会留下"系统代理仍指向本应用端口、端口却没人监听"
+    // 的残留（实测表现为重启软件后彻底断网，还得手动点一次启动）。检测到这个
+    // 指纹时，即使非登录启动也自动恢复连接，等价于把用户的上次意图接回来。
+    // 注意 cfg 只门控紧随的那条语句，所以两条 let 都要单独写 cfg。
     #[cfg(feature = "gui")]
-    let login_proxy_node = login_proxy_node_id(
+    let proxy_killed_last_session = proxy_left_engaged_after_kill(proxy_options.mixed_port);
+    #[cfg(not(feature = "gui"))]
+    let proxy_killed_last_session = false;
+    if proxy_killed_last_session {
+        tracing::warn!(
+            port = proxy_options.mixed_port,
+            "检测到上次会话异常退出残留的系统代理指向本应用端口，本次启动自动恢复代理连接"
+        );
+    }
+    #[cfg(feature = "gui")]
+    let login_proxy_node = auto_connect_node_id(
         cli.login_startup,
         app_settings.launch_at_startup,
+        proxy_killed_last_session,
         proxy_options.selected_node_id.as_deref(),
     )
     .map(str::to_owned);
+    #[cfg(not(feature = "gui"))]
+    let _login_proxy_node = Option::<String>::None;
     let has_override_groups = proxy_options
         .override_yaml
         .as_deref()
@@ -758,9 +833,11 @@ fn main() -> Result<()> {
         startup_log("警告：登录自动启动同步失败，请检查系统设置和 startup.log");
     }
 
-    // 「以管理员方式启动软件」必须在**创建任何窗口之前**决策：提权成功则本实例直接退出，
-    // 整个过程没有窗口出现过，用户只看到提权实例那一个窗口——否则普通实例先把窗口画出来、
-    // 提权后再闪第二个，就是"启动闪一次"的来源。UAC 被取消则本实例以普通权限继续（不再重试）。
+    // 「以管理员方式启动软件」必须在**创建任何窗口之前**决策（见下方旧注释），
+    // 同时也必须排在 `--start-proxy-node` 启动内核**之前**：非提权实例若先把内核
+    // 拉起来再 runas 退出，tokio 的 kill_on_drop 会把刚启动的内核一起带走——
+    // 提权实例的命令行此前又丢了 --start-proxy-node，结果就是"代理启动后几秒
+    // 无声消失"。所以本判定必须最先做，并把启动参数透传给提权实例。
     if cfg!(windows)
         && app_settings.launch_as_admin
         && !diag
@@ -770,7 +847,13 @@ fn main() -> Result<()> {
         && !platform::is_elevated()
     {
         startup_log("管理员启动：设置开启且本实例非提权，在窗口创建前请求 runas 接管");
-        match platform::request_elevation(&["--elevated-relaunch".to_string()]) {
+        let mut relaunch_args = vec!["--elevated-relaunch".to_string()];
+        if let Some(node_id) = cli.start_proxy_node.as_deref() {
+            // 透传自启参数：提权实例接管后接着把代理拉起来，而不是停在"未启动"。
+            relaunch_args.push("--start-proxy-node".to_string());
+            relaunch_args.push(node_id.to_string());
+        }
+        match platform::request_elevation(&relaunch_args) {
             Ok(()) => {
                 startup_log("管理员启动：提权已批准，本实例未显示窗口即退出，由提权实例接管");
                 return Ok(());
@@ -783,6 +866,10 @@ fn main() -> Result<()> {
             }
         }
     }
+
+    // 「以管理员方式启动软件」的判定已前移到登录自启检查之后：它必须排在
+    // `--start-proxy-node` 启动内核之前（runas 退出会经 kill_on_drop 带走内核），
+    // 且必须在任何窗口创建之前（避免启动闪两次窗）。
 
     // 提权子进程只做代理，不接管 HTTP API：否则等于把（刚加上鉴权的）接口
     // 以管理员身份再监听一次。
@@ -956,8 +1043,15 @@ fn main() -> Result<()> {
                             // No network/authorization work is awaited on the UI
                             // thread. A temporary startup failure leaves the GUI
                             // available and manager recovery retains the intent.
-                            if let Err(error) = connect_saved_proxy_at_login(&db, &proxy_manager, &node_id).await {
-                                tracing::warn!(%error, "登录自动连接未完成，保留界面以便恢复或手动启动");
+                            if let Err(error) = connect_saved_proxy_at_login(
+                                &db,
+                                &proxy_manager,
+                                &node_id,
+                                proxy_killed_last_session,
+                            )
+                            .await
+                            {
+                                tracing::warn!(%error, "自动恢复代理连接未完成，保留界面以便恢复或手动启动");
                             }
                         });
                     }
@@ -1027,14 +1121,16 @@ async fn connect_saved_proxy_at_login(
     db: &Database,
     manager: &ProxyManager,
     node_id: &str,
+    kill_recovered: bool,
 ) -> Result<()> {
     let settings = db.get_settings().await?;
     let saved = db.get_proxy_config().await?;
     // Recheck after the GUI has appeared: an intervening manual preference or
     // selection change wins over the original login request.
-    if login_proxy_node_id(
+    if auto_connect_node_id(
         true,
         settings.launch_at_startup,
+        kill_recovered,
         saved.selected_node_id.as_deref(),
     ) != Some(node_id)
     {
@@ -1073,7 +1169,33 @@ async fn connect_saved_proxy_at_login(
         .iter()
         .filter(|mapping| mapping.enabled)
     {
-        if let Some(node) = db.get_node(&mapping.node_id).await? {
+        // 解析链与 GUI 的 prime_port_mapping_candidates 一致：订阅重建后节点 ID
+        // 会失效，同名节点还在就兜底改绑；找不到同名则跳过（编译器不会为缺失
+        // 的映射回落到主节点，端口不会被静默转错）。单个映射查库失败只跳过
+        // 该映射，不中止整个登录自动连接。
+        let node = match db.get_node(&mapping.node_id).await {
+            Ok(Some(node)) => Some(node),
+            Ok(None) => match db.find_node_by_name(&mapping.node_name).await {
+                Ok(found) => found,
+                Err(error) => {
+                    tracing::warn!(
+                        %error,
+                        port = mapping.port,
+                        "按名称查找映射目标节点失败，跳过该映射"
+                    );
+                    None
+                }
+            },
+            Err(error) => {
+                tracing::warn!(
+                    %error,
+                    port = mapping.port,
+                    "读取映射目标节点失败，跳过该映射"
+                );
+                None
+            }
+        };
+        if let Some(node) = node {
             mappings.push((mapping.port, node));
         }
     }
@@ -1094,9 +1216,10 @@ async fn connect_saved_proxy_at_login(
     }
     let settings = db.get_settings().await?;
     let saved = db.get_proxy_config().await?;
-    if login_proxy_node_id(
+    if auto_connect_node_id(
         true,
         settings.launch_at_startup,
+        kill_recovered,
         saved.selected_node_id.as_deref(),
     ) != Some(node_id)
     {
@@ -1107,30 +1230,117 @@ async fn connect_saved_proxy_at_login(
 
 /// Manual opens remember selection without connecting. Only the enabled login
 /// entry reconnects, and an absent selection simply opens the GUI for selection.
+/// `kill_recovered`（上次会话异常退出残留）是独立于登录入口的自动连接触发条件。
 #[cfg(any(feature = "gui", test))]
-fn login_proxy_node_id(login_entry: bool, enabled: bool, selected: Option<&str>) -> Option<&str> {
-    if login_entry && enabled {
+fn auto_connect_node_id(
+    login_entry: bool,
+    enabled: bool,
+    kill_recovered: bool,
+    selected: Option<&str>,
+) -> Option<&str> {
+    if (login_entry && enabled) || kill_recovered {
         selected.filter(|id| !id.is_empty())
     } else {
         None
     }
 }
 
+/// 上次会话异常退出的指纹：系统代理仍指向本应用的 mixed 端口，但该端口已经
+/// 没有任何进程在监听（正常停止代理会把系统代理一并还原，不会留下这个状态）。
+#[cfg(feature = "gui")]
+fn proxy_left_engaged_after_kill(mixed_port: u16) -> bool {
+    system_proxy_points_at_mixed_port(mixed_port) && port_is_free(mixed_port)
+}
+
+/// 系统代理当前是否指向 `127.0.0.1:{mixed_port}`。读取失败/未启用/指向别处
+/// （比如用户换了别的代理工具）一律返回 false，绝不替用户做主。
+#[cfg(feature = "gui")]
+fn system_proxy_points_at_mixed_port(mixed_port: u16) -> bool {
+    vproxy::system_proxy::current_system_proxy_url()
+        .is_some_and(|url| url == format!("http://127.0.0.1:{mixed_port}"))
+}
+
+/// 端口当前没有监听者。临时 bind 探测：能绑定 = 没人监听 = 死端口。
+#[cfg(any(feature = "gui", test))]
+fn port_is_free(port: u16) -> bool {
+    std::net::TcpListener::bind(("127.0.0.1", port)).is_ok()
+}
+
+#[cfg(test)]
+mod log_prune_tests {
+    use super::is_stale_rotated_log;
+    use std::time::{Duration, SystemTime};
+
+    #[test]
+    fn stale_rotated_logs_match_and_fresh_ones_do_not() {
+        let now = SystemTime::now();
+        let cutoff = now - Duration::from_secs(86_400 * 7);
+        let name = "vproxy.log.2026-01-01";
+        assert!(is_stale_rotated_log(
+            name,
+            now - Duration::from_secs(86_400 * 8),
+            cutoff
+        ));
+        assert!(!is_stale_rotated_log(
+            name,
+            now - Duration::from_secs(86_400 * 2),
+            cutoff
+        ));
+    }
+
+    #[test]
+    fn current_main_log_file_is_never_pruned() {
+        let now = SystemTime::now();
+        let cutoff = now - Duration::from_secs(86_400 * 7);
+        assert!(!is_stale_rotated_log(
+            "vproxy.log",
+            now - Duration::from_secs(86_400 * 30),
+            cutoff
+        ));
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{login_proxy_node_id, Cli};
+    use super::{auto_connect_node_id, port_is_free, Cli};
     use clap::Parser;
 
     #[test]
     fn login_entry_restores_only_when_enabled_and_selected() {
         assert_eq!(
-            login_proxy_node_id(true, true, Some("saved-node")),
+            auto_connect_node_id(true, true, false, Some("saved-node")),
             Some("saved-node")
         );
-        assert_eq!(login_proxy_node_id(false, true, Some("saved-node")), None);
-        assert_eq!(login_proxy_node_id(true, false, Some("saved-node")), None);
-        assert_eq!(login_proxy_node_id(true, true, None), None);
-        assert_eq!(login_proxy_node_id(true, true, Some("")), None);
+        assert_eq!(
+            auto_connect_node_id(false, true, false, Some("saved-node")),
+            None
+        );
+        assert_eq!(
+            auto_connect_node_id(true, false, false, Some("saved-node")),
+            None
+        );
+        assert_eq!(auto_connect_node_id(true, true, false, None), None);
+        assert_eq!(auto_connect_node_id(true, true, false, Some("")), None);
+    }
+
+    #[test]
+    fn kill_recovery_restores_even_without_login_entry() {
+        // 上次会话被杀残留系统代理时，手动双击启动也要自动恢复连接。
+        assert_eq!(
+            auto_connect_node_id(false, false, true, Some("saved-node")),
+            Some("saved-node")
+        );
+        assert_eq!(auto_connect_node_id(false, false, true, None), None);
+        assert_eq!(auto_connect_node_id(false, false, true, Some("")), None);
+    }
+
+    #[test]
+    fn port_is_free_detects_taken_and_vacant_ports() {
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        assert!(!port_is_free(port), "有人监听的端口不算空闲");
+        drop(listener);
+        assert!(port_is_free(port), "关闭监听后应视为空闲");
     }
 
     #[test]

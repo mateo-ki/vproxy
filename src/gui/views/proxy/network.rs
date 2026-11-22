@@ -743,6 +743,16 @@ impl VpnApp {
                 if ui.button("刷新日志").clicked() {
                     self.reload_proxy_logs();
                 }
+                if ui.button("打开日志目录").clicked() {
+                    // data/logs 存放应用自身 tracing 双层日志（见 main.rs 日志初始化）；
+                    // 内核运行日志在 data/run/<会话>/ 下，开到上一级都能翻到。
+                    let dir = crate::data_root().join("logs");
+                    let _ = std::fs::create_dir_all(&dir);
+                    #[cfg(windows)]
+                    {
+                        let _ = std::process::Command::new("explorer.exe").arg(&dir).spawn();
+                    }
+                }
                 if !self.proxy_log.is_empty() {
                     if ui.button("清空显示").clicked() {
                         self.proxy_log.clear();
