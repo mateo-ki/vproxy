@@ -350,6 +350,15 @@ impl ProxyRuntimeStatus {
                 ProxyState::Starting | ProxyState::Running | ProxyState::Stopping
             ) || (self.state == ProxyState::Degraded && self.local_proxy_ready))
     }
+
+    /// 内核进程是否正在服务流量。Degraded 有两种来源：出站探活降级（进程仍然
+    /// 活着，local_proxy_ready 保持 true，连接/DNS/日志照常上报）和看门狗检测到
+    /// 内核退出（local_proxy_ready 被置 false）。只有前者算"正在服务"——界面
+    /// 若只认 Running，就会把降级运行中的内核误报成"未启动"。
+    pub fn kernel_serving(&self) -> bool {
+        self.state == ProxyState::Running
+            || (self.state == ProxyState::Degraded && self.local_proxy_ready)
+    }
 }
 
 /// 提权交接（TUN 模式）通过临时文件安全落盘传递配置。

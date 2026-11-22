@@ -3,7 +3,6 @@ use crate::gui::theme;
 use crate::gui::types::Tab;
 use crate::gui::widgets::{format_duration_ms, header_cell, nav_item_icon_only, stat_chip};
 use crate::gui::VpnApp;
-use crate::proxy::ProxyState;
 use eframe::egui::{self, Color32, CornerRadius, RichText, Sense, Stroke, Ui, Vec2};
 
 impl VpnApp {
@@ -30,7 +29,8 @@ impl VpnApp {
         );
         ui.add_space(8.0);
 
-        let is_running = matches!(self.proxy_status.state, ProxyState::Running);
+        // 探活降级（内核活着）时导航圆点也保持点亮。
+        let is_running = self.proxy_status.kernel_serving();
         let proxy_dot = if is_running {
             Some(theme::accent())
         } else {

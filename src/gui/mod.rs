@@ -5023,7 +5023,7 @@ impl VpnApp {
             return;
         }
         self.geo_updating = true;
-        let running = matches!(self.proxy_status.state, ProxyState::Running);
+        let running = self.proxy_status.kernel_serving();
         let port = self.proxy_status.controller_port;
         let secret = self.proxy_status.controller_secret.clone();
         let active_kernel = self.proxy_status.kernel;
@@ -6151,7 +6151,9 @@ impl VpnApp {
                     self.unpark_from_tray(ctx);
                 }
                 crate::platform::TrayEvent::ToggleProxy => {
-                    if self.proxy_status.state == ProxyState::Running {
+                    // 降级运行（内核活着）也算运行中：托盘开关按"停止"处理，
+                    // 内核已死的 Degraded 才走启动分支（等于一键恢复）。
+                    if self.proxy_status.kernel_serving() {
                         self.stop_proxy();
                     } else {
                         self.start_proxy();
@@ -6177,7 +6179,7 @@ impl VpnApp {
             }
         }
         self.tray
-            .set_proxy_running(self.proxy_status.state == ProxyState::Running);
+            .set_proxy_running(self.proxy_status.kernel_serving());
 
         // Intercept window close event according to user setting (close_to_tray vs exit)
         // Guard with frame_count > 5 so false close events during window creation are ignored
@@ -6264,8 +6266,8 @@ impl VpnApp {
         }
         // 出口通不等于浏览器会走它：核对注册表（内部限频 30 秒一次，且只在系统代理模式下）。
         self.maybe_check_proxy_drift();
-        if self.proxy_status.state != ProxyState::Running && !self.kernel_groups.is_empty() {
-            // 停掉内核后这些组就不存在了，留着会显示上一次的假状态。
+        // 内核不再服务（真停了或看门狗检测到退出）才清组；探活降级时组仍由内核上报。
+        if !self.proxy_status.kernel_serving() && !self.kernel_groups.is_empty() {
             self.kernel_groups.clear();
         }
 

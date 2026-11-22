@@ -876,7 +876,9 @@ impl VpnApp {
                                     // 进程一直跑的是旧镜像（文件已被改名为 .backup），只有
                                     // 重启才换新。实际重启在 ProxyOp(Stop) 完成回调里触发。
                                     if self.restart_after_kernel_update {
-                                        if self.proxy_status.state == ProxyState::Running {
+                                        // 更新完成时内核进程还在跑（Running 或探活降级）就
+                                        // 必须重启换新镜像；内核已死则重启无意义，直接清标记。
+                                        if self.proxy_status.kernel_serving() {
                                             crate::startup_log(&format!(
                                                 "[内核] {message}；代理正在运行，自动重启以启用新内核"
                                             ));
@@ -1705,7 +1707,9 @@ impl VpnApp {
                 Err(TryRecvError::Disconnected) => break,
             }
         }
-        if self.proxy_status.state != ProxyState::Running
+        // 内核不再服务（真停了或看门狗检测到退出）才清流量数据；探活降级时
+        // 连接/流量仍由内核上报，清了会让连接抽屉在降级状态下永远空白。
+        if !self.proxy_status.kernel_serving()
             && (self.traffic_up_rate > 0
                 || self.traffic_down_rate > 0
                 || !self.active_connections.is_empty()

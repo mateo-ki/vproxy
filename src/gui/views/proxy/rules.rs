@@ -9,7 +9,7 @@ use crate::gui::VpnApp;
 use crate::proxy::{
     adblock_quic_rules, ai_service_rules, dev_mirrors_rules, game_platforms_rules,
     mihomo_dns_poison_overrides, optimize_traffic_rules, social_telegram_rules,
-    streaming_media_rules, ProxyState, RoutingMode, TrafficRule,
+    streaming_media_rules, RoutingMode, TrafficRule,
 };
 use eframe::egui::{self, CornerRadius, Frame, Margin, RichText, Stroke, Ui};
 
@@ -37,7 +37,7 @@ impl VpnApp {
         let tab_now = self.rules_tab;
         let busy = self.proxy_busy;
         let geo_updating = self.geo_updating;
-        let proxy_running = self.proxy_status.state == ProxyState::Running;
+        let proxy_running = self.proxy_status.kernel_serving();
         let mut action = RulesHeaderAction::None;
         // 系统显示缩放 125%/150% 叠上字体 140% 时，960 物理最小宽只剩 550~460 逻辑点，
         // 中央面板不到 420 —— 一行放不下"两个分区标签 + 动作组"，右对齐那组会

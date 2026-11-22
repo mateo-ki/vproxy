@@ -8,7 +8,7 @@ use crate::gui::widgets::{
     primary_btn,
 };
 use crate::gui::VpnApp;
-use crate::proxy::{DnsEnhancedMode, ProxyState};
+use crate::proxy::DnsEnhancedMode;
 use eframe::egui::{self, Color32, CornerRadius, Frame, Margin, RichText, Stroke, Ui, Vec2};
 
 /// 判断一条规则是否属于兜底规则 (MATCH / FINAL) - 零堆内存分配
@@ -95,7 +95,9 @@ impl VpnApp {
         ui.set_min_width(ui.available_width());
         ui.set_width(ui.available_width());
 
-        let is_running = self.proxy_status.state == ProxyState::Running;
+        // 降级运行时内核进程依然在跑（连接/DNS 数据照常上报），必须与 Running
+        // 同等对待，否则界面会把运行中的内核误报成"代理内核未运行"。
+        let is_running = self.proxy_status.kernel_serving();
         let mut close_id = None;
         let mut close_all = false;
         let mut close_process_name: Option<String> = None;

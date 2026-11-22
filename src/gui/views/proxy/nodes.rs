@@ -6,7 +6,7 @@ use crate::gui::view_models::nodes_vm::{NodeCardAction, NodesViewModel};
 use crate::gui::widgets::{card_frame, compact_node_card, panel_frame, section_title};
 use crate::gui::VpnApp;
 use crate::models::NodeSummary;
-use crate::proxy::{ProxyState, URL_TEST_GROUP};
+use crate::proxy::URL_TEST_GROUP;
 use eframe::egui::{self, CornerRadius, Frame, Margin, RichText, Stroke, Ui};
 
 #[allow(dead_code)]
@@ -38,7 +38,8 @@ impl VpnApp {
         }
 
         let is_auto = self.proxy_config.url_test;
-        let running = self.proxy_status.state == ProxyState::Running;
+        // 降级运行（探活失败但内核活着）时策略组/节点数据照常上报，不能当作未运行。
+        let running = self.proxy_status.kernel_serving();
         let current_group_now =
             if self.proxy_selected_group == "全部" || self.proxy_selected_group == "PROXY" {
                 if is_auto {

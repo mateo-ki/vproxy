@@ -2,7 +2,6 @@ use crate::gui::icons::{self, icon_label, Icon};
 use crate::gui::theme;
 use crate::gui::widgets::{card_frame, status_badge};
 use crate::gui::VpnApp;
-use crate::proxy::ProxyState;
 use eframe::egui::{self, RichText, Ui};
 
 impl VpnApp {
@@ -189,7 +188,7 @@ impl VpnApp {
             );
             ui.add_space(4.0);
             ui.horizontal(|ui| {
-                let running = self.proxy_status.state == ProxyState::Running;
+                let running = self.proxy_status.kernel_serving();
                 if ui
                     .add_enabled(!self.geo_updating, egui::Button::new("在线更新 Geo 数据库"))
                     .on_hover_text(if running {

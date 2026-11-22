@@ -5,7 +5,7 @@ use crate::gui::widgets::{
 };
 use crate::gui::VpnApp;
 use crate::kernel::{KernelKind, KernelPreference};
-use crate::proxy::{DnsEnhancedMode, ProxyMode, ProxyState, TunStack};
+use crate::proxy::{DnsEnhancedMode, ProxyMode, TunStack};
 use eframe::egui::{self, Color32, CornerRadius, Frame, Margin, RichText, Sense, Stroke, Ui, Vec2};
 use std::sync::atomic::Ordering;
 
@@ -782,7 +782,7 @@ impl VpnApp {
                 .stick_to_bottom(true)
                 .show(ui, |ui| {
                     if self.proxy_log.is_empty() {
-                        let is_running = self.proxy_status.state == ProxyState::Running;
+                        let is_running = self.proxy_status.kernel_serving();
                         if is_running {
                             ui.label(
                                 RichText::new("暂无输出（内核运行中，正在等待新日志...）")
