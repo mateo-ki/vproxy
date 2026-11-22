@@ -2,7 +2,6 @@ use super::{BackendCompiler, CompiledArtifact, CompilerCapabilities};
 use crate::kernel::KernelKind;
 use crate::models::Node;
 use crate::proxy::ir::{IRAction, IRMatcher, RoutingPlan};
-use crate::proxy::ProxyMode;
 use anyhow::{anyhow, Result};
 use serde_json::{json, Map, Value};
 use std::collections::HashSet;
@@ -87,7 +86,7 @@ impl BackendCompiler for SingBoxCompiler {
             "listen_port": plan.inbounds.mixed_port
         })];
 
-        if plan.inbounds.mode == ProxyMode::Tun {
+        if plan.inbounds.mode.has_tun() {
             inbounds.push(json!({
                 "type": "tun",
                 "tag": "tun-in",
@@ -679,5 +678,42 @@ mod shadowtls_export_tests {
         assert_eq!(ss["detour"], "shadowtls-endpoint");
         assert_eq!(ss["method"], "aes-128-gcm");
         assert_eq!(ss["password"], "ss-pass");
+    }
+
+    #[test]
+    fn both_mode_compiles_tun_and_mixed_inbounds() {
+        // 回归：Both = 系统代理 + TUN 同时接管。编译器此前用 `mode == Tun` 判断，
+        // Both 模式会静默丢掉 TUN 入站（mihomo 用 has_tun() 无此问题）。
+        let node = test_node(json!({
+            "type": "ss",
+            "server": "st.example.com",
+            "port": 443,
+            "cipher": "aes-128-gcm",
+            "password": "ss-pass",
+            "plugin": "shadow-tls",
+            "plugin-opts": {
+                "host": "www.apple.com",
+                "password": "stls-pass",
+                "version": 3
+            },
+            "name": "st-node"
+        }));
+        let options = MihomoConfigOptions {
+            mode: crate::proxy::ProxyMode::Both,
+            ..Default::default()
+        };
+        let plan = lower_options_to_ir(&options, Some(&node));
+        let artifact = SingBoxCompiler::new().compile(&plan).expect("compile");
+        let val = artifact.as_json_value().expect("json");
+
+        let inbounds = val["inbounds"].as_array().expect("inbounds");
+        assert!(
+            inbounds.iter().any(|i| i["type"] == "tun"),
+            "Both 模式必须包含 tun 入站"
+        );
+        assert!(
+            inbounds.iter().any(|i| i["type"] == "mixed"),
+            "Both 模式必须保留 mixed 入站（系统代理）"
+        );
     }
 }

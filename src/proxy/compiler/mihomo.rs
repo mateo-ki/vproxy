@@ -579,14 +579,14 @@ impl BackendCompiler for MihomoCompiler {
                 .iter()
                 .any(|l| l.get("port") == Some(&json!(mapping.port)))
             {
-                port_listeners.push(json!({
-                    "name": format!("inbound-{}", mapping.port),
-                    "type": "mixed",
-                    "port": mapping.port,
-                    "listen": if plan.inbounds.allow_lan { "0.0.0.0" } else { "127.0.0.1" },
-                    "proxy": proxy_name
-                }));
-                port_rules.push(format!("IN-PORT,{},{}", mapping.port, proxy_name));
+                // 该映射的目标节点没解析成功（订阅重建后 ID 失效且无同名节点等）。
+                // 绝不静默回落到主节点——那会让用户以为在走日本，实际出口是主节点；
+                // 跳过监听让外部连接被直接拒绝（诚实的失败），由 GUI 标记失效提示重选。
+                tracing::warn!(
+                    port = mapping.port,
+                    name = %mapping.node_name,
+                    "端口映射目标节点未解析，本轮不创建该端口的转发监听"
+                );
             }
         }
 
@@ -1579,9 +1579,88 @@ mod tests {
         let plan = lower_options_to_ir(&options, Some(&node));
         MihomoCompiler::new().compile(&plan)?.as_json_value()
     }
-
     fn compile(options: MihomoConfigOptions) -> Value {
         compile_result(options).unwrap()
+    }
+
+    #[test]
+    fn unresolved_port_mapping_does_not_fall_back_to_main_node() {
+        // 回归：端口映射的目标节点 ID 失效后（订阅重新拉取会给同名节点生成全新
+        // UUID），监听器绝不静默回落到主节点——那会让用户以为在走日本，实际出口
+        // 是主节点。失效映射本轮不转发，外部连接直接被拒（诚实的失败）。
+        let options = MihomoConfigOptions {
+            port_mappings: vec![crate::proxy::PortMapping {
+                id: "m1".into(),
+                port: 10820,
+                node_id: "stale-id".into(),
+                node_name: "日本1".into(),
+                enabled: true,
+            }],
+            // prime 未能解析出该映射的节点：port_mapping_nodes 为空
+            port_mapping_nodes: Vec::new(),
+            ..MihomoConfigOptions::default()
+        };
+        let config = compile(options);
+
+        // listeners 键只在有映射监听器时才写：全跳过时键不存在也算通过。
+        let has_stale_listener = config["listeners"]
+            .as_array()
+            .is_some_and(|listeners| listeners.iter().any(|l| l["port"] == 10820));
+        assert!(
+            !has_stale_listener,
+            "失效映射不得创建监听器（更不得回落主节点）"
+        );
+        let rules = config["rules"].as_array().expect("rules");
+        assert!(
+            !rules.iter().any(|rule| rule
+                .as_str()
+                .is_some_and(|text| text.contains("IN-PORT,10820"))),
+            "失效映射不得产生 IN-PORT 分流规则"
+        );
+    }
+
+    #[test]
+    fn resolved_port_mapping_creates_listener_and_in_port_rule() {
+        // 正向路径：已解析的映射必须创建指向映射节点本体的监听器 + IN-PORT 规则，
+        // 而不是指向主节点。
+        let options = MihomoConfigOptions {
+            port_mappings: vec![crate::proxy::PortMapping {
+                id: "m2".into(),
+                port: 10810,
+                node_id: "n1".into(),
+                node_name: "美国2".into(),
+                enabled: true,
+            }],
+            port_mapping_nodes: vec![(
+                10810,
+                "美国2".into(),
+                json!({
+                    "type": "ss",
+                    "name": "美国2",
+                    "server": "us2.example.com",
+                    "port": 443,
+                    "cipher": "aes-128-gcm",
+                    "password": "p"
+                }),
+            )],
+            ..MihomoConfigOptions::default()
+        };
+        let config = compile(options);
+
+        let listeners = config["listeners"].as_array().expect("listeners");
+        let listener = listeners
+            .iter()
+            .find(|l| l["port"] == 10810)
+            .expect("已解析映射必须创建监听器");
+        assert_eq!(listener["proxy"], "美国2", "监听器必须指向映射节点本体");
+
+        let rules = config["rules"].as_array().expect("rules");
+        assert!(
+            rules.iter().any(|rule| rule
+                .as_str()
+                .is_some_and(|text| text == "IN-PORT,10810,美国2")),
+            "IN-PORT 规则必须指向映射节点本体"
+        );
     }
 
     #[test]

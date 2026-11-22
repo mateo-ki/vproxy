@@ -145,16 +145,26 @@ pub fn lower_options_to_ir(
             continue;
         }
         let in_tag = format!("inbound-{}", mapping.port);
-        // 如果有注入对应的端口代理节点，则路由至该节点，否则走主代理
-        let target_name = options
+        // 目标节点未解析成功（订阅重建后 ID 失效且无同名节点）时绝不静默回落主代理：
+        // 用户以为在走日本，实际出口是主节点。跳过规则、不建监听器 = 诚实的失败，
+        // GUI 侧会把该映射标成「失效」提示重选。
+        let Some(target_name) = options
             .port_mapping_nodes
             .iter()
             .find(|(port, _, _)| *port == mapping.port)
-            .map(|(_, name, _)| name.clone());
+            .map(|(_, name, _)| name.clone())
+        else {
+            tracing::warn!(
+                port = mapping.port,
+                name = %mapping.node_name,
+                "端口映射目标节点未解析，跳过 IN-PORT 规则"
+            );
+            continue;
+        };
 
         rules.push(IRRule {
             matchers: vec![IRMatcher::Inbound(in_tag)],
-            action: IRAction::Proxy(target_name),
+            action: IRAction::Proxy(Some(target_name)),
             no_resolve: true,
             source: RuleSource::Inbound,
         });
@@ -481,4 +491,100 @@ pub fn parse_clash_rules_yaml_to_ir(rules_yaml: Option<&str>, source: RuleSource
 
 pub fn parse_override_rules_to_ir(override_yaml: Option<&str>) -> Vec<IRRule> {
     parse_clash_rules_yaml_to_ir(override_yaml, RuleSource::Override)
+}
+
+#[cfg(test)]
+mod port_mapping_lower_tests {
+    use super::*;
+    use crate::models::Node;
+    use crate::proxy::{MihomoConfigOptions, PortMapping};
+
+    fn test_node() -> Node {
+        Node {
+            id: "main".into(),
+            source_id: None,
+            protocol: "ss".into(),
+            name: "主节点".into(),
+            server: "main.example.com".into(),
+            port: 8388,
+            raw: String::new(),
+            config: serde_json::json!({
+                "type": "ss",
+                "server": "main.example.com",
+                "port": 8388,
+                "cipher": "aes-128-gcm",
+                "password": "test-only"
+            }),
+            country: None,
+            latency_ms: None,
+            latency_ok: None,
+            download_kbps: None,
+            latency_kernel: None,
+            latency_test_kind: None,
+            latency_tested_at: None,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        }
+    }
+
+    fn mapping(id: &str, port: u16, node_id: &str, node_name: &str) -> PortMapping {
+        PortMapping {
+            id: id.into(),
+            port,
+            node_id: node_id.into(),
+            node_name: node_name.into(),
+            enabled: true,
+        }
+    }
+
+    fn inbound_rule_port(plan: &RoutingPlan, port: u16) -> Option<&IRRule> {
+        let tag = format!("inbound-{port}");
+        plan.rules.iter().find(
+            |rule| matches!(&rule.matchers[..], [IRMatcher::Inbound(actual)] if *actual == tag),
+        )
+    }
+
+    #[test]
+    fn resolved_mapping_routes_to_its_node_not_main() {
+        let options = MihomoConfigOptions {
+            port_mappings: vec![mapping("m1", 10820, "fresh-id", "日本1")],
+            port_mapping_nodes: vec![(
+                10820,
+                "日本1".into(),
+                serde_json::json!({
+                    "type": "ss",
+                    "name": "日本1",
+                    "server": "jp.example.com",
+                    "port": 443,
+                    "cipher": "aes-128-gcm",
+                    "password": "p"
+                }),
+            )],
+            ..Default::default()
+        };
+        let plan = lower_options_to_ir(&options, Some(&test_node()));
+
+        let rule = inbound_rule_port(&plan, 10820).expect("已解析映射必须产生 IN-PORT 规则");
+        match &rule.action {
+            IRAction::Proxy(Some(target)) => assert_eq!(target, "日本1"),
+            other => panic!("IN-PORT 规则应指向映射节点本体，实际 {:?}", other),
+        }
+    }
+
+    #[test]
+    fn unresolved_mapping_is_skipped_not_falling_back_to_main() {
+        // 回归：目标节点未解析时旧行为是 `Proxy(None)` = 走主代理——用户以为在
+        // 走日本，实际出口是主节点。现在必须整条规则都不生成。
+        let options = MihomoConfigOptions {
+            port_mappings: vec![mapping("m1", 10820, "stale-id", "日本1")],
+            port_mapping_nodes: vec![],
+            ..Default::default()
+        };
+        let plan = lower_options_to_ir(&options, Some(&test_node()));
+
+        assert!(
+            inbound_rule_port(&plan, 10820).is_none(),
+            "未解析的映射不得产生 IN-PORT 规则（更不得指向主节点）"
+        );
+    }
 }
