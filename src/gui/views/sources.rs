@@ -988,8 +988,9 @@ impl VpnApp {
         .open(&mut open)
         .show(ctx, |ui| {
             ui.horizontal(|ui| {
-                ui.label("名称");
-                let name_field = ui.text_edit_singleline(&mut self.form_name);
+                ui.label("名称（必填）");
+                let name_field =
+                    ui.add(egui::TextEdit::singleline(&mut self.form_name).desired_width(f32::INFINITY));
                 crate::gui::widgets::note_text_field(ui, &name_field);
             });
             if is_ungrouped {
@@ -1061,7 +1062,9 @@ impl VpnApp {
             ui.checkbox(&mut self.form_enabled, "启用");
             ui.horizontal(|ui| {
                 ui.label("备注");
-                let remark_field = ui.text_edit_singleline(&mut self.form_remark);
+                let remark_field = ui.add(
+                    egui::TextEdit::singleline(&mut self.form_remark).desired_width(f32::INFINITY),
+                );
                 crate::gui::widgets::note_text_field(ui, &remark_field);
             });
             if !is_ungrouped {
@@ -1150,17 +1153,23 @@ impl VpnApp {
                 );
             }
             ui.add_space(4.0);
+            // 校验错误就摆在按钮上方：以前只写主窗口底栏，弹窗开着时看不见。
+            if let Some(error) = &self.source_form_error {
+                ui.label(RichText::new(error.as_str()).small().color(theme::danger()));
+            }
             ui.horizontal(|ui| {
                 if ui.add(primary_btn("保存")).clicked() {
                     self.save_source_form();
                 }
                 if ui.button("取消").clicked() {
                     self.show_source_form = false;
+                    self.source_form_error = None;
                 }
             });
         });
         if !open {
             self.show_source_form = false;
+            self.source_form_error = None;
         }
     }
 
