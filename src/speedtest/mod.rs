@@ -696,65 +696,30 @@ mod tests {
     async fn inspect_and_test_vpcore_on_vproxy_db_nodes() {
         if let Ok(mut db) = Database::connect("data/vproxy.db").await {
             db.node_root = std::path::PathBuf::from("data/subscriptions");
-            let nodes = db.load_nodes(None).await.unwrap_or_default();
-            println!(
-                ">>> DATA/VPROXY.DB + SUBSCRIPTIONS CONTAINS {} NODES <<<",
-                nodes.len()
-            );
-
-            let with_latency: Vec<_> = nodes
-                .iter()
-                .filter(|n| n.latency_ms.is_some())
-                .cloned()
-                .collect();
-            println!(
-                ">>> NODES WITH RECORDED LATENCY IN DB: {} <<<",
-                with_latency.len()
-            );
-            for n in with_latency.iter().take(5) {
-                println!(
-                    "  Prior OK Node: id={} name={} proto={} server={}:{} latency={:?}",
-                    n.id, n.name, n.protocol, n.server, n.port, n.latency_ms
-                );
-            }
-
-            let test_count = 10_000.min(nodes.len());
-            let test_nodes = nodes.into_iter().take(test_count).collect::<Vec<_>>();
+            let loukas_id = "96a211ab-a815-4c4a-911e-3989938779f8";
+            let loukas_nodes = db.load_nodes(Some(loukas_id)).await.unwrap_or_default();
+            let total_loukas = loukas_nodes.len();
 
             let network_limit = std::sync::Arc::new(tokio::sync::Semaphore::new(128));
             let start = std::time::Instant::now();
-            let results = crate::proxy_probe::verify_nodes_with_vpcore_progress_limited(
-                test_nodes,
-                std::time::Duration::from_millis(2000),
-                Some(|p: crate::proxy_probe::ProxyProbeProgress| {
-                    println!(
-                        "Progress: done={}/{} ok={} fail={} (batch {:?}/{:?}) elapsed={:?}",
-                        p.done, p.total, p.ok, p.fail, p.batch_index, p.batch_total, p.elapsed
-                    );
-                }),
-                network_limit,
-                200,
+            let vp_res = crate::proxy_probe::verify_nodes_with_vpcore_progress_limited(
+                loukas_nodes,
+                std::time::Duration::from_millis(3000),
+                None::<fn(crate::proxy_probe::ProxyProbeProgress)>,
+                network_limit.clone(),
+                100,
                 false,
                 Some("http://cp.cloudflare.com/generate_204".into()),
             )
             .await;
             let elapsed = start.elapsed();
-            match results {
-                Ok(res) => {
-                    let ok_count = res.iter().filter(|r| r.ok).count();
-                    println!(
-                        "SUCCESS: tested {} nodes, {} OK in {:?}",
-                        res.len(),
-                        ok_count,
-                        elapsed
-                    );
-                    for r in res.iter().filter(|r| r.ok).take(5) {
-                        println!("  OK Node {} latency={:?}", r.id, r.latency_ms);
-                    }
-                }
-                Err(e) => {
-                    println!("ERROR: {:?}", e);
-                }
+
+            if let Ok(ref vp) = vp_res {
+                let vp_ok = vp.iter().filter(|r| r.ok).count();
+                println!(
+                    ">>> VPCORE FINAL ON ALL {} LOUKAS NODES: {} OK in {:?} <<<",
+                    total_loukas, vp_ok, elapsed
+                );
             }
         }
     }
