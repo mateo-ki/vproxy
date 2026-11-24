@@ -1,8 +1,8 @@
 use super::CLASH_VERGE_RECOMMENDED_OVERRIDE;
-use crate::gui::icons::{icon_label, Icon};
+use crate::gui::icons::{self, icon_label, Icon};
 use crate::gui::theme;
 use crate::gui::types::{GroupsTab, KernelGroup, OverrideEditorTab};
-use crate::gui::widgets::{card_frame, macos_segmented_tabs, primary_btn};
+use crate::gui::widgets::{card_frame, macos_segmented_tabs};
 use crate::gui::VpnApp;
 use crate::models::NodeSummary;
 use crate::proxy::ProxyState;
@@ -376,20 +376,32 @@ impl VpnApp {
                                     );
                                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                         if ui
-                                            .add_enabled(!self.proxy_busy, primary_btn("保存配置"))
+                                            .add_enabled(
+                                                !self.proxy_busy,
+                                                icons::button_with_icon(Icon::Check, "保存配置", theme::accent_strong()),
+                                            )
                                             .on_hover_text("保存 YAML 覆写配置；支持热重载时立即应用")
                                             .clicked()
                                         {
                                             save_clicked = true;
                                         }
                                         if ui
-                                            .add_enabled(!self.proxy_busy, egui::Button::new("⚡ 一键载入推荐规则"))
+                                            .add_enabled(
+                                                !self.proxy_busy,
+                                                icons::button_with_icon(Icon::Lightning, "一键载入推荐规则", theme::warning()),
+                                            )
                                             .on_hover_text("填入经典的 AI、Google、多线下载与国内直连分流配置")
                                             .clicked()
                                         {
                                             load_recommended = true;
                                         }
-                                        if ui.add_enabled(!self.proxy_busy, egui::Button::new("清空覆写")).clicked() {
+                                        if ui
+                                            .add_enabled(
+                                                !self.proxy_busy,
+                                                icons::button_with_icon(Icon::Trash, "清空覆写", theme::danger()),
+                                            )
+                                            .clicked()
+                                        {
                                             clear_override = true;
                                         }
                                     });
@@ -472,27 +484,42 @@ impl VpnApp {
                                     );
                                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                         if ui
-                                            .add_enabled(!self.proxy_busy, primary_btn("保存脚本"))
+                                            .add_enabled(
+                                                !self.proxy_busy,
+                                                icons::button_with_icon(Icon::Check, "保存脚本", theme::accent_strong()),
+                                            )
                                             .on_hover_text("校验并保存 Rhai 脚本；支持热重载时立即应用")
                                             .clicked()
                                         {
                                             save_clicked = true;
                                         }
                                         if ui
-                                            .button("🔍 语法校验")
+                                            .add_enabled(
+                                                !self.proxy_busy,
+                                                icons::button_with_icon(Icon::Search, "语法校验", theme::accent()),
+                                            )
                                             .on_hover_text("在本地纯 Rust 安全沙箱中编译校验语法正确性")
                                             .clicked()
                                         {
                                             validate_clicked = true;
                                         }
                                         if ui
-                                            .add_enabled(!self.proxy_busy, egui::Button::new("⚡ 载入模板"))
+                                            .add_enabled(
+                                                !self.proxy_busy,
+                                                icons::button_with_icon(Icon::Lightning, "载入模板", theme::warning()),
+                                            )
                                             .on_hover_text("填入经典的主流脚本模板 (DNS增强、规则插入与动态节点过滤)")
                                             .clicked()
                                         {
                                             load_template = true;
                                         }
-                                        if ui.add_enabled(!self.proxy_busy, egui::Button::new("清空脚本")).clicked() {
+                                        if ui
+                                            .add_enabled(
+                                                !self.proxy_busy,
+                                                icons::button_with_icon(Icon::Trash, "清空脚本", theme::danger()),
+                                            )
+                                            .clicked()
+                                        {
                                             clear_script = true;
                                         }
                                     });
@@ -634,14 +661,20 @@ impl VpnApp {
                                     );
                                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                         if ui
-                                            .button("📋 复制 DSL")
+                                            .add_enabled(
+                                                !self.proxy_busy,
+                                                icons::button_with_icon(Icon::Clipboard, "复制 DSL", theme::text_primary()),
+                                            )
                                             .on_hover_text("复制当前 .vp DSL 脚本到剪贴板")
                                             .clicked()
                                         {
                                             copy_clicked = true;
                                         }
                                         if ui
-                                            .add_enabled(!self.proxy_busy, primary_btn("⚡ 生成当前 DSL 预览"))
+                                            .add_enabled(
+                                                !self.proxy_busy,
+                                                icons::button_with_icon(Icon::Lightning, "生成当前 DSL 预览", theme::warning()),
+                                            )
                                             .on_hover_text("基于当前分流策略与选中的代理节点即时编译生成原生 .vp DSL 配置")
                                             .clicked()
                                         {

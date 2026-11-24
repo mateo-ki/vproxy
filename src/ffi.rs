@@ -10,8 +10,8 @@ use std::time::{Duration, Instant};
 
 use crate::models::Node;
 use crate::proxy::compiler::{
-    BackendCompiler, CompiledArtifact, MeowCompiler, MihomoCompiler, ShoesCompiler,
-    SingBoxCompiler, VpCoreCompiler, XrayCompiler,
+    BackendCompiler, CompiledArtifact, MeowCompiler, MihomoCompiler, SingBoxCompiler,
+    VpCoreCompiler, XrayCompiler,
 };
 use crate::proxy::ir::lower_options_to_ir;
 use crate::proxy::MihomoConfigOptions;
@@ -94,7 +94,7 @@ pub unsafe extern "C" fn vpn_parse_nodes_count(content: *const c_char) -> i32 {
 /// 将节点与配置选项编译为目标代理内核的配置内容（YAML 或 JSON 字符串）。
 ///
 /// 参数：
-/// - `kernel_kind`: 目标内核名称，支持 `"mihomo"` / `"sing-box"` / `"vp-core"` / `"xray"` / `"shoes"` / `"meow"`
+/// - `kernel_kind`: 目标内核名称，支持 `"mihomo"` / `"sing-box"` / `"vp-core"` / `"xray"` / `"meow"`
 /// - `node_json`: 单个节点的 JSON 字符串，反序列化为 `Node`
 /// - `options_json`: 配置选项 JSON 字符串（对应 `MihomoConfigOptions`），若传 NULL 则采用默认生产配置
 ///
@@ -141,7 +141,6 @@ pub unsafe extern "C" fn vpn_compile_config(
         "sing-box" | "singbox" => SingBoxCompiler::default().compile(&plan),
         "vp-core" | "vpcore" | "vp_core" => VpCoreCompiler.compile(&plan),
         "xray" => XrayCompiler::default().compile(&plan),
-        "shoes" => ShoesCompiler::default().compile(&plan),
         "meow" => MeowCompiler.compile(&plan),
         other => return to_c_string(format!(r#"{{"error":"unsupported kernel kind: {other}"}}"#)),
     };
@@ -350,8 +349,8 @@ mod tests {
 
     #[test]
     fn test_ffi_tcp_latency_invalid() {
-        // RFC 5737 TEST-NET-1 (192.0.2.1) 不可路由保留地址，测试超时返回 -1
-        let invalid_host = CString::new("192.0.2.1").unwrap();
+        // 无效域名解析失败，测试返回 -1（且不受本机全局 TUN 网卡接管影响）
+        let invalid_host = CString::new("nonexistent.invalid").unwrap();
         unsafe {
             let latency = vpn_test_tcp_latency(invalid_host.as_ptr(), 54321, 100);
             assert_eq!(latency, -1);

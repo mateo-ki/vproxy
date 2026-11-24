@@ -80,7 +80,7 @@ impl ProxyWorkDir {
             KernelKind::Mihomo | KernelKind::Meow | KernelKind::VpCore => {
                 managed_kernel_root().join(kernel.directory_name())
             }
-            KernelKind::SingBox | KernelKind::Xray | KernelKind::Shoes => root.clone(),
+            KernelKind::SingBox | KernelKind::Xray => root.clone(),
         };
         tokio::fs::create_dir_all(&data_root).await?;
         if kernel == KernelKind::VpCore {
@@ -103,9 +103,7 @@ impl ProxyWorkDir {
 
     pub fn config_path(&self) -> PathBuf {
         self.root.join(match self.kernel {
-            KernelKind::Mihomo | KernelKind::Shoes | KernelKind::Meow | KernelKind::VpCore => {
-                "config.yaml"
-            }
+            KernelKind::Mihomo | KernelKind::Meow | KernelKind::VpCore => "config.yaml",
             KernelKind::SingBox | KernelKind::Xray => "config.json",
         })
     }
@@ -115,7 +113,6 @@ impl ProxyWorkDir {
             KernelKind::Mihomo => "mihomo.log",
             KernelKind::SingBox => "sing-box.log",
             KernelKind::Xray => "xray.log",
-            KernelKind::Shoes => "shoes.log",
             KernelKind::Meow => "meow.log",
             KernelKind::VpCore => "vpcore.log",
         })
@@ -1316,7 +1313,7 @@ impl ProxyManager {
         // 3. 探测失败：优先通过控制器清理所有僵尸/半开连接，让浏览器立刻建立新连接
         let supports_controller = matches!(
             kernel,
-            Some(KernelKind::Mihomo | KernelKind::VpCore | KernelKind::Meow | KernelKind::Shoes)
+            Some(KernelKind::Mihomo | KernelKind::VpCore | KernelKind::Meow)
         );
         if supports_controller && controller_port > 0 {
             if let Ok(client) = reqwest::Client::builder()

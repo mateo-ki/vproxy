@@ -4,7 +4,7 @@
   <b>简体中文</b> | <a href="README.en.md">English</a>
 </p>
 
-Rust + egui 编写的高性能现代化跨平台代理工作站：采集订阅、解析节点、驱动六大代理内核（Mihomo / sing-box / VP-Core / Xray / Meow / Shoes），并实测代理可用性与延迟。
+Rust + egui 编写的高性能现代化跨平台代理工作站：采集订阅、解析节点、驱动五大代理内核（Mihomo / sing-box / VP-Core / Xray / Meow），并实测代理可用性与延迟。
 
 <p align="center">
   <img src="docs/images/dashboard.png" alt="VProxy 控制台主界面" width="100%">
@@ -61,10 +61,9 @@ Rust + egui 编写的高性能现代化跨平台代理工作站：采集订阅�
 | Mihomo | `ss` `ssr` `vmess` `vless` `trojan` `hysteria` `hysteria2` `tuic` `anytls` `snell` `mieru` `openvpn` `wireguard` `masque` `http(s)` `socks5` |
 | sing-box | `ss` `vmess` `vless` `trojan` `hysteria2` `tuic` `anytls` `ssh` `wireguard` `http(s)` `socks5` |
 | Xray | `ss` `vmess` `vless` `trojan` `http(s)` `socks5` |
-| Shoes | `ss` `vmess` `vless` `trojan` `snell` `anytls` `naive` `wireguard` `http(s)` `socks5` |
 | Meow | `ss` `vmess` `vless` `trojan` `hysteria2` `snell` `anytls` `http(s)` `socks5` |
 
-选路要点：`snell` 优先 Shoes，`ssh` 优先 sing-box，`naive` 与 `juicity` 专属 VP-Core（mihomo 不支持、sing-box 1.12 起移除），`openvpn` 优先 VP-Core 原生出站（VPN Gate 实测、mihomo 兜底）；`xhttp/splithttp` 传输层仅 VP-Core 支持，命中时自动改由 VP-Core 运行。解析到但当前装不到内核的协议会在界面标注，不会静默丢弃。
+选路要点：`snell` 优先 Mihomo，`ssh` 优先 sing-box，`naive` 与 `juicity` 专属 VP-Core（mihomo 不支持、sing-box 1.12 起移除），`openvpn` 优先 VP-Core 原生出站（VPN Gate 实测、mihomo 兜底）；`xhttp/splithttp` 传输层仅 VP-Core 支持，命中时自动改由 VP-Core 运行。解析到但当前装不到内核的协议会在界面标注，不会静默丢弃。
 
 ## 文档
 
@@ -145,7 +144,7 @@ VProxy 原生支持 OpenWrt 路由器环境（X86 软路由及 ARM64 路由器�
 3. **零遥测与数据隐私安全**：本项目严格贯彻无遥测原则，代码中不包含任何后台统计、埋点追踪或数据收集上报模块。用户配置、订阅源地址、节点数据库、分流规则以及测速与切换记录均仅保存在用户本地设备的数据目录（`data/`）中，数据绝不上传云端，且卸载程序不会强制删除本地个人配置与数据库。
 4. **联网动作透明度**：本软件在默认常规运行中的网络请求仅限于主动发起的“数据取回”：包括拉取用户添加的订阅源内容、检测本地公网出口 IP、向官方仓库检查并下载软件更新、下载开源代理内核与 GeoIP/GeoSite 规则库，以及进行分流可用性探测时的公共 DNS 域名解析。
 5. **用户主动触发的外发行为**：除上述常规取回外，仅在以下两处需要用户明确主动配置或手动点击时，才会产生单次网络请求：① 用户主动配置并点击将测通节点发布至自建 Web 后台；② 用户主动点击发起 IP 风险与归属地画像检测（请求第三方权威接口 ipinfo.io、ip-api.com、ipwho.is 查询该 IP）。
-6. **第三方内核与规则免责**：本项目调用的代理内核（VP-Core、Mihomo、sing-box、Xray、Meow、Shoes 等）与 Geo 规则数据库均为独立分发的开源项目，按各自开源许可证独立维护，其功能、安全性与网络稳定性完全由对应上游项目负责。软件界面所呈现的延迟、吞吐速率及健康度均为用户本机运行时的瞬时探测采样值，不构成对任何节点长期可用性、连接质量或稳定性的保证。
+6. **第三方内核与规则免责**：本项目调用的代理内核（VP-Core、Mihomo、sing-box、Xray、Meow 等）与 Geo 规则数据库均为独立分发的开源项目，按各自开源许可证独立维护，其功能、安全性与网络稳定性完全由对应上游项目负责。软件界面所呈现的延迟、吞吐速率及健康度均为用户本机运行时的瞬时探测采样值，不构成对任何节点长期可用性、连接质量或稳定性的保证。
 
 ## 社区
 

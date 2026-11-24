@@ -73,6 +73,8 @@ pub struct SpeedTestOptions {
     pub tcp_ping_only: bool,
     /// 测速探测目标 URL（如 http://cp.cloudflare.com/generate_204）
     pub speedtest_url: Option<String>,
+    /// 测速所偏好的内核（默认 Auto 自动按协议选最优内核）
+    pub kernel_preference: crate::kernel::KernelPreference,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -111,6 +113,7 @@ impl Default for SpeedTestOptions {
             dedup_egress: false,
             tcp_ping_only: false,
             speedtest_url: None,
+            kernel_preference: crate::kernel::KernelPreference::Auto,
         }
     }
 }

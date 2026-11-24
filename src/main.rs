@@ -106,9 +106,9 @@ enum Commands {
         #[arg(long)]
         json: bool,
     },
-    /// 将节点配置编译为目标内核支持的配置文件 (Mihomo / Sing-box / VP-Core / Xray / Shoes / Meow)
+    /// 将节点配置编译为目标内核支持的配置文件 (Mihomo / Sing-box / VP-Core / Xray / Meow)
     Compile {
-        /// 目标内核名称: mihomo, sing-box, vp-core, xray, shoes, meow
+        /// 目标内核名称: mihomo, sing-box, vp-core, xray, meow
         #[arg(long, default_value = "mihomo")]
         kernel: String,
 
@@ -217,18 +217,17 @@ fn handle_command(cmd: Commands) -> Result<()> {
             };
             let plan = vproxy::proxy::ir::lower_options_to_ir(&options, Some(&nodes[0]));
             use vproxy::proxy::compiler::{
-                BackendCompiler, CompiledArtifact, MeowCompiler, MihomoCompiler, ShoesCompiler,
-                SingBoxCompiler, VpCoreCompiler, XrayCompiler,
+                BackendCompiler, CompiledArtifact, MeowCompiler, MihomoCompiler, SingBoxCompiler,
+                VpCoreCompiler, XrayCompiler,
             };
             let artifact = match kernel.to_ascii_lowercase().as_str() {
                 "mihomo" | "clash" => MihomoCompiler::default().compile(&plan)?,
                 "sing-box" | "singbox" => SingBoxCompiler::default().compile(&plan)?,
                 "vp-core" | "vpcore" | "vp_core" => VpCoreCompiler.compile(&plan)?,
                 "xray" => XrayCompiler::default().compile(&plan)?,
-                "shoes" => ShoesCompiler::default().compile(&plan)?,
                 "meow" => MeowCompiler.compile(&plan)?,
                 other => {
-                    eprintln!("错误: 不支持的内核类型 '{other}'，可选: mihomo, sing-box, vp-core, xray, shoes, meow");
+                    eprintln!("错误: 不支持的内核类型 '{other}'，可选: mihomo, sing-box, vp-core, xray, meow");
                     std::process::exit(1);
                 }
             };
@@ -486,7 +485,6 @@ fn main() -> Result<()> {
         let kernel = match kernel_str.to_ascii_lowercase().as_str() {
             "sing-box" | "singbox" => vproxy::kernel::KernelKind::SingBox,
             "xray" => vproxy::kernel::KernelKind::Xray,
-            "shoes" => vproxy::kernel::KernelKind::Shoes,
             "meow" => vproxy::kernel::KernelKind::Meow,
             "vpcore" | "vp-core" | "vp_core" => vproxy::kernel::KernelKind::VpCore,
             _ => vproxy::kernel::KernelKind::Mihomo,

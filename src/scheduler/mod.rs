@@ -44,6 +44,7 @@ fn refill_opts(settings: &AppSettings) -> SpeedTestOptions {
         dedup_egress: settings.speedtest_dedup_egress,
         tcp_ping_only: settings.speedtest_tcp_ping_only,
         speedtest_url: Some(settings.speedtest_url.clone()),
+        kernel_preference: crate::kernel::KernelPreference::Auto,
     }
 }
 
@@ -186,6 +187,7 @@ impl Scheduler {
                             dedup_egress: settings.speedtest_dedup_egress,
                             tcp_ping_only: settings.speedtest_tcp_ping_only,
                             speedtest_url: Some(settings.speedtest_url.clone()),
+                            kernel_preference: crate::kernel::KernelPreference::Auto,
                         };
                         match self.speedtester.test_all_sources(opts).await {
                             Ok(sum) => {

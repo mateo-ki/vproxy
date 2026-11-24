@@ -1,8 +1,8 @@
-use crate::gui::icons::{icon_label, Icon};
+use crate::gui::icons::{self, icon_label, Icon};
 use crate::gui::theme;
 use crate::gui::types::RulesTab;
 use crate::gui::widgets::{
-    card_frame, header_cell, panel_tab, primary_btn, routing_mode_description, routing_mode_detail,
+    card_frame, header_cell, panel_tab, routing_mode_description, routing_mode_detail,
     section_title,
 };
 use crate::gui::VpnApp;
@@ -564,21 +564,30 @@ impl VpnApp {
                             );
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                 if ui
-                                    .add_enabled(editable, primary_btn("保存规则"))
+                                    .add_enabled(
+                                        editable,
+                                        icons::button_with_icon(Icon::Check, "保存规则", theme::accent_strong()),
+                                    )
                                     .on_hover_text("解析并保存规则，支持热重载时立即应用")
                                     .clicked()
                                 {
                                     save_rules_clicked = true;
                                 }
                                 if ui
-                                    .add_enabled(editable, egui::Button::new("自动优化"))
+                                    .add_enabled(
+                                        editable,
+                                        icons::button_with_icon(Icon::Lightning, "自动优化", theme::warning()),
+                                    )
                                     .on_hover_text("解析规则、自动去重并按标准顺序优化排序")
                                     .clicked()
                                 {
                                     auto_optimize = true;
                                 }
                                 if ui
-                                    .add_enabled(editable, egui::Button::new("清空规则"))
+                                    .add_enabled(
+                                        editable,
+                                        icons::button_with_icon(Icon::Trash, "清空规则", theme::danger()),
+                                    )
                                     .on_hover_text("清空当前编辑框中的全部自定义规则")
                                     .clicked()
                                 {
@@ -688,8 +697,8 @@ impl VpnApp {
                         // 多行代码文本编辑器（独立垂直滚动）
                         egui::ScrollArea::vertical()
                             .auto_shrink([false, false])
-                            .max_height(360.0)
-                            .min_scrolled_height(220.0)
+                            .max_height(580.0)
+                            .min_scrolled_height(380.0)
                             .id_salt("proxy_custom_rules_editor_scroll")
                             .show(ui, |ui| {
                                 ui.add_enabled_ui(editable, |ui| {
@@ -697,7 +706,7 @@ impl VpnApp {
                                         egui::TextEdit::multiline(&mut self.custom_rules_text)
                                             .font(egui::TextStyle::Monospace)
                                             .desired_width(f32::INFINITY)
-                                            .desired_rows(18)
+                                            .desired_rows(26)
                                             .hint_text("# 可在此处粘贴或输入自定义规则，每行一条（支持 - 前缀与 # 注释）：\n- DOMAIN-SUFFIX,openai.com,PROXY\n- DOMAIN-KEYWORD,github,PROXY\n- IP-CIDR,192.168.0.0/16,DIRECT\n- GEOIP,CN,DIRECT\n- PROCESS-NAME,chrome.exe,PROXY"),
                                     );
                                 });

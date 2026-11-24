@@ -784,6 +784,119 @@ pub async fn first_reachable(
         .map(|(_, node, _)| (node.id, node.name))
 }
 
+/// 为单节点拉起独立的临时 Mihomo 代理（开放本地 mixed-port 端口）。
+/// 用于单节点下载带宽测速与网络测速，绝不污染或切换主代理活动节点。
+pub struct SingleNodeProbeProxy {
+    child: tokio::process::Child,
+    pub mixed_port: u16,
+    work_dir: std::path::PathBuf,
+}
+
+impl Drop for SingleNodeProbeProxy {
+    fn drop(&mut self) {
+        let _ = self.child.start_kill();
+        let work_dir = self.work_dir.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(150)).await;
+            let _ = tokio::fs::remove_dir_all(&work_dir).await;
+        });
+    }
+}
+
+pub async fn spawn_single_node_probe_proxy(node: &Node) -> Result<SingleNodeProbeProxy> {
+    let mihomo = find_mihomo_executable().ok_or_else(|| anyhow!("未找到 Mihomo 内核"))?;
+    let clash_proxies = nodes_to_clash_proxies(std::slice::from_ref(node));
+    let mut clash_proxy = clash_proxies
+        .into_iter()
+        .next()
+        .ok_or_else(|| anyhow!("节点无法转换为 Mihomo 配置: {}", node.protocol))?;
+
+    let proxy_name = "speedtest-target".to_string();
+    if let Some(map) = clash_proxy.as_object_mut() {
+        map.insert("name".into(), json!(proxy_name));
+    }
+
+    let listener = TcpListener::bind("127.0.0.1:0").await?;
+    let mixed_port = listener.local_addr()?.port();
+    drop(listener);
+
+    let ctrl_listener = TcpListener::bind("127.0.0.1:0").await?;
+    let ctrl_port = ctrl_listener.local_addr()?.port();
+    drop(ctrl_listener);
+
+    let config = json!({
+        "mixed-port": mixed_port,
+        "external-controller": format!("127.0.0.1:{ctrl_port}"),
+        "secret": "",
+        "allow-lan": false,
+        "ipv6": false,
+        "mode": "rule",
+        "log-level": "silent",
+        "proxies": [clash_proxy],
+        "proxy-groups": [{
+            "name": "PROXY",
+            "type": "select",
+            "proxies": [proxy_name]
+        }],
+        "rules": ["MATCH,PROXY"]
+    });
+
+    let work_dir = std::env::temp_dir().join(format!("vproxy-st-{}", Uuid::new_v4()));
+    tokio::fs::create_dir_all(&work_dir).await?;
+    let config_path = work_dir.join("config.yaml");
+    tokio::fs::write(&config_path, serde_yaml::to_string(&config)?).await?;
+
+    let mut command = Command::new(mihomo);
+    command
+        .env_remove("HTTP_PROXY")
+        .env_remove("http_proxy")
+        .env_remove("HTTPS_PROXY")
+        .env_remove("https_proxy")
+        .env_remove("ALL_PROXY")
+        .env_remove("all_proxy")
+        .arg("-d")
+        .arg(&work_dir)
+        .arg("-f")
+        .arg(&config_path)
+        .kill_on_drop(true)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    #[cfg(windows)]
+    {
+        command.creation_flags(0x0800_0000);
+    }
+    let mut child = command.spawn()?;
+
+    // 等待端口就绪（最多 3 秒）
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
+    let addr = std::net::SocketAddr::from(([127, 0, 0, 1], mixed_port));
+    let mut ready = false;
+    while tokio::time::Instant::now() < deadline {
+        if let Ok(Some(status)) = child.try_wait() {
+            let _ = tokio::fs::remove_dir_all(&work_dir).await;
+            anyhow::bail!("临时测速内核异常退出: {status}");
+        }
+        if TcpStream::connect(addr).await.is_ok() {
+            ready = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+
+    if !ready {
+        let _ = child.kill().await;
+        let _ = tokio::fs::remove_dir_all(&work_dir).await;
+        anyhow::bail!("临时测速内核启动超时");
+    }
+
+    Ok(SingleNodeProbeProxy {
+        child,
+        mixed_port,
+        work_dir,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -975,5 +1088,22 @@ mod tests {
         assert!(!is_connection_failure(
             "Google: HTTP 503 Service Unavailable"
         ));
+    }
+
+    #[tokio::test]
+    async fn test_single_node_probe_proxy_lifecycle() {
+        let Some(_mihomo) = find_mihomo_executable() else {
+            return;
+        };
+        let node = node("http", json!({"server":"127.0.0.1","port":8080}));
+        let runner = spawn_single_node_probe_proxy(&node).await;
+        if let Ok(runner) = runner {
+            assert!(runner.mixed_port > 0);
+            let dir = runner.work_dir.clone();
+            assert!(dir.exists());
+            drop(runner);
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            assert!(!dir.exists());
+        }
     }
 }

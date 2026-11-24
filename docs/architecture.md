@@ -17,7 +17,7 @@ VProxy 是 Rust + egui 的桌面代理工作站：采集订阅 → 解析节点 
 节点库（data/subscriptions/*.db）
       │  src/proxy/compiler/<kernel>（按内核编译）
       ▼
-Mihomo YAML │ sing-box JSON │ Xray JSON │ VP-Core DSL(.vp) │ Shoes / Meow 配置
+Mihomo YAML │ sing-box JSON │ Xray JSON │ VP-Core DSL(.vp) │ Meow 配置
       │
       ▼
 内核常驻进程（src/proxy 进程管理 + src/system_proxy + TUN 提权）
@@ -30,7 +30,7 @@ Mihomo YAML │ sing-box JSON │ Xray JSON │ VP-Core DSL(.vp) │ Shoes / Meo
 | `src/parser` | 分享链接与订阅正文解析（URI scheme 见 §3）；Clash YAML、Base64、混合文本 |
 | `src/export` | 节点 → Clash 代理 JSON / 分享链接（含各协议 URI 重建） |
 | `src/kernel` | 内核资产管理、版本检测、更新器、**内核选路**（§5） |
-| `src/proxy/compiler` | 每内核一个编译器：`mihomo` / `sing_box` / `xray` / `vp_core`（VP-DSL）/ `shoes` / `meow` |
+| `src/proxy/compiler` | 每内核一个编译器：`mihomo` / `sing_box` / `xray` / `vp_core`（VP-DSL）/ `meow` |
 | `src/proxy/ir` | 内核无关的编译中间层（RoutingPlan / OutboundKind / TransportSpec） |
 | `src/proxy` | 进程生命周期、端口就绪检测、降级状态、系统代理会话 |
 | `src/speedtest` | TCP 预筛 + 内核真实握手测速 + 可选吞吐探测 |
@@ -49,7 +49,6 @@ Mihomo YAML │ sing-box JSON │ Xray JSON │ VP-Core DSL(.vp) │ Shoes / Meo
 | Mihomo | `ss` `ssr` `vmess` `vless` `trojan` `hysteria` `hysteria2` `tuic` `anytls` `snell` `mieru` `openvpn` `wireguard` `masque` `http(s)` `socks5` |
 | sing-box | `ss` `vmess` `vless` `trojan` `hysteria2` `tuic` `anytls` `ssh` `wireguard` `http(s)` `socks5` |
 | Xray | `ss` `vmess` `vless` `trojan` `http(s)` `socks5` |
-| Shoes | `ss` `vmess` `vless` `trojan` `snell` `anytls` `naive` `wireguard` `http(s)` `socks5` |
 | Meow | `ss` `vmess` `vless` `trojan` `hysteria2` `snell` `anytls` `http(s)` `socks5` |
 
 备注：
@@ -71,8 +70,8 @@ Mihomo YAML │ sing-box JSON │ Xray JSON │ VP-Core DSL(.vp) │ Shoes / Meo
 自动选路（Auto 偏好）顺序：
 
 1. **协议级偏好** `preferred_proxy_kernel`：
-   `snell → Shoes`；`ssh → SingBox`；`naive → VP-Core`；`juicity → VP-Core`（专属）；`openvpn → VP-Core`（mihomo 兜底）；`hysteria2/hy2/tuic/anytls/wireguard → SingBox`；其余落在白名单内的协议 → Mihomo。
-2. 偏好内核未安装时按 `Mihomo ↔ SingBox` 回退，仍不可用再兜底 `VP-Core → Meow → Shoes → Xray`。
+   `snell → Mihomo`；`ssh → SingBox`；`naive → VP-Core`；`juicity → VP-Core`（专属）；`openvpn → VP-Core`（mihomo 兜底）；`hysteria2/hy2/tuic/anytls/wireguard → SingBox`；其余落在白名单内的协议 → Mihomo。
+2. 偏好内核未安装时按 `Mihomo ↔ SingBox` 回退，仍不可用再兜底 `VP-Core → Meow → Xray`。
 3. **传输层修正**：节点传输层为 `xhttp/splithttp` 时（仅 VP-Core 支持），无论上一步选中谁，均升级到 VP-Core（可用时），并在通知中说明。
 4. **兼容性护栏**：Meow 排除 `xhttp/splithttp`、`grpc`、ECH、WireGuard/TUIC/SSR/MASQUE；VP-Core 仅排除 `mkcp/kcp`；命中时平滑回退并保留通知。
 5. 手动点名内核时遵循同一套协议支持与兼容性检查；不支持则明确回退或报错，不静默丢弃。

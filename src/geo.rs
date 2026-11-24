@@ -127,7 +127,6 @@ pub fn sync_geo_to_all_kernels(src_dir: &Path) -> Vec<String> {
         root.join("vpcore"),
         root.join("meow"),
         root.join("xray"),
-        root.join("shoes"),
     ];
 
     let geo_files = [
@@ -590,7 +589,6 @@ pub fn find_geo_dat_file(name: &str) -> Option<PathBuf> {
         crate::kernel::managed_kernel_root().join("vp_core"),
         crate::kernel::managed_kernel_root().join("meow"),
         crate::kernel::managed_kernel_root().join("xray"),
-        crate::kernel::managed_kernel_root().join("shoes"),
         crate::data_root().join("kernels").join("mihomo"),
     ];
     for dir in candidate_dirs {

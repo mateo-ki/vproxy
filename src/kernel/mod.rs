@@ -20,7 +20,6 @@ pub enum KernelKind {
     Mihomo,
     Xray,
     SingBox,
-    Shoes,
     Meow,
     VpCore,
 }
@@ -33,7 +32,6 @@ pub enum KernelPreference {
     Mihomo,
     SingBox,
     Xray,
-    Shoes,
     Meow,
     VpCore,
 }
@@ -45,7 +43,6 @@ impl KernelPreference {
             Self::Mihomo => Some(KernelKind::Mihomo),
             Self::SingBox => Some(KernelKind::SingBox),
             Self::Xray => Some(KernelKind::Xray),
-            Self::Shoes => Some(KernelKind::Shoes),
             Self::Meow => Some(KernelKind::Meow),
             Self::VpCore => Some(KernelKind::VpCore),
         }
@@ -55,7 +52,7 @@ impl KernelPreference {
     pub const fn supports_chain_proxy(self) -> bool {
         match self {
             Self::Auto | Self::Mihomo | Self::Meow | Self::VpCore => true,
-            Self::SingBox | Self::Xray | Self::Shoes => false,
+            Self::SingBox | Self::Xray => false,
         }
     }
 }
@@ -126,7 +123,6 @@ impl KernelKind {
             Self::Mihomo => "mihomo",
             Self::Xray => "xray",
             Self::SingBox => "sing_box",
-            Self::Shoes => "shoes",
             Self::Meow => "meow",
             Self::VpCore => "vpcore",
         }
@@ -137,7 +133,6 @@ impl KernelKind {
             Self::Mihomo => "Mihomo",
             Self::Xray => "Xray",
             Self::SingBox => "Sing-box",
-            Self::Shoes => "Shoes",
             Self::Meow => "Meow",
             Self::VpCore => "VP-Core",
         }
@@ -154,7 +149,6 @@ impl KernelKind {
             Self::Mihomo => "MIHOMO_PATH",
             Self::Xray => "XRAY_PATH",
             Self::SingBox => "SING_BOX_PATH",
-            Self::Shoes => "SHOES_PATH",
             Self::Meow => "MEOW_PATH",
             Self::VpCore => "VPCORE_PATH",
         }
@@ -171,13 +165,11 @@ impl KernelKind {
             (Self::Mihomo, KernelPlatform::Windows) => "mihomo.exe",
             (Self::Xray, KernelPlatform::Windows) => "xray.exe",
             (Self::SingBox, KernelPlatform::Windows) => "sing-box.exe",
-            (Self::Shoes, KernelPlatform::Windows) => "shoes.exe",
             (Self::Meow, KernelPlatform::Windows) => "meow.exe",
             (Self::VpCore, KernelPlatform::Windows) => "vpcore.exe",
             (Self::Mihomo, KernelPlatform::Linux | KernelPlatform::MacOS) => "mihomo",
             (Self::Xray, KernelPlatform::Linux | KernelPlatform::MacOS) => "xray",
             (Self::SingBox, KernelPlatform::Linux | KernelPlatform::MacOS) => "sing-box",
-            (Self::Shoes, KernelPlatform::Linux | KernelPlatform::MacOS) => "shoes",
             (Self::Meow, KernelPlatform::Linux | KernelPlatform::MacOS) => "meow",
             (Self::VpCore, KernelPlatform::Linux | KernelPlatform::MacOS) => "vpcore",
         }
@@ -187,7 +179,6 @@ impl KernelKind {
         match self {
             Self::Mihomo => &["-v"],
             Self::Xray | Self::SingBox => &["version"],
-            Self::Shoes => &["-V"],
             Self::Meow | Self::VpCore => &["--version"],
         }
     }
@@ -197,7 +188,6 @@ impl KernelKind {
             Self::Mihomo => "mihomo",
             Self::Xray => "xray",
             Self::SingBox => "sing-box",
-            Self::Shoes => "shoes",
             Self::Meow => "meow",
             Self::VpCore => "vpcore",
         }
@@ -208,7 +198,6 @@ impl KernelKind {
             Self::Mihomo => "MetaCubeX/mihomo",
             Self::Xray => "XTLS/Xray-core",
             Self::SingBox => "SagerNet/sing-box",
-            Self::Shoes => "mateo-ki/shoes",
             Self::Meow => "meow-rs/meow-rs",
             Self::VpCore => "mateo-ki/vp_core",
         }
@@ -222,7 +211,6 @@ impl KernelKind {
     /// mihomo: Windows (.zip), Linux (.gz), macOS (.gz)
     /// xray: Windows (.zip), Linux (.zip), macOS (.zip)
     /// sing-box: Windows (.zip), Linux (.tar.gz), macOS (.tar.gz)
-    /// shoes: Windows (.zip), Linux (.tar.gz), macOS (.tar.gz)
     /// meow: Windows (.zip), Linux (.tar.gz), macOS (.tar.gz)
     pub fn asset_candidates_for(self, platform: KernelPlatform, tag: &str) -> Vec<String> {
         self.asset_candidates_for_arch(platform, tag, std::env::consts::ARCH)
@@ -263,17 +251,6 @@ impl KernelKind {
             (Self::SingBox, KernelPlatform::MacOS) => {
                 vec![format!("sing-box-{version}-darwin-amd64.tar.gz")]
             }
-            (Self::Shoes, KernelPlatform::Windows) => {
-                vec!["shoes-x86_64-pc-windows-msvc.zip".into()]
-            }
-            (Self::Shoes, KernelPlatform::Linux) => vec![
-                "shoes-x86_64-unknown-linux-gnu.tar.gz".into(),
-                "shoes-x86_64-unknown-linux-musl.tar.gz".into(),
-            ],
-            (Self::Shoes, KernelPlatform::MacOS) => vec![
-                "shoes-aarch64-apple-darwin.tar.gz".into(),
-                "shoes-x86_64-apple-darwin.tar.gz".into(),
-            ],
             (Self::Meow, KernelPlatform::Windows) => {
                 vec![format!("meow-{tag}-x86_64-pc-windows-msvc.zip")]
             }
@@ -321,7 +298,6 @@ impl KernelKind {
             Self::Mihomo => stem.starts_with("mihomo"),
             Self::Xray => stem == "xray",
             Self::SingBox => stem == "sing-box",
-            Self::Shoes => stem == "shoes",
             Self::Meow => stem == "meow",
             Self::VpCore => stem == "vpcore",
         }
@@ -383,23 +359,6 @@ impl KernelKind {
                     | "socks"
                     | "socks5"
             ),
-            Self::Shoes => matches!(
-                protocol.as_str(),
-                "ss" | "shadowsocks"
-                    | "vmess"
-                    | "vless"
-                    | "trojan"
-                    | "snell"
-                    | "anytls"
-                    | "naive"
-                    | "naiveproxy"
-                    | "wireguard"
-                    | "wg"
-                    | "http"
-                    | "https"
-                    | "socks"
-                    | "socks5"
-            ),
             Self::Meow => matches!(
                 protocol.as_str(),
                 "ss" | "shadowsocks"
@@ -449,8 +408,8 @@ impl KernelKind {
 
 pub fn preferred_proxy_kernel(protocol: &str) -> Option<KernelKind> {
     match protocol.to_ascii_lowercase().as_str() {
-        "snell" => Some(KernelKind::Shoes),
-        // naive 走 VP-Core 原生出站（Shoes 编译器暂未实现 naive 协议层）
+        "snell" => Some(KernelKind::Mihomo),
+        // naive 走 VP-Core 原生出站
         "naive" | "naiveproxy" => Some(KernelKind::VpCore),
         // juicity 仅有 VP-Core 原生实现（mihomo 不支持；sing-box 1.12 起已移除 juicity 出站）
         "juicity" => Some(KernelKind::VpCore),
@@ -462,7 +421,6 @@ pub fn preferred_proxy_kernel(protocol: &str) -> Option<KernelKind> {
         protocol if KernelKind::Mihomo.supports_proxy_protocol(protocol) => {
             Some(KernelKind::Mihomo)
         }
-        protocol if KernelKind::Shoes.supports_proxy_protocol(protocol) => Some(KernelKind::Shoes),
         _ => None,
     }
 }
@@ -475,7 +433,6 @@ pub fn select_proxy_kernel_with(
     let fallback = match preferred {
         Some(KernelKind::Mihomo) => Some(KernelKind::SingBox),
         Some(KernelKind::SingBox) => Some(KernelKind::Mihomo),
-        Some(KernelKind::Shoes) => Some(KernelKind::Mihomo),
         Some(KernelKind::Meow) => Some(KernelKind::Mihomo),
         Some(KernelKind::VpCore) => Some(KernelKind::Mihomo),
         Some(KernelKind::Xray) => unreachable!(),
@@ -483,12 +440,7 @@ pub fn select_proxy_kernel_with(
     };
     let mut candidates: Vec<KernelKind> = preferred.into_iter().collect();
     candidates.extend(fallback);
-    candidates.extend([
-        KernelKind::VpCore,
-        KernelKind::Meow,
-        KernelKind::Shoes,
-        KernelKind::Xray,
-    ]);
+    candidates.extend([KernelKind::VpCore, KernelKind::Meow, KernelKind::Xray]);
     for candidate in candidates {
         if candidate.supports_proxy_protocol(protocol) && available(candidate) {
             return Ok(candidate);
@@ -644,7 +596,7 @@ pub fn select_proxy_kernel_preference_with(
     available: impl Fn(KernelKind) -> bool,
 ) -> Result<KernelKind> {
     if let Some(kind) = preference.kernel() {
-        if (kind == KernelKind::Xray || kind == KernelKind::Shoes) && !allow_xray {
+        if kind == KernelKind::Xray && !allow_xray {
             // 当前内核不支持 TUN 模式，遇到不支持的模式默认退回 Mihomo
             if available(KernelKind::Mihomo) && KernelKind::Mihomo.supports_proxy_protocol(protocol)
             {
@@ -687,7 +639,7 @@ pub fn select_proxy_kernel_preference_with(
         return Ok(kind);
     }
     if allow_xray {
-        for fallback_kind in [KernelKind::Meow, KernelKind::Shoes, KernelKind::Xray] {
+        for fallback_kind in [KernelKind::Meow, KernelKind::Xray] {
             if fallback_kind.supports_proxy_protocol(protocol) && available(fallback_kind) {
                 return Ok(fallback_kind);
             }
@@ -798,7 +750,7 @@ fn select_proxy_kernel_preference_for_node_base(
         }
 
         // 3. TUN 模式不支持时默认退回 Mihomo
-        if (kind == KernelKind::Xray || kind == KernelKind::Shoes) && has_tun {
+        if kind == KernelKind::Xray && has_tun {
             tracing::warn!(
                 kernel = %kind.display_name(),
                 "当前内核不支持 TUN 模式，默认平滑回退至 Mihomo"
@@ -915,8 +867,8 @@ pub fn missing_kernel_for(
     available: impl Fn(KernelKind) -> bool,
 ) -> Option<KernelKind> {
     if let Some(kind) = preference.kernel() {
-        // Xray/Shoes 在 TUN 下是"不支持"，不是"没装"，别拿下载框去挡。
-        if (kind == KernelKind::Xray || kind == KernelKind::Shoes) && !system_mode {
+        // Xray 在 TUN 下是"不支持"，不是"没装"，别拿下载框去挡。
+        if kind == KernelKind::Xray && !system_mode {
             return None;
         }
         // 点名内核不支持该协议时：如果已有已安装内核支持该协议，不弹下载框；否则默认退回引导安装 Mihomo
@@ -1001,15 +953,14 @@ impl KernelManager {
     }
 
     pub async fn detect_all(&self) -> Vec<KernelInfo> {
-        let (mihomo, xray, sing_box, shoes, meow, vp_core) = tokio::join!(
+        let (mihomo, xray, sing_box, meow, vp_core) = tokio::join!(
             self.detect(KernelKind::Mihomo),
             self.detect(KernelKind::Xray),
             self.detect(KernelKind::SingBox),
-            self.detect(KernelKind::Shoes),
             self.detect(KernelKind::Meow),
             self.detect(KernelKind::VpCore)
         );
-        vec![mihomo, xray, sing_box, shoes, meow, vp_core]
+        vec![mihomo, xray, sing_box, meow, vp_core]
     }
 
     pub async fn check_updates_with_proxy(
@@ -1018,13 +969,12 @@ impl KernelManager {
     ) -> Result<Vec<KernelReleaseInfo>> {
         let updater = updater::KernelUpdater::new(managed_kernel_root(), proxy_url.as_deref())?;
         let infos = self.detect_all().await;
-        let (mihomo, xray, sing_box, shoes, meow, vp_core) = tokio::join!(
+        let (mihomo, xray, sing_box, meow, vp_core) = tokio::join!(
             updater.check(&infos[0]),
             updater.check(&infos[1]),
             updater.check(&infos[2]),
             updater.check(&infos[3]),
-            updater.check(&infos[4]),
-            updater.check(&infos[5])
+            updater.check(&infos[4])
         );
         let fallback = |res: Result<KernelReleaseInfo>, info: &KernelInfo| match res {
             Ok(release) => release,
@@ -1042,9 +992,8 @@ impl KernelManager {
             fallback(mihomo, &infos[0]),
             fallback(xray, &infos[1]),
             fallback(sing_box, &infos[2]),
-            fallback(shoes, &infos[3]),
-            fallback(meow, &infos[4]),
-            fallback(vp_core, &infos[5]),
+            fallback(meow, &infos[3]),
+            fallback(vp_core, &infos[4]),
         ])
     }
 
@@ -1386,7 +1335,7 @@ Use tags: with_gvisor
         );
         assert_eq!(
             missing_with("snell", KernelPreference::Auto, true, &[]),
-            Some(KernelKind::Shoes)
+            Some(KernelKind::Mihomo)
         );
     }
 
@@ -1398,27 +1347,15 @@ Use tags: with_gvisor
             Some(KernelKind::SingBox)
         );
         assert_eq!(
-            missing_with("ss", KernelPreference::Shoes, true, &[KernelKind::Mihomo]),
-            Some(KernelKind::Shoes)
-        );
-        assert_eq!(
             missing_with("ss", KernelPreference::Mihomo, true, &[KernelKind::Mihomo]),
-            None
-        );
-        assert_eq!(
-            missing_with("ss", KernelPreference::Shoes, true, &[KernelKind::Shoes]),
             None
         );
     }
 
     #[test]
     fn preflight_does_not_confuse_unsupported_with_not_installed() {
-        // Xray 和 Shoes 在 TUN 下是"不支持"，报这个就行，弹下载框反而误导。
+        // Xray 在 TUN 下是"不支持"，报这个就行，弹下载框反而误导。
         assert_eq!(missing_with("ss", KernelPreference::Xray, false, &[]), None);
-        assert_eq!(
-            missing_with("ss", KernelPreference::Shoes, false, &[]),
-            None
-        );
         // 不认识的协议同理：该走"暂不支持协议"那条错。
         assert_eq!(
             missing_with("quantum-tunnel", KernelPreference::Auto, true, &[]),
@@ -1431,7 +1368,6 @@ Use tags: with_gvisor
         assert_eq!(KernelKind::Mihomo.display_name(), "Mihomo");
         assert_eq!(KernelKind::Xray.display_name(), "Xray");
         assert_eq!(KernelKind::SingBox.display_name(), "Sing-box");
-        assert_eq!(KernelKind::Shoes.display_name(), "Shoes");
         assert_eq!(KernelKind::Meow.display_name(), "Meow");
         assert_eq!(KernelKind::VpCore.display_name(), "VP-Core");
     }
@@ -1523,11 +1459,6 @@ Use tags: with_gvisor
         assert!(info.path.is_none());
         assert!(info.version.is_none());
         assert!(info.message.contains("未找到"));
-
-        let shoes_info = manager.info_for_missing(KernelKind::Shoes);
-        assert_eq!(shoes_info.kind, KernelKind::Shoes);
-        assert!(!shoes_info.available);
-        assert!(shoes_info.message.contains("Shoes 未找到"));
     }
 
     #[test]
@@ -1535,7 +1466,6 @@ Use tags: with_gvisor
         assert_eq!(KernelKind::Mihomo.version_args(), &["-v"]);
         assert_eq!(KernelKind::Xray.version_args(), &["version"]);
         assert_eq!(KernelKind::SingBox.version_args(), &["version"]);
-        assert_eq!(KernelKind::Shoes.version_args(), &["-V"]);
         assert_eq!(KernelKind::Meow.version_args(), &["--version"]);
         assert_eq!(KernelKind::VpCore.version_args(), &["--version"]);
     }
@@ -1545,7 +1475,6 @@ Use tags: with_gvisor
         assert!(KernelKind::Mihomo.matches_archive_executable("mihomo-windows-amd64.exe"));
         assert!(KernelKind::Xray.matches_archive_executable("xray.exe"));
         assert!(KernelKind::SingBox.matches_archive_executable("sing-box.exe"));
-        assert!(KernelKind::Shoes.matches_archive_executable("shoes.exe"));
         assert!(KernelKind::Meow.matches_archive_executable("meow.exe"));
         assert!(KernelKind::VpCore.matches_archive_executable("vpcore.exe"));
         assert!(!KernelKind::Xray.matches_archive_executable("wv2ray.exe"));
@@ -1593,7 +1522,7 @@ Use tags: with_gvisor
         for protocol in ["tuic", "wireguard", "wg"] {
             assert_eq!(preferred_proxy_kernel(protocol), Some(KernelKind::SingBox));
         }
-        assert_eq!(preferred_proxy_kernel("snell"), Some(KernelKind::Shoes));
+        assert_eq!(preferred_proxy_kernel("snell"), Some(KernelKind::Mihomo));
         // naive 走 VP-Core 原生出站；ssh 走 Sing-box；mieru 由 mihomo 原生支持
         for protocol in ["naive", "naiveproxy"] {
             assert_eq!(preferred_proxy_kernel(protocol), Some(KernelKind::VpCore));
@@ -1716,10 +1645,6 @@ Use tags: with_gvisor
             "sing-box"
         );
         assert_eq!(
-            KernelKind::Shoes.executable_name_for(KernelPlatform::MacOS),
-            "shoes"
-        );
-        assert_eq!(
             KernelKind::VpCore.executable_name_for(KernelPlatform::MacOS),
             "vpcore"
         );
@@ -1738,10 +1663,6 @@ Use tags: with_gvisor
         assert_eq!(
             KernelKind::SingBox.asset_name_for(KernelPlatform::MacOS, "v1.8.0"),
             "sing-box-1.8.0-darwin-amd64.tar.gz"
-        );
-        assert_eq!(
-            KernelKind::Shoes.asset_name_for(KernelPlatform::MacOS, "v0.3.3"),
-            "shoes-aarch64-apple-darwin.tar.gz"
         );
         assert_eq!(
             KernelKind::VpCore.asset_name_for(KernelPlatform::MacOS, "v1.0.0"),
@@ -1917,8 +1838,7 @@ Use tags: with_gvisor
 
     #[test]
     fn test_unsupported_protocol_defaults_to_mihomo() {
-        let available =
-            |k| k == KernelKind::Xray || k == KernelKind::Mihomo || k == KernelKind::Shoes;
+        let available = |k| k == KernelKind::Xray || k == KernelKind::Mihomo;
 
         // 1. 用户指定 Xray，但节点为 wireguard（Xray 并不支持），默认退回 Mihomo
         let wg_node = Node {
@@ -1951,38 +1871,7 @@ Use tags: with_gvisor
         assert_eq!(res_kernel, KernelKind::Mihomo);
         assert!(notice.unwrap().contains("Mihomo"));
 
-        // 2. 用户指定 Shoes，但节点为 hysteria2（Shoes 不支持 hysteria2），默认退回 Mihomo
-        let hy2_node = Node {
-            id: "hy2-node".into(),
-            source_id: None,
-            protocol: "hysteria2".into(),
-            name: "Hysteria2 Node".into(),
-            server: "1.2.3.4".into(),
-            port: 443,
-            raw: "hysteria2://...".into(),
-            config: serde_json::json!({}),
-            country: None,
-            latency_ms: None,
-            latency_ok: None,
-            download_kbps: None,
-            latency_kernel: None,
-            latency_test_kind: None,
-            latency_tested_at: None,
-            created_at: chrono::Utc::now(),
-            updated_at: chrono::Utc::now(),
-        };
-        let (shoes_res, shoes_notice) = select_proxy_kernel_preference_for_node_with(
-            &hy2_node,
-            KernelPreference::Shoes,
-            true,
-            false,
-            available,
-        )
-        .expect("遇到不支持的协议默认退回 Mihomo");
-        assert_eq!(shoes_res, KernelKind::Mihomo);
-        assert!(shoes_notice.unwrap().contains("Mihomo"));
-
-        // 3. 用户指定 VpCore，节点为 masque（VP-Core 现已原生支持），直接选定 VpCore 无需回退
+        // 2. 用户指定 VpCore，节点为 masque（VP-Core 现已原生支持），直接选定 VpCore 无需回退
         let masque_node = Node {
             id: "masque-node".into(),
             source_id: None,

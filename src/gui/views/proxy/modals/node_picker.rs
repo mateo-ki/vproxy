@@ -126,7 +126,7 @@ impl VpnApp {
         if let Some((id, name)) = picked_node {
             match self.node_picker_target {
                 Some(crate::gui::types::NodePickerTarget::Speedtest) => {
-                    self.switch_proxy_node(id, name, "测速选择出站节点");
+                    self.speedtest_target_node_id = Some(id);
                 }
                 Some(crate::gui::types::NodePickerTarget::ChainEntry) => {
                     self.proxy_config.chain_entry_node_id = Some(id);

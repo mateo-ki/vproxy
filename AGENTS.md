@@ -1,6 +1,6 @@
 # AGENTS.md
 
-VProxy（D:\project\rust\vs\vpn-parser）：桌面代理工作站。GUI + clap CLI + HTTP API（src/api）+ 多内核编译器（mihomo / sing-box / VP-Core / xray / shoes / meow）。lib 名为 `vproxy`（rlib/cdylib/staticlib），未发布 crates.io，仅 path/git 依赖。
+VProxy（D:\project\rust\vs\vpn-parser）：桌面代理工作站。GUI + clap CLI + HTTP API（src/api）+ 多内核编译器（mihomo / sing-box / VP-Core / xray / meow）。lib 名为 `vproxy`（rlib/cdylib/staticlib），未发布 crates.io，仅 path/git 依赖。
 
 ## 硬规则：每次提交都要极致测试
 

@@ -214,7 +214,7 @@ pub struct Theme {
     pub accent: u32,
 }
 
-/// 顺序就是设置页里的顺序。保留默认香槟金，并加入方案二莫兰迪低饱和、Surge 拓扑绿与方案三 Apple Store 晶紫。
+/// 顺序就是设置页里的顺序。保留默认香槟金，并加入莫兰迪低饱和、Surge 拓扑绿与 Apple Store 晶紫。
 pub const THEMES: [Theme; 4] = [
     Theme {
         id: "theme-champagne",
@@ -228,12 +228,12 @@ pub const THEMES: [Theme; 4] = [
     },
     Theme {
         id: "theme-surge",
-        name: "Surge 拓扑绿 (方案二)",
+        name: "Surge 拓扑绿",
         accent: 0x3B_9E_56,
     },
     Theme {
         id: "theme-apple-store",
-        name: "Apple Store 晶紫 (方案三)",
+        name: "Apple Store 晶紫",
         accent: 0x9F_6D_D5,
     },
 ];
@@ -385,7 +385,7 @@ pub const RADIUS_CARD: u8 = 14;
 /// 导航项圆角。
 pub const RADIUS_NAV: u8 = 8;
 /// 按钮、标签页、状态胶囊圆角。
-pub const RADIUS_BTN: u8 = 8;
+pub const RADIUS_BTN: u8 = 6;
 /// 卡片内边距（`Margin` 在 egui 0.31 是 i8）。
 pub const PAD_CARD: i8 = 22;
 
@@ -453,18 +453,20 @@ pub fn apply(ctx: &egui::Context, id: &str, dark: bool) {
     visuals.error_fg_color = pal.danger;
     visuals.widgets.noninteractive.bg_stroke = Stroke::new(1.0_f32, pal.border_subtle);
     visuals.widgets.noninteractive.fg_stroke = Stroke::new(1.0_f32, pal.muted);
-    visuals.widgets.noninteractive.corner_radius = egui::CornerRadius::same(7);
+    visuals.widgets.noninteractive.corner_radius = egui::CornerRadius::same(6);
     visuals.widgets.inactive.bg_fill = pal.panel;
     visuals.widgets.inactive.bg_stroke = Stroke::new(1.0_f32, pal.border);
-    visuals.widgets.inactive.corner_radius = egui::CornerRadius::same(7);
+    visuals.widgets.inactive.corner_radius = egui::CornerRadius::same(6);
     visuals.widgets.hovered.bg_fill = pal.panel_hover;
     visuals.widgets.hovered.bg_stroke = Stroke::new(1.0_f32, pal.accent);
-    visuals.widgets.hovered.corner_radius = egui::CornerRadius::same(7);
+    visuals.widgets.hovered.corner_radius = egui::CornerRadius::same(6);
+    visuals.widgets.hovered.expansion = 0.0;
     visuals.widgets.active.bg_fill = pal.panel_hover;
     visuals.widgets.active.bg_stroke = Stroke::new(1.0_f32, pal.accent_hover);
-    visuals.widgets.active.corner_radius = egui::CornerRadius::same(7);
-    visuals.widgets.open.corner_radius = egui::CornerRadius::same(7);
-    visuals.menu_corner_radius = egui::CornerRadius::same(8);
+    visuals.widgets.active.corner_radius = egui::CornerRadius::same(6);
+    visuals.widgets.active.expansion = 0.0;
+    visuals.widgets.open.corner_radius = egui::CornerRadius::same(6);
+    visuals.menu_corner_radius = egui::CornerRadius::same(6);
     visuals.window_corner_radius = egui::CornerRadius::same(12);
     visuals.selection.bg_fill = pal.accent_bg;
     visuals.selection.stroke = Stroke::new(1.0_f32, pal.accent);
@@ -488,7 +490,8 @@ pub fn apply(ctx: &egui::Context, id: &str, dark: bool) {
     visuals.popup_shadow = shadow;
     visuals.window_shadow = shadow;
     style.spacing.item_spacing = Vec2::new(10.0, 9.0);
-    style.spacing.button_padding = Vec2::new(14.0, 8.0);
+    style.spacing.button_padding = Vec2::new(10.0, 6.0);
+    style.spacing.interact_size.y = 27.0;
     ctx.set_global_style(style);
 }
 

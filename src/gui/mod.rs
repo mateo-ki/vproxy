@@ -495,6 +495,7 @@ pub struct VpnApp {
     pub(crate) edit_speedtest_tcp_ping_only: bool,
     /// 测速弹窗（样本 1 Mac 仪表风格）状态与数据
     pub(crate) speedtest_server: String,
+    pub(crate) speedtest_target_node_id: Option<String>,
     pub(crate) speedtest_show_settings: bool,
     pub(crate) speedtest_last_ping_ms: Option<i64>,
     pub(crate) speedtest_last_dl_mbps: Option<f32>,
@@ -621,34 +622,6 @@ fn rules_editor_text_from_config(config: &MihomoConfigOptions) -> String {
                 .join("\n")
         })
         .unwrap_or_default()
-}
-
-/// 只保留 exports 目录里最新的 `keep` 份导出文件，其余删除（失败静默——清理
-/// 不值得打扰用户）。
-async fn prune_old_exports(dir: &std::path::Path, keep: usize) {
-    let Ok(mut entries) = tokio::fs::read_dir(dir).await else {
-        return;
-    };
-    let mut files: Vec<(std::time::SystemTime, std::path::PathBuf)> = Vec::new();
-    while let Ok(Some(entry)) = entries.next_entry().await {
-        let Ok(meta) = entry.metadata().await else {
-            continue;
-        };
-        if !meta.is_file() {
-            continue;
-        }
-        let modified = meta.modified().unwrap_or(std::time::SystemTime::UNIX_EPOCH);
-        files.push((modified, entry.path()));
-    }
-    if files.len() <= keep {
-        return;
-    }
-    files.sort_by_key(|file| std::cmp::Reverse(file.0));
-    for (_, path) in files.into_iter().skip(keep) {
-        if let Err(error) = tokio::fs::remove_file(&path).await {
-            tracing::debug!(%error, path = %path.display(), "清理旧导出文件失败");
-        }
-    }
 }
 
 impl VpnApp {
@@ -975,6 +948,7 @@ impl VpnApp {
             edit_speedtest_dedup_egress: false,
             edit_speedtest_tcp_ping_only: false,
             speedtest_server: "Cloudflare 全球 Anycast CDN".to_string(),
+            speedtest_target_node_id: None,
             speedtest_show_settings: false,
             speedtest_last_ping_ms: None,
             speedtest_last_dl_mbps: None,
@@ -1179,6 +1153,7 @@ impl VpnApp {
             dedup_egress: self.settings.speedtest_dedup_egress,
             tcp_ping_only: self.settings.speedtest_tcp_ping_only,
             speedtest_url: Some(self.settings.speedtest_url.clone()),
+            kernel_preference: KernelPreference::Auto,
         }
     }
 
@@ -2702,67 +2677,6 @@ impl VpnApp {
         });
     }
 
-    /// 测速完成后把可用节点（latency_ok=1）导出成 URI 列表文件：
-    /// data/exports/可用节点-<时间戳>.txt，可直接当订阅文件导入别的客户端，
-    /// 或再喂回本程序 parse/compile。放后台跑，失败只记日志不打扰界面。
-    fn export_alive_nodes_snapshot(&mut self) {
-        let db = self.db.clone();
-        let tx = self.tx.clone();
-        self.rt.spawn(async move {
-            let summaries = match db.load_all_node_summaries().await {
-                Ok(summaries) => summaries,
-                Err(error) => {
-                    tracing::warn!(%error, "读取节点摘要失败，跳过可用节点导出");
-                    return;
-                }
-            };
-            let alive_count = summaries
-                .iter()
-                .filter(|n| n.latency_ok == Some(true))
-                .count();
-            if alive_count == 0 {
-                return;
-            }
-            // 按测速延迟升序：最快的排最前，导入别的客户端时选路顺序即质量顺序。
-            let mut alive: Vec<&crate::models::NodeSummary> = summaries
-                .iter()
-                .filter(|n| n.latency_ok == Some(true))
-                .collect();
-            alive.sort_by_key(|n| n.latency_ms.unwrap_or(i64::MAX));
-            let mut nodes = Vec::with_capacity(alive.len());
-            for summary in alive {
-                if let Ok(Some(node)) = db.get_node(&summary.id).await {
-                    nodes.push(node);
-                }
-            }
-            let uris = crate::export::nodes_to_share_uris(&nodes);
-            if uris.is_empty() {
-                return;
-            }
-            let dir = crate::data_root().join("exports");
-            if tokio::fs::create_dir_all(&dir).await.is_err() {
-                tracing::warn!("创建导出目录失败，跳过可用节点导出");
-                return;
-            }
-            let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
-            let path = dir.join(format!("可用节点-{stamp}.txt"));
-            let mut body = uris.join("\n");
-            body.push('\n');
-            match tokio::fs::write(&path, body).await {
-                Ok(()) => {
-                    // 只留最新 20 份，测速频繁时 exports 目录不会无限膨胀。
-                    prune_old_exports(&dir, 20).await;
-                    let message = format!("已导出 {} 个可用节点 → {}", uris.len(), path.display());
-                    tracing::info!("{message}");
-                    let _ = tx.send(BgMsg::Status(message));
-                }
-                Err(error) => {
-                    tracing::warn!(%error, "写入可用节点导出文件失败");
-                }
-            }
-        });
-    }
-
     pub(crate) fn speedtest_all_sources(&mut self) {
         self.speedtester.reset_cancel();
         let speedtester = self.speedtester.clone();
@@ -3115,6 +3029,7 @@ impl VpnApp {
 
     pub(crate) fn speedtest_one(&mut self, id: String) {
         self.speedtester.reset_cancel();
+        self.speedtest_target_node_id = Some(id.clone());
         let st = self.speedtester.clone();
         let mut opts = self.speed_opts();
         opts.measure_download = false;
@@ -3153,28 +3068,45 @@ impl VpnApp {
         self.traffic_down_rate = 0;
         self.traffic_up_rate = 0;
         self.status = "正在测速... 阶段 1/3: 握手延迟与抖动探测".into();
-        // 若指定的测速节点与当前内核活动节点不一致，自动切换内核出口为该节点
-        if self.selected_proxy_node_id.as_deref() != Some(&id) {
-            if let Some(node) = self
-                .proxy_nodes
-                .iter()
-                .chain(self.nodes.iter())
-                .find(|n| n.id == id)
-                .cloned()
-            {
-                self.switch_proxy_node(node.id, node.name, "测速指定节点");
-            }
-        }
-        let proxy_port = if self.proxy_status.local_proxy_active() {
+        self.speedtest_target_node_id = Some(id.clone());
+
+        // 判定测速目标是否恰为当前运行中主代理的活动节点
+        let is_current_active = self.selected_proxy_node_id.as_deref() == Some(&id)
+            && self.proxy_status.local_proxy_active();
+        let main_proxy_port = if is_current_active {
             Some(self.proxy_status.mixed_port)
         } else {
             None
         };
+
         let target_server = self.speedtest_server.clone();
         let db = self.db.clone();
         let tx = self.tx.clone();
 
         self.rt.spawn(async move {
+            // 如果不是当前活动节点，拉起独立的临时测速内核，绝不切换、不干扰当前主代理！
+            let target_node = if !is_current_active {
+                db.get_node(&id).await.ok().flatten()
+            } else {
+                None
+            };
+
+            let _temp_runner = if !is_current_active {
+                if let Some(ref node) = target_node {
+                    crate::proxy_probe::spawn_single_node_probe_proxy(node).await.ok()
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+
+            let effective_port = if let Some(ref runner) = _temp_runner {
+                Some(runner.mixed_port)
+            } else {
+                main_proxy_port
+            };
+
             let (ping_url, download_url) = match target_server.as_str() {
                 "Apple 官方全球 CDN" | "Apple CDN Speed" => (
                     "https://www.apple.com",
@@ -3208,7 +3140,7 @@ impl VpnApp {
 
             let mut builder = reqwest::Client::builder()
                 .timeout(std::time::Duration::from_secs(12));
-            if let Some(port) = proxy_port {
+            if let Some(port) = effective_port {
                 if let Ok(proxy) = reqwest::Proxy::all(format!("http://127.0.0.1:{port}")) {
                     builder = builder.proxy(proxy);
                 }
@@ -3819,7 +3751,6 @@ impl VpnApp {
             crate::kernel::KernelKind::Mihomo,
             crate::kernel::KernelKind::Xray,
             crate::kernel::KernelKind::SingBox,
-            crate::kernel::KernelKind::Shoes,
             crate::kernel::KernelKind::Meow,
             crate::kernel::KernelKind::VpCore,
         ] {
@@ -4163,7 +4094,6 @@ impl VpnApp {
             crate::kernel::KernelKind::Mihomo,
             crate::kernel::KernelKind::SingBox,
             crate::kernel::KernelKind::Xray,
-            crate::kernel::KernelKind::Shoes,
             crate::kernel::KernelKind::Meow,
             crate::kernel::KernelKind::VpCore,
         ]
@@ -4501,7 +4431,7 @@ impl VpnApp {
         // 绝不要发起 UAC 提权重启，直接明确拦截提示用户切回系统代理或改选支持 TUN 的内核。
         if self.proxy_config.mode.has_tun() {
             if let Some(kind) = self.proxy_config.kernel_preference.kernel() {
-                if kind == KernelKind::Shoes || kind == KernelKind::Xray {
+                if kind == KernelKind::Xray {
                     self.status = format!(
                         "{} 不支持 TUN 虚拟网卡模式，请将出站模式切换为「系统代理」，或改选 Mihomo / VP-Core / Sing-box / Meow 内核运行 TUN 模式",
                         kind.display_name()
@@ -4586,7 +4516,6 @@ impl VpnApp {
                                     KernelKind::Mihomo => "mihomo",
                                     KernelKind::SingBox => "sing_box",
                                     KernelKind::Xray => "xray",
-                                    KernelKind::Shoes => "shoes",
                                     KernelKind::Meow => "meow",
                                     KernelKind::VpCore => "vpcore",
                                 });
@@ -4635,7 +4564,6 @@ impl VpnApp {
                                         KernelKind::Mihomo => "mihomo",
                                         KernelKind::SingBox => "sing_box",
                                         KernelKind::Xray => "xray",
-                                        KernelKind::Shoes => "shoes",
                                         KernelKind::Meow => "meow",
                                         KernelKind::VpCore => "vpcore",
                                     });
@@ -5010,12 +4938,6 @@ impl VpnApp {
 
     pub(crate) fn select_kernel_member(&mut self, group: String, target: String) {
         if group == "全部" || group == "all" || group.trim().is_empty() {
-            return;
-        }
-        // Shoes 内核只具有 PROXY 主策略组，不向其请求任何其它策略组切换，避免 404
-        let is_shoes = self.proxy_status.kernel == Some(KernelKind::Shoes)
-            || self.proxy_config.kernel_preference.kernel() == Some(KernelKind::Shoes);
-        if is_shoes && group != "PROXY" {
             return;
         }
         // 若内核已上报策略组列表，且该 group 并不存在于内核真实策略组中，则直接忽略，避免触发 404 错误

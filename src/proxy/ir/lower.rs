@@ -147,13 +147,9 @@ pub fn lower_options_to_ir(
         let in_tag = format!("inbound-{}", mapping.port);
         // 目标节点未解析成功（订阅重建后 ID 失效且无同名节点）时绝不静默回落主代理：
         // 用户以为在走日本，实际出口是主节点。跳过规则、不建监听器 = 诚实的失败，
-        // GUI 侧会把该映射标成「失效」提示重选。
-        let Some(target_name) = options
-            .port_mapping_nodes
-            .iter()
-            .find(|(port, _, _)| *port == mapping.port)
-            .map(|(_, name, _)| name.clone())
-        else {
+        // GUI 侧会把该映射标成「失效」提示重选。查法与启动就绪检测共用
+        // `mapping_target_name`，两边不许各写一份。
+        let Some(target_name) = options.mapping_target_name(mapping.port) else {
             tracing::warn!(
                 port = mapping.port,
                 name = %mapping.node_name,
@@ -585,6 +581,50 @@ mod port_mapping_lower_tests {
         assert!(
             inbound_rule_port(&plan, 10820).is_none(),
             "未解析的映射不得产生 IN-PORT 规则（更不得指向主节点）"
+        );
+    }
+
+    /// 回归：#15 的修复让编译端不给「目标未解析」的映射建监听器，那么启动就绪检测就
+    /// 不许再等那个端口 —— 否则内核刚起来就被判「启动失败」并杀掉。required_ports 是
+    /// 六个内核共用的形状，所以换个内核也一样起不来。
+    #[test]
+    fn an_unresolved_mapping_port_is_not_required_for_startup_readiness() {
+        use crate::kernel::KernelKind;
+        use crate::proxy::manager::required_startup_ports;
+
+        let unresolved = MihomoConfigOptions {
+            port_mappings: vec![mapping("m1", 10820, "stale-id", "日本1")],
+            port_mapping_nodes: vec![],
+            ..Default::default()
+        };
+        assert!(
+            inbound_rule_port(&lower_options_to_ir(&unresolved, Some(&test_node())), 10820)
+                .is_none(),
+            "前提不成立：编译端其实给这个端口建了规则"
+        );
+        let ports = required_startup_ports(KernelKind::Mihomo, &unresolved);
+        assert!(
+            !ports.contains(&10820),
+            "编译端不建监听，就绪端却还在等 10820（会把整个内核判死）：{ports:?}"
+        );
+
+        // 对照组：目标解析出来了就必须等，否则上面那条断言是在给自己鼓掌。
+        let resolved = MihomoConfigOptions {
+            port_mappings: vec![mapping("m2", 10821, "fresh-id", "日本2")],
+            port_mapping_nodes: vec![(
+                10821,
+                "日本2".into(),
+                serde_json::json!({ "name": "日本2" }),
+            )],
+            ..Default::default()
+        };
+        assert!(
+            inbound_rule_port(&lower_options_to_ir(&resolved, Some(&test_node())), 10821).is_some(),
+            "对照组坏了：已解析的映射没产生规则"
+        );
+        assert!(
+            required_startup_ports(KernelKind::Mihomo, &resolved).contains(&10821),
+            "已解析的映射端口必须纳入就绪检测"
         );
     }
 }

@@ -55,14 +55,12 @@ pub trait KernelAdapter: Send + Sync {
 pub struct MihomoAdapter;
 pub struct SingBoxAdapter;
 pub struct XrayAdapter;
-pub struct ShoesAdapter;
 pub struct MeowAdapter;
 pub struct VpCoreAdapter;
 
 pub static MIHOMO_ADAPTER: MihomoAdapter = MihomoAdapter;
 pub static SING_BOX_ADAPTER: SingBoxAdapter = SingBoxAdapter;
 pub static XRAY_ADAPTER: XrayAdapter = XrayAdapter;
-pub static SHOES_ADAPTER: ShoesAdapter = ShoesAdapter;
 pub static MEOW_ADAPTER: MeowAdapter = MeowAdapter;
 pub static VP_CORE_ADAPTER: VpCoreAdapter = VpCoreAdapter;
 
@@ -71,7 +69,6 @@ pub fn kernel_adapter(kernel: KernelKind) -> &'static dyn KernelAdapter {
         KernelKind::Mihomo => &MIHOMO_ADAPTER,
         KernelKind::SingBox => &SING_BOX_ADAPTER,
         KernelKind::Xray => &XRAY_ADAPTER,
-        KernelKind::Shoes => &SHOES_ADAPTER,
         KernelKind::Meow => &MEOW_ADAPTER,
         KernelKind::VpCore => &VP_CORE_ADAPTER,
     }
@@ -114,9 +111,9 @@ impl KernelAdapter for MihomoAdapter {
 
     fn required_ports(&self, options: &MihomoConfigOptions) -> Vec<u16> {
         let mut ports = vec![options.mixed_port, options.controller_port];
-        for mapping in &options.port_mappings {
-            if mapping.enabled && !ports.contains(&mapping.port) {
-                ports.push(mapping.port);
+        for port in options.mapping_ports_with_listener() {
+            if !ports.contains(&port) {
+                ports.push(port);
             }
         }
         ports
@@ -195,9 +192,9 @@ impl KernelAdapter for MeowAdapter {
 
     fn required_ports(&self, options: &MihomoConfigOptions) -> Vec<u16> {
         let mut ports = vec![options.mixed_port, options.controller_port];
-        for mapping in &options.port_mappings {
-            if mapping.enabled && !ports.contains(&mapping.port) {
-                ports.push(mapping.port);
+        for port in options.mapping_ports_with_listener() {
+            if !ports.contains(&port) {
+                ports.push(port);
             }
         }
         ports
@@ -271,10 +268,8 @@ impl KernelAdapter for SingBoxAdapter {
 
     fn required_ports(&self, options: &MihomoConfigOptions) -> Vec<u16> {
         let mut ports = vec![options.mixed_port];
-        for mapping in &options.port_mappings {
-            if mapping.enabled {
-                ports.push(mapping.port);
-            }
+        for port in options.mapping_ports_with_listener() {
+            ports.push(port);
         }
         ports
     }
@@ -353,10 +348,8 @@ impl KernelAdapter for XrayAdapter {
 
     fn required_ports(&self, options: &MihomoConfigOptions) -> Vec<u16> {
         let mut ports = vec![options.mixed_port];
-        for mapping in &options.port_mappings {
-            if mapping.enabled {
-                ports.push(mapping.port);
-            }
+        for port in options.mapping_ports_with_listener() {
+            ports.push(port);
         }
         ports
     }
@@ -378,79 +371,6 @@ impl KernelAdapter for XrayAdapter {
     ) -> Pin<Box<dyn std::future::Future<Output = Result<Vec<ProxyProbeResult>>> + Send + 'a>> {
         Box::pin(async move {
             crate::proxy::xray::verify_nodes_with_xray_progress_limited(
-                nodes,
-                timeout,
-                progress.map(|callback| move |state| callback(state)),
-                network_limit,
-                test_url,
-            )
-            .await
-        })
-    }
-}
-
-impl KernelAdapter for ShoesAdapter {
-    fn kind(&self) -> KernelKind {
-        KernelKind::Shoes
-    }
-
-    fn build_config(&self, node: &Node, options: MihomoConfigOptions) -> Result<Value> {
-        crate::proxy::shoes::build_shoes_config(node, options)
-    }
-
-    fn serialize_config(&self, config: &Value) -> Result<String> {
-        Ok(serde_yaml::to_string(config)?)
-    }
-
-    fn configure_command(&self, command: &mut Command, work_dir: &ProxyWorkDir) {
-        command.arg("--no-reload").arg(work_dir.config_path());
-    }
-
-    fn validation_args(&self, work_dir: &ProxyWorkDir) -> Option<Vec<std::ffi::OsString>> {
-        Some(vec![
-            "check".into(),
-            work_dir.config_path().as_os_str().to_owned(),
-        ])
-    }
-
-    fn readiness_port(&self, options: &MihomoConfigOptions) -> u16 {
-        if options.controller_port > 0 {
-            options.controller_port
-        } else {
-            options.mixed_port
-        }
-    }
-
-    fn required_ports(&self, options: &MihomoConfigOptions) -> Vec<u16> {
-        let mut ports = vec![options.mixed_port];
-        if options.controller_port > 0 {
-            ports.push(options.controller_port);
-        }
-        for mapping in &options.port_mappings {
-            if mapping.enabled && !ports.contains(&mapping.port) {
-                ports.push(mapping.port);
-            }
-        }
-        ports
-    }
-
-    fn batch_size(&self) -> usize {
-        64
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    fn verify_nodes<'a>(
-        &'a self,
-        nodes: Vec<Node>,
-        timeout: Duration,
-        progress: Option<&'a (dyn Fn(ProxyProbeProgress) + Send + Sync)>,
-        network_limit: Arc<Semaphore>,
-        _batch_size: usize,
-        _conditional_isolation: bool,
-        test_url: Option<String>,
-    ) -> Pin<Box<dyn std::future::Future<Output = Result<Vec<ProxyProbeResult>>> + Send + 'a>> {
-        Box::pin(async move {
-            crate::proxy::shoes::verify_nodes_with_shoes_progress_limited(
                 nodes,
                 timeout,
                 progress.map(|callback| move |state| callback(state)),
@@ -510,9 +430,9 @@ impl KernelAdapter for VpCoreAdapter {
         if options.controller_port > 0 {
             ports.push(options.controller_port);
         }
-        for mapping in &options.port_mappings {
-            if mapping.enabled && !ports.contains(&mapping.port) {
-                ports.push(mapping.port);
+        for port in options.mapping_ports_with_listener() {
+            if !ports.contains(&port) {
+                ports.push(port);
             }
         }
         ports

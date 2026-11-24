@@ -44,7 +44,7 @@ int32_t vpn_parse_nodes_count(const char* content);
 
 /**
  * @brief Compiles a node and options into the target kernel's configuration format.
- * @param kernel_kind Target kernel: "mihomo", "sing-box", "vp-core", "xray", "shoes", "meow".
+ * @param kernel_kind Target kernel: "mihomo", "sing-box", "vp-core", "xray", "meow".
  * @param node_json JSON representation of a Node object.
  * @param options_json Optional JSON of MihomoConfigOptions (pass NULL for defaults).
  * @return Configuration text (YAML or JSON) or error `{"error":"..."}`. Must be freed with vpn_free_string().

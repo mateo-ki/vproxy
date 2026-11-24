@@ -1,11 +1,12 @@
-use crate::gui::danger_btn;
 use crate::gui::icons::{icon_label, Icon};
 use crate::gui::theme;
 use crate::gui::view_models::nodes_vm::{NodeCardAction, NodesViewModel};
 use crate::gui::widgets::{card_frame, compact_node_card, panel_frame, section_title, sort_label};
 use crate::gui::VpnApp;
 use crate::speedtest::SpeedtestIntensity;
-use eframe::egui::{self, Color32, CornerRadius, Frame, Margin, RichText, Sense, Stroke, Ui};
+use eframe::egui::{
+    self, Color32, CornerRadius, Frame, Margin, Pos2, RichText, Sense, Stroke, StrokeKind, Ui, Vec2,
+};
 
 impl VpnApp {
     pub(crate) fn ui_nodes(&mut self, ui: &mut Ui) {
@@ -30,8 +31,8 @@ impl VpnApp {
         let tr_all_sources = crate::i18n::tr(lang, "全部订阅源");
         let tr_sources_label = crate::i18n::tr(lang, "订阅源");
         let tr_sort_label = crate::i18n::tr(lang, "排序:");
-        let tr_import_export = crate::i18n::tr(lang, "📥 导入/导出 ▼");
-        let tr_maintenance = crate::i18n::tr(lang, "🧹 维护清理 ▼");
+        let tr_import_export = crate::i18n::tr(lang, "导入/导出 ▼");
+        let tr_maintenance = crate::i18n::tr(lang, "维护清理 ▼");
         let tr_import_clip = crate::i18n::tr(lang, "📋 剪贴板导入节点/订阅");
         let tr_push_nodes = crate::i18n::tr(lang, "📤 推送可用节点到服务端");
         let tr_export_sub = crate::i18n::tr(lang, "导出订阅");
@@ -42,36 +43,28 @@ impl VpnApp {
         let tr_prune_stale = crate::i18n::tr(lang, "🍂 淘汰 7 天过期失效节点");
         let tr_dedup = crate::i18n::tr(lang, "🧹 物理去重 (同 IP:Port)");
 
-        // 节点类型统计：协议分布环形图 (Donut Chart) + 协议缩写徽标
-        if let Some(s) = self.stats.as_ref() {
-            if !s.protocol_stats.is_empty() {
-                let mut next_proto = None;
-                let mut next_lat = None;
+        // 1. 顶部整合卡片：搜索与快速筛选（所有按钮、胶囊、下拉框与搜索框严格统一 27px 高度，与反向剔除同质化源按钮一致）
+        const TOOLBAR_BTN_H: f32 = 27.0;
+        let mut page_changed = false;
+        Frame::NONE
+            .fill(theme::panel())
+            .stroke(Stroke::new(1.0_f32, theme::border_subtle()))
+            .corner_radius(CornerRadius::same(10))
+            .inner_margin(Margin::symmetric(14, 10))
+            .show(ui, |ui| {
+                ui.spacing_mut().interact_size.y = TOOLBAR_BTN_H;
+                ui.spacing_mut().button_padding = egui::vec2(10.0, 6.0);
 
-                ui.horizontal(|ui| {
-                    crate::gui::widgets::render_protocol_donut_chart(
-                        ui,
-                        &s.protocol_stats,
-                        s.node_count,
-                    );
-                    ui.add_space(8.0);
-
-                    ui.vertical(|ui| {
-                        crate::gui::widgets::render_node_health_bar(
-                            ui,
-                            s.alive_count,
-                            s.tested_count,
-                            s.node_count,
-                        );
-                        ui.add_space(3.0);
-
-                        let lat_stats = crate::gui::widgets::LatencySpectrumStats::from_latencies(
-                            self.nodes.iter().map(|n| n.latency_ms),
-                        );
-                        crate::gui::widgets::render_latency_spectrum(ui, &lat_stats);
-                        ui.add_space(4.0);
+                // 第一行：协议与可用性状态快速筛选胶囊行（置于筛选卡片内容顶部）
+                if let Some(s) = self.stats.as_ref() {
+                    if !s.protocol_stats.is_empty() {
+                        let mut next_proto = None;
+                        let mut next_lat = None;
 
                         ui.horizontal_wrapped(|ui| {
+                            ui.spacing_mut().item_spacing.x = 8.0;
+                            ui.spacing_mut().interact_size.y = TOOLBAR_BTN_H;
+                            ui.spacing_mut().button_padding = egui::vec2(10.0, 6.0);
                             let is_all =
                                 self.protocol_filter.is_empty() || self.protocol_filter == "all";
                             if crate::gui::widgets::protocol_stat_chip(
@@ -120,9 +113,10 @@ impl VpnApp {
                             if ui
                                 .add(
                                     egui::Button::new(RichText::new("全部状态").small().strong())
+                                        .min_size(egui::vec2(0.0, TOOLBAR_BTN_H))
                                         .fill(color_all)
                                         .stroke(stroke_all)
-                                        .corner_radius(CornerRadius::same(10)),
+                                        .corner_radius(CornerRadius::same(6)),
                                 )
                                 .clicked()
                             {
@@ -143,9 +137,10 @@ impl VpnApp {
                             if ui
                                 .add(
                                     egui::Button::new(RichText::new(label_alive).small().strong())
+                                        .min_size(egui::vec2(0.0, TOOLBAR_BTN_H))
                                         .fill(color_alive)
                                         .stroke(stroke_alive)
-                                        .corner_radius(CornerRadius::same(10)),
+                                        .corner_radius(CornerRadius::same(6)),
                                 )
                                 .clicked()
                             {
@@ -171,9 +166,10 @@ impl VpnApp {
                             if ui
                                 .add(
                                     egui::Button::new(RichText::new(label_untest).small().strong())
+                                        .min_size(egui::vec2(0.0, TOOLBAR_BTN_H))
                                         .fill(color_untest)
                                         .stroke(stroke_untest)
-                                        .corner_radius(CornerRadius::same(10)),
+                                        .corner_radius(CornerRadius::same(6)),
                                 )
                                 .clicked()
                             {
@@ -185,33 +181,28 @@ impl VpnApp {
                                 next_lat = Some((new_filter, false));
                             }
                         });
-                    });
-                });
 
-                if let Some(proto) = next_proto {
-                    self.protocol_filter = proto;
-                    filter_changed = true;
+                        if let Some(proto) = next_proto {
+                            self.protocol_filter = proto;
+                            filter_changed = true;
+                        }
+                        if let Some((lat, only_avail)) = next_lat {
+                            self.latency_filter = lat;
+                            self.only_available_nodes = only_avail;
+                            filter_changed = true;
+                        }
+
+                        ui.add_space(6.0);
+                        ui.separator();
+                        ui.add_space(6.0);
+                    }
                 }
-                if let Some((lat, only_avail)) = next_lat {
-                    self.latency_filter = lat;
-                    self.only_available_nodes = only_avail;
-                    filter_changed = true;
-                }
 
-                ui.add_space(8.0);
-            }
-        }
-
-        // 1. 顶部整合卡片：搜索与快速筛选
-        Frame::NONE
-            .fill(theme::panel())
-            .stroke(Stroke::new(1.0_f32, theme::border_subtle()))
-            .corner_radius(CornerRadius::same(10))
-            .inner_margin(Margin::symmetric(14, 10))
-            .show(ui, |ui| {
-                // 第一行：搜索、订阅源筛选与操作菜单组（批量测速、维护清理、导入/导出）
+                // 第二行：搜索、订阅源筛选与操作菜单组（批量测速、维护清理、导入/导出）
                 ui.horizontal_wrapped(|ui| {
                     ui.spacing_mut().item_spacing.x = 8.0;
+                    ui.spacing_mut().interact_size.y = TOOLBAR_BTN_H;
+                    ui.spacing_mut().button_padding = egui::vec2(10.0, 6.0);
                     self.render_nodes_toolbar_search_and_filters(
                         ui,
                         &mut filter_changed,
@@ -250,9 +241,11 @@ impl VpnApp {
                 ui.separator();
                 ui.add_space(6.0);
 
-                // 第二行：地区快速筛选胶囊行 + 排序下拉（紧随「其它」后面）
+                // 第三行：地区快速筛选胶囊行 + 排序下拉 + 翻页按钮（紧随排序下拉后面）
                 ui.horizontal_wrapped(|ui| {
                     ui.spacing_mut().item_spacing.x = 8.0;
+                    ui.spacing_mut().interact_size.y = TOOLBAR_BTN_H;
+                    ui.spacing_mut().button_padding = egui::vec2(10.0, 4.0);
                     ui.label(
                         RichText::new("地区:")
                             .small()
@@ -261,40 +254,16 @@ impl VpnApp {
                     );
                     for (val, lbl) in [
                         ("all", "全部"),
-                        ("HK", "🇭🇰 香港"),
-                        ("JP", "🇯🇵 日本"),
-                        ("US", "🇺🇸 美国"),
-                        ("SG", "🇸🇬 新加坡"),
-                        ("TW", "🇹🇼 台湾"),
-                        ("KR", "🇰🇷 韩国"),
-                        ("OTHER", "🌐 其它"),
+                        ("HK", "香港"),
+                        ("JP", "日本"),
+                        ("US", "美国"),
+                        ("SG", "新加坡"),
+                        ("TW", "台湾"),
+                        ("KR", "韩国"),
+                        ("OTHER", "其它"),
                     ] {
                         let is_active = self.region_filter == val;
-                        let text_color = if is_active {
-                            theme::accent_strong()
-                        } else {
-                            theme::text_secondary()
-                        };
-                        let pill = ui.add(
-                            egui::Button::new(
-                                RichText::new(lbl).small().strong().color(text_color),
-                            )
-                            .fill(if is_active {
-                                theme::accent_bg()
-                            } else {
-                                theme::page_bg()
-                            })
-                            .stroke(Stroke::new(
-                                1.0_f32,
-                                if is_active {
-                                    theme::accent()
-                                } else {
-                                    theme::border_subtle()
-                                },
-                            ))
-                            .corner_radius(CornerRadius::same(12)),
-                        );
-                        if pill.clicked() && !is_active {
+                        if render_region_chip(ui, is_active, lbl).clicked() && !is_active {
                             self.region_filter = val.to_string();
                             filter_changed = true;
                         }
@@ -303,32 +272,61 @@ impl VpnApp {
                     ui.separator();
 
                     // 排序下拉（紧随「其它」胶囊）
-                    ui.label(RichText::new(tr_sort_label).small().color(theme::muted()));
-                    egui::ComboBox::from_id_salt("sort_by")
-                        .selected_text(sort_label(&self.sort_by))
-                        .show_ui(ui, |ui| {
-                            let tr_lat = self.tr("延迟最低");
-                            let tr_spd = self.tr("下载速度");
-                            let tr_upd = self.tr("更新时间");
-                            let tr_nam = self.tr("节点名称");
-                            for (val, lbl) in [
-                                ("latency", tr_lat),
-                                ("download", tr_spd),
-                                ("updated", tr_upd),
-                                ("name", tr_nam),
-                            ] {
-                                if ui
-                                    .selectable_value(&mut self.sort_by, val.into(), lbl)
-                                    .changed()
-                                {
-                                    filter_changed = true;
+                    ui.label(
+                        RichText::new(tr_sort_label)
+                            .small()
+                            .strong()
+                            .color(theme::muted()),
+                    );
+                    show_compact_combo(ui, TOOLBAR_BTN_H, |ui| {
+                        egui::ComboBox::from_id_salt("sort_by")
+                            .selected_text(RichText::new(sort_label(&self.sort_by)).size(13.0))
+                            .show_ui(ui, |ui| {
+                                ui.spacing_mut().button_padding = egui::vec2(10.0, 4.0);
+                                let tr_lat = self.tr("延迟最低");
+                                let tr_spd = self.tr("下载速度");
+                                let tr_upd = self.tr("更新时间");
+                                let tr_nam = self.tr("节点名称");
+                                for (val, lbl) in [
+                                    ("latency", tr_lat),
+                                    ("download", tr_spd),
+                                    ("updated", tr_upd),
+                                    ("name", tr_nam),
+                                ] {
+                                    if ui
+                                        .selectable_value(&mut self.sort_by, val.into(), lbl)
+                                        .changed()
+                                    {
+                                        filter_changed = true;
+                                    }
                                 }
-                            }
-                        });
+                            });
+                    });
+
+                    ui.separator();
+
+                    // 翻页控制（紧随排序下拉后面）
+                    let pages = NodesViewModel::total_pages(self.node_total, self.page_size);
+                    if render_page_btn(ui, self.page > 1, "上一页")
+                        .on_hover_text(format!("第 {} / {} 页", self.page, pages))
+                        .clicked()
+                    {
+                        self.page = self.page.saturating_sub(1).max(1);
+                        page_changed = true;
+                    }
+                    if render_page_btn(ui, self.page < pages, "下一页")
+                        .on_hover_text(format!("第 {} / {} 页", self.page, pages))
+                        .clicked()
+                    {
+                        self.page = (self.page + 1).min(pages);
+                        page_changed = true;
+                    }
                 });
             });
         if filter_changed {
             self.page = 1;
+            self.reload_nodes();
+        } else if page_changed {
             self.reload_nodes();
         }
 
@@ -349,29 +347,6 @@ impl VpnApp {
         }
 
         ui.add_space(8.0);
-
-        ui.horizontal(|ui| {
-            let pages = NodesViewModel::total_pages(self.node_total, self.page_size);
-            ui.label(format!(
-                "第 {} / {} 页 · 共 {} 条",
-                self.page, pages, self.node_total
-            ));
-            if ui
-                .add_enabled(self.page > 1, egui::Button::new("上一页"))
-                .clicked()
-            {
-                self.page -= 1;
-                self.reload_nodes();
-            }
-            if ui
-                .add_enabled(self.page < pages, egui::Button::new("下一页"))
-                .clicked()
-            {
-                self.page += 1;
-                self.reload_nodes();
-            }
-        });
-        ui.add_space(6.0);
 
         if self.nodes.is_empty() {
             card_frame().show(ui, |ui| {
@@ -403,11 +378,18 @@ impl VpnApp {
         tr_all_sources: &str,
         tr_source_search_hint: &str,
     ) {
+        const TOOLBAR_BTN_H: f32 = 27.0;
+        ui.spacing_mut().interact_size.y = TOOLBAR_BTN_H;
+        ui.spacing_mut().button_padding = egui::vec2(10.0, 6.0);
+
         // 搜索框
         icon_label(ui, Icon::Search, 13.0, theme::text_secondary());
         let search_field = ui.add(
             egui::TextEdit::singleline(&mut self.keyword)
+                .font(egui::TextStyle::Small)
                 .desired_width(140.0)
+                .min_size(egui::vec2(0.0, TOOLBAR_BTN_H))
+                .vertical_align(egui::Align::Center)
                 .hint_text(tr_search_hint),
         );
         crate::gui::widgets::note_text_field(ui, &search_field);
@@ -435,6 +417,7 @@ impl VpnApp {
         ui.label(
             RichText::new(format!("{tr_sources_label}:"))
                 .small()
+                .strong()
                 .color(theme::muted()),
         );
         let source_label = if self.source_filter.is_empty() {
@@ -465,114 +448,120 @@ impl VpnApp {
             tr_all_sources.to_string()
         };
 
-        egui::ComboBox::from_id_salt("node_source_filter")
-            .selected_text(source_label)
-            .width(130.0)
-            .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
-            .show_ui(ui, |ui| {
-                ui.horizontal(|ui| {
-                    icon_label(ui, Icon::Search, 11.0, theme::muted());
-                    let search_edit = ui.add(
-                        egui::TextEdit::singleline(&mut self.source_search_query)
-                            .desired_width(140.0)
-                            .hint_text(tr_source_search_hint),
-                    );
-                    crate::gui::widgets::note_text_field(ui, &search_edit);
-                    if !self.source_search_query.is_empty()
-                        && ui
-                            .add(crate::gui::icons::icon_btn_square(Icon::Close, 11.0))
-                            .on_hover_text("清空搜索")
-                            .clicked()
-                    {
-                        self.source_search_query.clear();
-                    }
-                });
-                ui.separator();
-
-                egui::ScrollArea::vertical()
-                    .id_salt("nodes_source_filter_popup_scroll")
-                    .max_height(220.0)
-                    .show(ui, |ui| {
-                        let q = self.source_search_query.trim().to_lowercase();
-                        if ui
-                            .selectable_label(self.source_filter.is_empty(), tr_all_sources)
-                            .clicked()
+        show_compact_combo(ui, TOOLBAR_BTN_H, |ui| {
+            egui::ComboBox::from_id_salt("node_source_filter")
+                .selected_text(RichText::new(source_label).size(13.0))
+                .width(130.0)
+                .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+                .show_ui(ui, |ui| {
+                    ui.spacing_mut().button_padding = egui::vec2(10.0, 4.0);
+                    ui.horizontal(|ui| {
+                        icon_label(ui, Icon::Search, 11.0, theme::muted());
+                        let search_edit = ui.add(
+                            egui::TextEdit::singleline(&mut self.source_search_query)
+                                .desired_width(140.0)
+                                .hint_text(tr_source_search_hint),
+                        );
+                        crate::gui::widgets::note_text_field(ui, &search_edit);
+                        if !self.source_search_query.is_empty()
+                            && ui
+                                .add(crate::gui::icons::icon_btn_square(Icon::Close, 11.0))
+                                .on_hover_text("清空搜索")
+                                .clicked()
                         {
-                            if !self.source_filter.is_empty() {
-                                self.source_filter.clear();
-                                *filter_changed = true;
-                            }
-                            ui.close();
-                        }
-
-                        let ungrouped_src = self
-                            .sources
-                            .iter()
-                            .find(|s| s.id == crate::db::UNGROUPED_SOURCE_ID);
-                        let ungrouped_name =
-                            ungrouped_src.map(|s| s.name.as_str()).unwrap_or("导入节点");
-                        let ungrouped_count = ungrouped_src.map(|s| s.last_node_count).unwrap_or(0);
-                        let match_ungrouped = q.is_empty()
-                            || ungrouped_name.to_lowercase().contains(&q)
-                            || "导入节点".contains(&q)
-                            || "未分组".contains(&q)
-                            || "自建".contains(&q)
-                            || "剪贴板".contains(&q);
-                        if match_ungrouped {
-                            let is_ungrouped = self.source_filter == crate::db::UNGROUPED_SOURCE_ID;
-                            let label = if ungrouped_name == "导入节点" {
-                                format!("导入节点 ({ungrouped_count})")
-                            } else {
-                                format!("{ungrouped_name} ({ungrouped_count})")
-                            };
-                            if ui.selectable_label(is_ungrouped, label).clicked() {
-                                if self.source_filter != crate::db::UNGROUPED_SOURCE_ID {
-                                    self.source_filter = crate::db::UNGROUPED_SOURCE_ID.to_string();
-                                    *filter_changed = true;
-                                }
-                                ui.close();
-                            }
-                        }
-
-                        let mut matched = 0;
-                        for s in &self.sources {
-                            if s.id == crate::db::UNGROUPED_SOURCE_ID {
-                                continue;
-                            }
-                            if !q.is_empty() {
-                                let match_name = s.name.to_lowercase().contains(&q);
-                                let match_remark = s
-                                    .remark
-                                    .as_deref()
-                                    .unwrap_or("")
-                                    .to_lowercase()
-                                    .contains(&q);
-                                let match_url = s.url_template.to_lowercase().contains(&q);
-                                if !match_name && !match_remark && !match_url {
-                                    continue;
-                                }
-                            }
-                            matched += 1;
-                            let is_selected = self.source_filter == s.id;
-                            let label = format!("{} ({})", s.name, s.last_node_count);
-                            if ui.selectable_label(is_selected, label).clicked() {
-                                if self.source_filter != s.id {
-                                    self.source_filter = s.id.clone();
-                                    *filter_changed = true;
-                                }
-                                ui.close();
-                            }
-                        }
-
-                        if matched == 0 && !q.is_empty() {
-                            ui.label(
-                                RichText::new(self.tr("无匹配订阅源"))
-                                    .small()
-                                    .color(theme::muted()),
-                            );
+                            self.source_search_query.clear();
                         }
                     });
-            });
+                    ui.separator();
+
+                    egui::ScrollArea::vertical()
+                        .id_salt("nodes_source_filter_popup_scroll")
+                        .max_height(220.0)
+                        .show(ui, |ui| {
+                            let q = self.source_search_query.trim().to_lowercase();
+                            if ui
+                                .selectable_label(self.source_filter.is_empty(), tr_all_sources)
+                                .clicked()
+                            {
+                                if !self.source_filter.is_empty() {
+                                    self.source_filter.clear();
+                                    *filter_changed = true;
+                                }
+                                ui.close();
+                            }
+
+                            let ungrouped_src = self
+                                .sources
+                                .iter()
+                                .find(|s| s.id == crate::db::UNGROUPED_SOURCE_ID);
+                            let ungrouped_name =
+                                ungrouped_src.map(|s| s.name.as_str()).unwrap_or("导入节点");
+                            let ungrouped_count =
+                                ungrouped_src.map(|s| s.last_node_count).unwrap_or(0);
+                            let match_ungrouped = q.is_empty()
+                                || ungrouped_name.to_lowercase().contains(&q)
+                                || "导入节点".contains(&q)
+                                || "未分组".contains(&q)
+                                || "自建".contains(&q)
+                                || "剪贴板".contains(&q);
+                            if match_ungrouped {
+                                let is_ungrouped =
+                                    self.source_filter == crate::db::UNGROUPED_SOURCE_ID;
+                                let label = if ungrouped_name == "导入节点" {
+                                    format!("导入节点 ({ungrouped_count})")
+                                } else {
+                                    format!("{ungrouped_name} ({ungrouped_count})")
+                                };
+                                if ui.selectable_label(is_ungrouped, label).clicked() {
+                                    if self.source_filter != crate::db::UNGROUPED_SOURCE_ID {
+                                        self.source_filter =
+                                            crate::db::UNGROUPED_SOURCE_ID.to_string();
+                                        *filter_changed = true;
+                                    }
+                                    ui.close();
+                                }
+                            }
+
+                            let mut matched = 0;
+                            for s in &self.sources {
+                                if s.id == crate::db::UNGROUPED_SOURCE_ID {
+                                    continue;
+                                }
+                                if !q.is_empty() {
+                                    let match_name = s.name.to_lowercase().contains(&q);
+                                    let match_remark = s
+                                        .remark
+                                        .as_deref()
+                                        .unwrap_or("")
+                                        .to_lowercase()
+                                        .contains(&q);
+                                    let match_url = s.url_template.to_lowercase().contains(&q);
+                                    if !match_name && !match_remark && !match_url {
+                                        continue;
+                                    }
+                                }
+                                matched += 1;
+                                let is_selected = self.source_filter == s.id;
+                                let label = format!("{} ({})", s.name, s.last_node_count);
+                                if ui.selectable_label(is_selected, label).clicked() {
+                                    if self.source_filter != s.id {
+                                        self.source_filter = s.id.clone();
+                                        *filter_changed = true;
+                                    }
+                                    ui.close();
+                                }
+                            }
+
+                            if matched == 0 && !q.is_empty() {
+                                ui.label(
+                                    RichText::new(self.tr("无匹配订阅源"))
+                                        .small()
+                                        .color(theme::muted()),
+                                );
+                            }
+                        });
+                });
+        });
     }
 
     // 工具栏按钮的点击标志（&mut bool）与 i18n 文案（&str）一一对应按钮，全部调用点在同一渲染函数里，打包成结构体只会多一层间接。
@@ -599,10 +588,24 @@ impl VpnApp {
         tr_prune_stale: &str,
         tr_dedup: &str,
     ) {
+        const TOOLBAR_BTN_H: f32 = 27.0;
+        ui.spacing_mut().interact_size.y = TOOLBAR_BTN_H;
+        ui.spacing_mut().button_padding = egui::vec2(10.0, 4.0);
+
         // 1. 测速菜单 / 停止测速
         if self.speedtest_busy {
             if ui
-                .add(danger_btn("⏹ 停止测速"))
+                .add(
+                    egui::Button::new(
+                        RichText::new("停止测速")
+                            .size(13.0)
+                            .color(theme::text_secondary()),
+                    )
+                    .fill(theme::panel_hover())
+                    .stroke(Stroke::new(1.0_f32, theme::border_subtle()))
+                    .min_size(egui::vec2(0.0, TOOLBAR_BTN_H))
+                    .corner_radius(CornerRadius::same(6)),
+                )
                 .on_hover_text("正在批量测速中，点击立即停止并清理测速任务")
                 .clicked()
             {
@@ -610,7 +613,8 @@ impl VpnApp {
             }
         } else {
             ui.add_enabled_ui(!self.busy, |ui| {
-                ui.menu_button("⚡ 批量测速 ▼", |ui| {
+                ui.menu_button(RichText::new("批量测速 ▼").size(13.0), |ui| {
+                    ui.spacing_mut().button_padding = egui::vec2(10.0, 4.0);
                     if ui
                         .button("⚡ 测速当前页")
                         .on_hover_text("测试当前分页显示的节点")
@@ -661,7 +665,8 @@ impl VpnApp {
 
         // 2. 清理维护菜单
         ui.add_enabled_ui(!self.busy, |ui| {
-            ui.menu_button(tr_maintenance, |ui| {
+            ui.menu_button(RichText::new(tr_maintenance).size(13.0), |ui| {
+                ui.spacing_mut().button_padding = egui::vec2(10.0, 4.0);
                 *prune_stale = ui
                     .button(tr_prune_stale)
                     .on_hover_text("清理持续不可用的僵尸节点")
@@ -688,7 +693,8 @@ impl VpnApp {
         ui.separator();
 
         // 3. 导入与导出菜单
-        ui.menu_button(tr_import_export, |ui| {
+        ui.menu_button(RichText::new(tr_import_export).size(13.0), |ui| {
+            ui.spacing_mut().button_padding = egui::vec2(10.0, 4.0);
             let tr_import_local = self.tr("📁 导入本地 YAML / 配置文件...");
             if ui
                 .add_enabled(!self.busy, egui::Button::new(tr_import_local))
@@ -985,16 +991,18 @@ where
                                         ui.close();
                                     }
                                 });
-                                if double_clicked {
-                                    card_action = Some(NodeCardAction::Connect {
-                                        id: node.id.clone(),
-                                        name: node.name.clone(),
-                                    });
-                                } else if clicked {
-                                    card_action = Some(NodeCardAction::Select {
-                                        id: node.id.clone(),
-                                        name: node.name.clone(),
-                                    });
+                                if card_action.is_none() {
+                                    if double_clicked {
+                                        card_action = Some(NodeCardAction::Connect {
+                                            id: node.id.clone(),
+                                            name: node.name.clone(),
+                                        });
+                                    } else if clicked {
+                                        card_action = Some(NodeCardAction::Select {
+                                            id: node.id.clone(),
+                                            name: node.name.clone(),
+                                        });
+                                    }
                                 }
                             }
                         });
@@ -1083,6 +1091,141 @@ impl VpnApp {
             self.show_detail = false;
         }
     }
+}
+
+pub(crate) fn render_region_chip(ui: &mut Ui, selected: bool, label: &str) -> egui::Response {
+    let padding = Vec2::new(10.0, 6.0);
+    let galley = ui.painter().layout_no_wrap(
+        label.to_string(),
+        egui::FontId::proportional(13.0),
+        if selected {
+            theme::accent_strong()
+        } else {
+            theme::text_secondary()
+        },
+    );
+    let desired_size = Vec2::new(padding.x * 2.0 + galley.size().x, 27.0);
+    let (rect, resp) = ui.allocate_exact_size(desired_size, egui::Sense::click());
+    if ui.is_rect_visible(rect) {
+        let (bg_fill, border_stroke, text_color) = if selected {
+            (
+                theme::accent_bg(),
+                Stroke::new(1.0_f32, theme::accent()),
+                theme::accent_strong(),
+            )
+        } else if resp.hovered() {
+            (
+                theme::panel_hover(),
+                Stroke::new(1.0_f32, theme::border()),
+                theme::text_primary(),
+            )
+        } else {
+            (
+                theme::panel(),
+                Stroke::new(1.0_f32, theme::border_subtle()),
+                theme::text_secondary(),
+            )
+        };
+
+        ui.painter().rect(
+            rect,
+            CornerRadius::same(6),
+            bg_fill,
+            border_stroke,
+            StrokeKind::Inside,
+        );
+
+        let text_pos = Pos2::new(
+            rect.center().x - galley.size().x / 2.0,
+            (rect.center().y - galley.size().y / 2.0 - 0.5).round(),
+        );
+        ui.painter().galley(text_pos, galley, text_color);
+    }
+    resp
+}
+
+pub(crate) fn render_page_btn(ui: &mut Ui, enabled: bool, label: &str) -> egui::Response {
+    let padding = Vec2::new(10.0, 6.0);
+    let text_color = if enabled {
+        theme::text_secondary()
+    } else {
+        theme::muted()
+    };
+    let galley = ui.painter().layout_no_wrap(
+        label.to_string(),
+        egui::FontId::proportional(13.0),
+        text_color,
+    );
+    let desired_size = Vec2::new(padding.x * 2.0 + galley.size().x, 27.0);
+    let (rect, resp) = ui.allocate_exact_size(
+        desired_size,
+        if enabled {
+            egui::Sense::click()
+        } else {
+            egui::Sense::hover()
+        },
+    );
+    if ui.is_rect_visible(rect) {
+        let (bg_fill, border_stroke, fg) = if !enabled {
+            (
+                theme::panel(),
+                Stroke::new(1.0_f32, theme::border_subtle()),
+                theme::muted(),
+            )
+        } else if resp.is_pointer_button_down_on() {
+            (
+                theme::panel_hover(),
+                Stroke::new(1.0_f32, theme::accent()),
+                theme::accent_strong(),
+            )
+        } else if resp.hovered() {
+            (
+                theme::panel_hover(),
+                Stroke::new(1.0_f32, theme::border()),
+                theme::text_primary(),
+            )
+        } else {
+            (
+                theme::panel(),
+                Stroke::new(1.0_f32, theme::border_subtle()),
+                theme::text_secondary(),
+            )
+        };
+
+        ui.painter().rect(
+            rect,
+            CornerRadius::same(6),
+            bg_fill,
+            border_stroke,
+            StrokeKind::Inside,
+        );
+
+        let text_pos = Pos2::new(
+            rect.center().x - galley.size().x / 2.0,
+            (rect.center().y - galley.size().y / 2.0 - 0.5).round(),
+        );
+        ui.painter().galley(text_pos, galley, fg);
+    }
+    resp
+}
+
+fn show_compact_combo<R>(ui: &mut Ui, target_h: f32, add_combo: impl FnOnce(&mut Ui) -> R) -> R {
+    let prev_pad = ui.spacing().button_padding;
+    let prev_interact_y = ui.spacing().interact_size.y;
+    let prev_icon_w = ui.spacing().icon_width;
+    ui.spacing_mut().interact_size.y = target_h;
+    ui.spacing_mut().icon_width = 12.0;
+    let small_row_h = ui.fonts_mut(|f| f.row_height(&egui::TextStyle::Small.resolve(ui.style())));
+    let actual_h = small_row_h.max(12.0);
+    // egui 0.36 ComboBox 在 button_frame 与内容区会各调一次 expand2(button_padding)，
+    // 总高度 = actual_h + 4 * pad_y；pad_y 留足文字垂直呼吸空间防字体底部被截断。
+    let pad_y = ((target_h - actual_h) / 4.0).clamp(2.5, 4.0);
+    ui.spacing_mut().button_padding = egui::vec2(10.0, pad_y);
+    let out = add_combo(ui);
+    ui.spacing_mut().button_padding = prev_pad;
+    ui.spacing_mut().interact_size.y = prev_interact_y;
+    ui.spacing_mut().icon_width = prev_icon_w;
+    out
 }
 
 #[cfg(test)]
@@ -1270,5 +1413,112 @@ pub(crate) mod empty_pool_modal_tests {
             seen.contains("节点详情") && seen.contains("sample_server: 1.2.3.4"),
             "节点详情窗口应使用 Order::Tooltip 渲染在最高层，防策略组抽屉遮挡: {seen:?}"
         );
+    }
+
+    #[test]
+    fn all_target_buttons_and_widgets_share_unified_27px_height() {
+        let ctx = egui::Context::default();
+        theme::apply(&ctx, "theme-champagne", false);
+
+        const H: f32 = 27.0;
+        let mut kw = String::new();
+        let mut sort = "latency".to_string();
+
+        let _ = crate::gui::run_test_ui(&ctx, screen_input(), |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
+                ui.horizontal_wrapped(|ui| {
+                    ui.spacing_mut().interact_size.y = H;
+                    ui.spacing_mut().button_padding = egui::vec2(10.0, 6.0);
+
+                    // 1. 基准按钮：反向剔除同质化源
+                    let benchmark_prune = ui.add(crate::gui::icons::button_with_icon(
+                        Icon::Lightning,
+                        "反向剔除同质化源",
+                        theme::warning(),
+                    ));
+
+                    // 2. 策略组覆写：清空覆写、一键载入推荐规则、保存配置
+                    let btn_clear = ui.add(crate::gui::icons::button_with_icon(
+                        Icon::Trash,
+                        "清空覆写",
+                        theme::danger(),
+                    ));
+                    let btn_recommend = ui.add(crate::gui::icons::button_with_icon(
+                        Icon::Lightning,
+                        "一键载入推荐规则",
+                        theme::warning(),
+                    ));
+                    let btn_save = ui.add(crate::gui::icons::button_with_icon(
+                        Icon::Check,
+                        "保存配置",
+                        theme::accent_strong(),
+                    ));
+
+                    // 3. 内核管理：检查更新、卡片已是最新
+                    let btn_check_update = ui.add(
+                        egui::Button::new("检查更新")
+                            .min_size(egui::vec2(0.0, H))
+                            .corner_radius(CornerRadius::same(6)),
+                    );
+                    let btn_kernel_state = ui.add(
+                        egui::Button::new(RichText::new("✅ 已是最新").small().strong())
+                            .min_size(egui::vec2(0.0, H))
+                            .corner_radius(CornerRadius::same(6)),
+                    );
+
+                    // 4. 节点池：协议状态胶囊、状态按钮、搜索框、订阅源下拉、批量测速菜单、地区胶囊、翻页
+                    let chip_r = crate::gui::widgets::protocol_stat_chip(ui, "All", 18292, true);
+                    let status_r = ui.add(
+                        egui::Button::new(RichText::new("全部状态").small().strong())
+                            .min_size(egui::vec2(0.0, H))
+                            .corner_radius(CornerRadius::same(6)),
+                    );
+                    let search_r = ui.add(
+                        egui::TextEdit::singleline(&mut kw)
+                            .font(egui::TextStyle::Small)
+                            .desired_width(140.0)
+                            .min_size(egui::vec2(0.0, H))
+                            .vertical_align(egui::Align::Center)
+                            .hint_text("搜索..."),
+                    );
+                    let combo_r = show_compact_combo(ui, H, |ui| {
+                        egui::ComboBox::from_id_salt("test_combo")
+                            .selected_text(RichText::new("全部订阅源").size(13.0))
+                            .show_ui(ui, |ui| {
+                                let _ =
+                                    ui.selectable_value(&mut sort, "latency".into(), "延迟最低");
+                            })
+                            .response
+                    });
+                    let menu_r = ui
+                        .menu_button(RichText::new("批量测速 ▼").size(13.0), |_ui| {})
+                        .response;
+                    let pill_r = render_region_chip(ui, true, "全部");
+                    let prev_r = render_page_btn(ui, true, "上一页");
+
+                    for (name, r) in [
+                        ("benchmark_prune", benchmark_prune.rect),
+                        ("btn_clear", btn_clear.rect),
+                        ("btn_recommend", btn_recommend.rect),
+                        ("btn_save", btn_save.rect),
+                        ("btn_check_update", btn_check_update.rect),
+                        ("btn_kernel_state", btn_kernel_state.rect),
+                        ("chip", chip_r.rect),
+                        ("status", status_r.rect),
+                        ("search", search_r.rect),
+                        ("combo", combo_r.rect),
+                        ("menu", menu_r.rect),
+                        ("pill", pill_r.rect),
+                        ("prev", prev_r.rect),
+                    ] {
+                        assert!(
+                            (r.height() - H).abs() < 0.1,
+                            "{name} height expected {H}, got {} (rect={r:?})",
+                            r.height()
+                        );
+                    }
+                });
+            });
+        });
     }
 }

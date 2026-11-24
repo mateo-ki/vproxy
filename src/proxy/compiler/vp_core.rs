@@ -503,7 +503,7 @@ impl BackendCompiler for VpCoreCompiler {
                             } else {
                                 let cat = code.to_ascii_lowercase();
                                 if !existing_geosites.contains(&cat)
-                                    && super::shoes::has_geosite_category(&cat)
+                                    && crate::geo::has_geosite_category(&cat)
                                 {
                                     let target = parts[2];
                                     new_rules.push(serde_json::Value::String(format!(

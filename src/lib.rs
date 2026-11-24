@@ -1,5 +1,5 @@
 //! VProxy: A modern cross-platform proxy workstation for collecting subscriptions,
-//! parsing nodes, and managing proxy cores (Mihomo, Sing-box, VP-Core, Meow, Xray, Shoes).
+//! parsing nodes, and managing proxy cores (Mihomo, Sing-box, VP-Core, Meow, Xray).
 
 pub mod api;
 pub mod app_update;

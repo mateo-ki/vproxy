@@ -207,10 +207,9 @@ pub fn protocol_stat_chip(
     };
 
     const PAD_X: f32 = 7.0;
-    const PAD_Y: f32 = 4.0;
     const GAP: f32 = 6.0;
     let badge_w = if code.len() >= 3 { 25.0 } else { 21.0 };
-    const BADGE_H: f32 = 18.0;
+    const BADGE_H: f32 = 16.0;
 
     let count_str = format!("{count}");
     let count_galley = egui::WidgetText::from(
@@ -226,7 +225,7 @@ pub fn protocol_stat_chip(
     .into_galley(ui, None, f32::INFINITY, egui::TextStyle::Body);
 
     let total_w = PAD_X * 2.0 + badge_w + GAP + count_galley.size().x;
-    let total_h = (BADGE_H.max(count_galley.size().y) + PAD_Y * 2.0).max(26.0);
+    let total_h = 27.0_f32;
     let size = egui::vec2(total_w, total_h);
 
     let (rect, response) = ui.allocate_at_least(size, Sense::click());
@@ -242,7 +241,7 @@ pub fn protocol_stat_chip(
 
         painter.rect(
             rect,
-            CornerRadius::same(theme::RADIUS_BTN),
+            CornerRadius::same(6),
             bg,
             stroke,
             egui::StrokeKind::Inside,

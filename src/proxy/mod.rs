@@ -6,7 +6,6 @@ pub mod manager;
 pub mod mihomo;
 pub mod rule_io;
 pub mod script_override;
-pub mod shoes;
 pub mod sing_box;
 pub mod tracer;
 pub mod types;

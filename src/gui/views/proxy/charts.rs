@@ -745,9 +745,9 @@ impl VpnApp {
         prepared: bool,
     ) {
         let gap = 8.0_f32;
-        let is_compact = self.settings.dashboard_ui_mode == "compact";
-        let row1_h = if is_compact { 216.0_f32 } else { 168.0_f32 };
-        let row2_h = if is_compact { 187.0_f32 } else { 148.0_f32 };
+        let is_compact = true;
+        let row1_h = 216.0_f32;
+        let row2_h = 187.0_f32;
         let _row3_h = 154.0_f32;
 
         // 宽度预算先扣除每张卡自身的左右内边距（Frame 外框 = 内容 + margin）。
@@ -826,33 +826,7 @@ impl VpnApp {
                 }
             });
 
-            // --- 第 2 行：活动连接 (与服务状态+分流规则之和等宽) | 软件性能 (出站模式上方) | 内核性能 (策略组上方) ---
-            if !is_compact {
-                let row_mid_h = 122.0_f32;
-                let row_top = ui.cursor().min;
-                let row_w = ui.available_width();
-                ui.allocate_ui(egui::vec2(row_w, row_mid_h), |ui| {
-                    for (x, w, kind) in [
-                        (x_status, conns_w, 0usize),
-                        (x_mode, mode_w, 1),
-                        (x_perf, perf_w, 2),
-                    ] {
-                        let origin = egui::pos2(row_top.x + x, row_top.y);
-                        let card_rect =
-                            Rect::from_min_size(origin, egui::vec2(w + 28.0, row_mid_h));
-                        ui.scope_builder(
-                            egui::UiBuilder::new().max_rect(card_rect),
-                            |ui| match kind {
-                                0 => self.dash_connections_card(ui, w, row_mid_h - 20.0),
-                                1 => self.dash_software_perf_card(ui, w, row_mid_h - 20.0),
-                                _ => self.dash_kernel_perf_card(ui, w, row_mid_h - 20.0),
-                            },
-                        );
-                    }
-                });
-            }
-
-            // --- 第 3 行：服务状态 | 分流规则 | 出站模式 | 策略组（按列 x 精确放置） ---
+            // --- 第 2 行：服务状态 | 分流规则 | 出站模式 | 策略组（按列 x 精确放置） ---
             let row_top = ui.cursor().min;
             let row_w = ui.available_width();
             let row_h2 = row2_h + 20.0;
@@ -871,8 +845,8 @@ impl VpnApp {
                             1 => self.dash_rules_card(ui, w, row2_h),
                             2 => {
                                 ui.spacing_mut().item_spacing.y = 0.0;
-                                let card_gap = if is_compact { 8.0_f32 } else { 5.0_f32 };
-                                let card1_h = if is_compact { 82.0_f32 } else { 62.0_f32 };
+                                let card_gap = 8.0_f32;
+                                let card1_h = 82.0_f32;
                                 let card2_h = row_h2 - card_gap - card1_h;
 
                                 // 采用绝对几何定位渲染两张子卡片，彻底免疫内部 scope_builder 光标收缩造成的两卡重叠
@@ -895,7 +869,7 @@ impl VpnApp {
                 }
             });
 
-            // --- 第 4 行（底部代理控制栏）：三卡对齐状态卡宽度，系统代理/TUN 平分剩余 ---
+            // --- 第 3 行（底部代理控制栏）：三卡对齐状态卡宽度，系统代理/TUN 平分剩余 ---
             self.render_bottom_proxy_bar(ui, total_w, gap, 3, Some((conns_w, groups_w, perf_w)));
 
             // 底部预留舒适呼吸内边距，消除滚动到底部时的边界摩擦与振荡
@@ -1674,14 +1648,16 @@ impl VpnApp {
                                             }
                                         });
 
-                                        if double_clicked {
-                                            clicked_node = Some(node.clone());
-                                            force_manual = true;
-                                        } else if clicked {
-                                            if !is_active && manual_mode {
+                                        if menu_action.is_none() {
+                                            if double_clicked {
                                                 clicked_node = Some(node.clone());
-                                            } else if !manual_mode {
-                                                clicked_auto = true;
+                                                force_manual = true;
+                                            } else if clicked {
+                                                if !is_active && manual_mode {
+                                                    clicked_node = Some(node.clone());
+                                                } else if !manual_mode {
+                                                    clicked_auto = true;
+                                                }
                                             }
                                         }
                                     }
@@ -1776,7 +1752,7 @@ impl VpnApp {
         let width = match drawer {
             DashboardDrawer::Connections => (screen.width() * 0.72).clamp(760.0, 1400.0),
             DashboardDrawer::Traffic => (screen.width() * 0.58).clamp(620.0, 960.0),
-            DashboardDrawer::Rules => (screen.width() * 0.70).clamp(580.0, 1400.0),
+            DashboardDrawer::Rules => (screen.width() * 0.72).clamp(680.0, 1400.0),
             DashboardDrawer::Groups => (screen.width() * 0.70).clamp(580.0, 1400.0),
             DashboardDrawer::Logs => (screen.width() * 0.50).clamp(500.0, 800.0),
             DashboardDrawer::Network => (screen.width() * 0.50).clamp(540.0, 780.0),
@@ -2360,7 +2336,6 @@ impl VpnApp {
                                     let combo_label = match current_pref {
                                         KernelPreference::Auto => "自动选择",
                                         KernelPreference::Mihomo => "Mihomo",
-                                        KernelPreference::Shoes => "Shoes",
                                         KernelPreference::SingBox => "Sing-box",
                                         KernelPreference::Xray => "Xray",
                                         KernelPreference::Meow => "Meow",
@@ -2405,11 +2380,6 @@ impl VpnApp {
                                                 &mut current_pref,
                                                 KernelPreference::Mihomo,
                                                 "Mihomo",
-                                            );
-                                            ui.selectable_value(
-                                                &mut current_pref,
-                                                KernelPreference::Shoes,
-                                                "Shoes",
                                             );
                                             ui.selectable_value(
                                                 &mut current_pref,
@@ -3262,13 +3232,8 @@ impl VpnApp {
                 // 顶栏：标题始终保持在卡片顶部，与其他卡片标题等高平齐
                 dash_label(ui, "出站模式", sub_label);
 
-                // 下方胶囊切换器在剩余区域内自适应居中排布
-                let seg_h = 24.0_f32;
-                let title_h = 18.0_f32;
-                let remain_h = (inner.height() - title_h).max(0.0);
-                let slack = (remain_h - seg_h).max(0.0);
-                let mid_gap = (slack * 0.42).clamp(4.0, 16.0);
-                ui.add_space(mid_gap);
+                let slack = ((inner.height() - 18.0 - 24.0) * 0.5).max(2.0);
+                ui.add_space(slack - 8.0);
 
                 let seg_w = ui.available_width();
 
@@ -3280,9 +3245,8 @@ impl VpnApp {
                     .inner_margin(Margin::symmetric(2, 2))
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
-                            ui.spacing_mut().item_spacing.x = 2.0;
-                            ui.spacing_mut().button_padding = Vec2::new(1.0, 1.0);
-                            let bw = ((seg_w - 4.0 - 4.0) / 3.0).floor().max(20.0);
+                            ui.spacing_mut().item_spacing.x = 3.0;
+                            let bw = ((seg_w - 12.0) / 3.0).floor();
                             for (mode, name) in [
                                 (RoutingMode::Rule, "规则"),
                                 (RoutingMode::Global, "全局"),
@@ -3295,12 +3259,12 @@ impl VpnApp {
                                     (Color32::TRANSPARENT, Stroke::NONE, theme::text_secondary())
                                 };
                                 let btn = egui::Button::new(
-                                    RichText::new(name).size(11.5).strong().color(text_color),
+                                    RichText::new(name).size(11.0).strong().color(text_color),
                                 )
                                 .fill(fill)
                                 .stroke(stroke)
                                 .corner_radius(CornerRadius::same(7))
-                                .min_size(Vec2::new(bw, 22.0));
+                                .min_size(Vec2::new(bw, 20.0));
                                 if ui.add(btn).clicked() && !active && !is_busy {
                                     if self.proxy_status.local_proxy_active() {
                                         self.hot_switch_routing_mode(mode);
@@ -3394,13 +3358,8 @@ impl VpnApp {
                     });
                 });
 
-                // 下方节点选择区自适应居中排布，留白充足且绝不贴底
-                let avail_h = (inner.height() - 20.0).max(0.0);
-                let slack = (avail_h - 40.0).max(0.0);
-                let chain_space = (slack * 0.45).clamp(4.0, 16.0);
-                let row_gap = (slack * 0.22).clamp(3.0, 8.0);
-
-                ui.add_space(chain_space);
+                // 前置行上间距 +5px (原 -5.0 + 5.0 = 0.0)
+                ui.add_space(0.0);
 
                 // 下栏：两行展示（前置: 节点 [清理] / 后置: 节点 [清理]）
                 let can_interact = supports_chain && !is_busy;
@@ -3551,8 +3510,7 @@ impl VpnApp {
                         }
                     });
 
-                    // 后置行自适应间距，前后置节点边界清晰且绝不贴底
-                    ui.add_space(row_gap);
+                    ui.add_space(6.0);
 
                     // 第二行：后置: 节点 [清理图标]
                     ui.horizontal(|ui| {
@@ -3818,6 +3776,7 @@ impl VpnApp {
         });
     }
 
+    #[allow(dead_code)]
     fn dash_connections_card(&mut self, ui: &mut Ui, w: f32, h: f32) {
         let outer = Rect::from_min_size(ui.cursor().min, Vec2::new(w + 28.0, h + 20.0));
         dash_card_at(ui, outer);
@@ -3974,6 +3933,7 @@ impl VpnApp {
         });
     }
 
+    #[allow(dead_code)]
     fn dash_software_perf_card(&mut self, ui: &mut Ui, w: f32, h: f32) {
         let outer = Rect::from_min_size(ui.cursor().min, Vec2::new(w + 28.0, h + 20.0));
         dash_card_at(ui, outer);
@@ -4059,6 +4019,7 @@ impl VpnApp {
         });
     }
 
+    #[allow(dead_code)]
     fn dash_kernel_perf_card(&mut self, ui: &mut Ui, w: f32, h: f32) {
         let is_running = matches!(
             self.proxy_status.state,
@@ -4086,7 +4047,6 @@ impl VpnApp {
                             match self.proxy_config.kernel_preference {
                                 KernelPreference::Auto => "自动",
                                 KernelPreference::Mihomo => "Mihomo",
-                                KernelPreference::Shoes => "Shoes",
                                 KernelPreference::SingBox => "Sing-box",
                                 KernelPreference::Xray => "Xray",
                                 KernelPreference::Meow => "Meow",
@@ -4195,6 +4155,7 @@ impl VpnApp {
 
 /// 方案 1：极简微型环形仪表盘 (Apple Watch / Activity 风格 Ring Gauge)
 /// 单个指标独立环形进度条，中心为关键读数，底部为指标标签与细粒度数值
+#[allow(dead_code)]
 fn render_ring_gauge(
     ui: &mut Ui,
     col_w: f32,

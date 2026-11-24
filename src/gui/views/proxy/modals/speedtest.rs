@@ -858,10 +858,12 @@ impl VpnApp {
                     .rect_filled(screen, 0.0, Color32::from_black_alpha(110));
             });
 
-        // 获取当前选中活动节点
-        let selected_node = self
-            .selected_proxy_node_id
+        // 获取测速目标节点：优先使用用户在测速弹窗中指定的节点，未指定时默认使用当前活动节点
+        let target_node_id = self
+            .speedtest_target_node_id
             .as_ref()
+            .or(self.selected_proxy_node_id.as_ref());
+        let selected_node = target_node_id
             .and_then(|id| {
                 self.proxy_nodes
                     .iter()
@@ -1051,17 +1053,8 @@ impl VpnApp {
                                         btn_painter.galley(icon_pos, galley_icon, pill_fg);
                                         btn_painter.galley(text_pos, galley_text, pill_fg);
 
-                                        let is_proxy_active = self.proxy_status.local_proxy_active()
-                                            || matches!(
-                                                self.proxy_status.state,
-                                                crate::proxy::types::ProxyState::Running | crate::proxy::types::ProxyState::Degraded
-                                            );
                                         let btn_tip = if selected_node.is_some() {
-                                            if is_proxy_active {
-                                                "开始代理测速（通过当前代理节点出站转发）"
-                                            } else {
-                                                "开始直连测速（代理未启动，流量直接连接测速服务器）"
-                                            }
+                                            "开始节点测速（独立测速，不切换当前主代理活动出口）"
                                         } else {
                                             "请先点击选择测速节点"
                                         };
@@ -1261,17 +1254,26 @@ impl VpnApp {
                                                         self.proxy_status.state,
                                                         crate::proxy::types::ProxyState::Running | crate::proxy::types::ProxyState::Degraded
                                                     );
-                                                let (mode_text, mode_col, tip) = if is_proxy_active {
-                                                    (
-                                                        "代理测速",
-                                                        Color32::from_rgb(0, 122, 255), // 醒目 Apple 蓝
-                                                        "代理内核运行中：测速数据流经由当前节点代理出站转发",
-                                                    )
+                                                let (mode_text, mode_col, tip) = if let Some(ref node) = selected_node {
+                                                    let is_curr = self.selected_proxy_node_id.as_deref() == Some(&node.id) && is_proxy_active;
+                                                    if is_curr {
+                                                        (
+                                                            "当前活动节点",
+                                                            Color32::from_rgb(0, 122, 255), // 醒目 Apple 蓝
+                                                            "当前代理节点：直接通过运行中代理端口出站测速",
+                                                        )
+                                                    } else {
+                                                        (
+                                                            "独立测速",
+                                                            Color32::from_rgb(16, 185, 129), // 绿色
+                                                            "独立临时内核测速：不影响且不切换当前主代理活动节点",
+                                                        )
+                                                    }
                                                 } else {
                                                     (
-                                                        "直连测速",
-                                                        theme::warning(), // 告警琥珀黄
-                                                        "代理内核未启动：测速数据流由本机网络直接连接测速服务器",
+                                                        "未选节点",
+                                                        theme::muted(),
+                                                        "请先点击选择测速节点",
                                                     )
                                                 };
                                                 ui.label(RichText::new(mode_text).size(12.0).strong().color(mode_col))

@@ -3,7 +3,7 @@ use crate::gui::theme;
 use crate::gui::widgets::{panel_frame, section_title};
 use crate::gui::VpnApp;
 use crate::proxy::ProxyMode;
-use eframe::egui::{self, CornerRadius, Frame, Margin, RichText, Stroke, Ui};
+use eframe::egui::{self, CornerRadius, RichText, Stroke, Ui};
 
 impl VpnApp {
     pub(crate) fn ui_proxy_security(&mut self, ui: &mut Ui) {
@@ -129,6 +129,10 @@ impl VpnApp {
                             .strong()
                             .size(14.0),
                     );
+                    help_tooltip(
+                        ui,
+                        "【功能说明】\n在内核层全面拦截 WebRTC 专用的 STUN / TURN 穿透端口（标准端口 3478-3479、TLS 端口 5349-5350、Google 专有段 19302-19309）以及所有 STUN/TURN/WebRTC 探测域名，阻断恶意网站通过 JavaScript 探针探测并获取访客本地真实物理公网 IP。\n\n【防护建议】\n系统代理仅拦截标准 TCP HTTP 流量。浏览器的 WebRTC 探针为探测 P2P 直连，默认会直接通过物理网卡发送原始 UDP 握手包，绕过系统代理造成真实公网 IP 泄露。\n建议一键切换至「TUN 虚拟网卡模式」以获得 100% 彻底防护；或在 Chrome/Edge 打开 chrome://flags/#webrtc-ip-handling-policy 设为 Disable non-proxied UDP。",
+                    );
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         let (btn_text, btn_fill, btn_color) = if self.proxy_config.block_webrtc {
                             ("● 已启用防御", theme::accent_bg(), theme::accent_strong())
@@ -150,79 +154,6 @@ impl VpnApp {
                         }
                     });
                 });
-                ui.add_space(4.0);
-                ui.label(
-                    RichText::new("在内核层全面拦截 WebRTC 专用的 STUN / TURN 穿透端口（标准端口 3478-3479、TLS 端口 5349-5350、Google 专有段 19302-19309）以及所有 STUN/TURN/WebRTC 探测域名，阻断恶意网站通过 JavaScript 探针探测并获取访客本地真实物理公网 IP。")
-                        .small()
-                        .color(theme::text_secondary()),
-                );
-
-                if self.proxy_config.block_webrtc {
-                    ui.add_space(6.0);
-                    if self.proxy_config.mode == ProxyMode::Tun {
-                        Frame::NONE
-                            .fill(theme::accent().gamma_multiply(0.08))
-                            .stroke(Stroke::new(1.0_f32, theme::accent().gamma_multiply(0.3)))
-                            .corner_radius(CornerRadius::same(6))
-                            .inner_margin(Margin::symmetric(10, 6))
-                            .show(ui, |ui| {
-                                ui.horizontal(|ui| {
-                                    icon_label(ui, Icon::Check, 13.0, theme::accent());
-                                    ui.label(
-                                        RichText::new("已处于「TUN 虚拟网卡模式」：代理内核已全面接管系统级 UDP/TCP 流量，所有 WebRTC STUN 穿透握手包在网卡层被强制丢弃，真实 IP 0 泄露。")
-                                            .small()
-                                            .color(theme::accent()),
-                                    );
-                                });
-                            });
-                    } else {
-                        Frame::NONE
-                            .fill(theme::warning().gamma_multiply(0.09))
-                            .stroke(Stroke::new(1.0_f32, theme::warning().gamma_multiply(0.38)))
-                            .corner_radius(CornerRadius::same(6))
-                            .inner_margin(Margin::symmetric(10, 7))
-                            .show(ui, |ui| {
-                                ui.vertical(|ui| {
-                                    ui.horizontal(|ui| {
-                                        icon_label(ui, Icon::Alert, 14.0, theme::warning());
-                                        ui.label(
-                                            RichText::new("⚠️ 当前处于「系统代理」模式：浏览器 WebRTC 会绕过 HTTP 代理！")
-                                                .strong()
-                                                .small()
-                                                .color(theme::warning()),
-                                        );
-                                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                            if ui
-                                                .add(
-                                                    egui::Button::new(
-                                                        RichText::new("⚡ 立即切换为 TUN 模式")
-                                                            .small()
-                                                            .strong()
-                                                            .color(theme::accent_strong()),
-                                                    )
-                                                    .fill(theme::accent_bg())
-                                                    .stroke(Stroke::new(1.0_f32, theme::accent().gamma_multiply(0.4)))
-                                                    .corner_radius(CornerRadius::same(5)),
-                                                )
-                                                .on_hover_text("点击切换为 TUN 虚拟网卡模式，全面接管系统 UDP 流量以 100% 阻断 WebRTC 泄露")
-                                                .clicked()
-                                            {
-                                                self.proxy_config.mode = ProxyMode::Tun;
-                                                changed = true;
-                                                self.status = "已切换为 TUN 虚拟网卡模式，若代理已启动请重启代理使 TUN 生效".to_string();
-                                            }
-                                        });
-                                    });
-                                    ui.add_space(3.0);
-                                    ui.label(
-                                        RichText::new("原理：系统代理仅拦截标准 TCP HTTP 流量。浏览器的 WebRTC 探针为探测 P2P 直连，默认会直接通过物理网卡发送原始 UDP 握手包，绕过系统代理造成真实公网 IP 泄露。\n建议：一键切换至「TUN 虚拟网卡模式」以获得 100% 彻底防护；或在 Chrome/Edge 打开 chrome://flags/#webrtc-ip-handling-policy 设为 Disable non-proxied UDP。")
-                                            .small()
-                                            .color(theme::text_secondary()),
-                                    );
-                                });
-                            });
-                    }
-                }
             });
 
             ui.add_space(8.0);
@@ -238,6 +169,10 @@ impl VpnApp {
                             .strong()
                             .size(14.0),
                     );
+                    help_tooltip(
+                        ui,
+                        "【功能说明】\n智能分流国内/海外 DNS 解析策略（国内直连域名走阿里/腾讯高保真解析，海外代理域名走 Cloudflare/Google DoH 并由出海节点远程加密发出），开启 respect-rules 防泄漏引擎，彻底消除因境内 DNS 代查海外域名导致的广州/境内归属地暴露。\n\n【防护建议】\n系统代理模式下，Windows 系统底层 DNS 解析与浏览器预取仍可能经本地物理网卡发送至运营商 DNS。推荐使用「TUN 虚拟网卡模式」全局劫持并加密所有 DNS 请求。",
+                    );
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         let (mode_badge, mode_color) = if self.proxy_config.mode == ProxyMode::Tun {
                             ("● TUN 全局接管保护中", theme::accent())
@@ -247,31 +182,6 @@ impl VpnApp {
                         ui.label(RichText::new(mode_badge).small().color(mode_color));
                     });
                 });
-                ui.add_space(4.0);
-                ui.label(
-                    RichText::new("智能分流国内/海外 DNS 解析策略（国内直连域名走阿里/腾讯高保真解析，海外代理域名走 Cloudflare/Google DoH 并由出海节点远程加密发出），开启 respect-rules 防泄漏引擎，彻底消除因境内 DNS 代查海外域名导致的广州/境内归属地暴露。")
-                        .small()
-                        .color(theme::text_secondary()),
-                );
-
-                if self.proxy_config.mode != ProxyMode::Tun {
-                    ui.add_space(6.0);
-                    Frame::NONE
-                        .fill(theme::warning().gamma_multiply(0.09))
-                        .stroke(Stroke::new(1.0_f32, theme::warning().gamma_multiply(0.38)))
-                        .corner_radius(CornerRadius::same(6))
-                        .inner_margin(Margin::symmetric(10, 6))
-                        .show(ui, |ui| {
-                            ui.horizontal(|ui| {
-                                icon_label(ui, Icon::Alert, 13.0, theme::warning());
-                                ui.label(
-                                    RichText::new("提示：系统代理模式下，Windows 系统底层 DNS 解析与浏览器预取仍可能经本地物理网卡发送至运营商 DNS。推荐使用「TUN 虚拟网卡模式」全局劫持 DNS 请求。")
-                                        .small()
-                                        .color(theme::warning()),
-                                );
-                            });
-                        });
-                }
             });
 
             ui.add_space(8.0);
@@ -286,6 +196,10 @@ impl VpnApp {
                         RichText::new("隐私与行为追踪广告过滤 (Tracker & Telemetry Blocking)")
                             .strong()
                             .size(14.0),
+                    );
+                    help_tooltip(
+                        ui,
+                        "【功能说明】\n在代理内核中自动加载专业过滤规则库（category-ads-all、privacy、reject），拦截第三方用户行为数据采集、埋点统计 SDK（Google Analytics、友盟等）及网页弹窗横幅广告，大幅提升隐私安全并加速页面加载。",
                     );
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         let (btn_text, btn_fill, btn_color) = if self.proxy_config.block_trackers {
@@ -308,12 +222,6 @@ impl VpnApp {
                         }
                     });
                 });
-                ui.add_space(4.0);
-                ui.label(
-                    RichText::new("在代理内核中自动加载专业过滤规则库（category-ads-all、privacy、reject），拦截第三方用户行为数据采集、埋点统计 SDK（Google Analytics、友盟等）及网页弹窗横幅广告，大幅提升隐私安全并加速页面加载。")
-                        .small()
-                        .color(theme::text_secondary()),
-                );
             });
 
             ui.add_space(8.0);
@@ -381,4 +289,15 @@ impl VpnApp {
             self.save_proxy_config();
         }
     }
+}
+
+fn help_tooltip(ui: &mut Ui, text: &str) {
+    ui.add(
+        egui::Button::new(RichText::new("?").strong().size(11.0).color(theme::muted()))
+            .min_size(egui::vec2(18.0, 18.0))
+            .corner_radius(CornerRadius::same(9))
+            .fill(theme::panel_hover())
+            .stroke(Stroke::new(1.0, theme::border_subtle())),
+    )
+    .on_hover_text(text);
 }

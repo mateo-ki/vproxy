@@ -13,7 +13,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::constants::proxy::{MEOW_TAG, MIHOMO_TAG, SHOES_TAG, VPCORE_TAG};
+use crate::constants::proxy::{MEOW_TAG, MIHOMO_TAG, VPCORE_TAG};
 
 const MAX_ARCHIVE_SIZE: u64 = 150 * 1024 * 1024;
 static INSTALL_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
@@ -1294,39 +1294,6 @@ fn fallback_release(kind: KernelKind) -> Option<GithubRelease> {
         });
     }
 
-    if kind == KernelKind::Shoes {
-        let (name, digest, size) = match KernelPlatform::current() {
-            KernelPlatform::Windows => (
-                "shoes-x86_64-pc-windows-msvc.zip",
-                "sha256:95cd4e23ce3fba5c3d897a4855afa203c02174842da7fc62e045860bf5f56ade",
-                8_962_632_u64,
-            ),
-            KernelPlatform::Linux => (
-                "shoes-x86_64-unknown-linux-gnu.tar.gz",
-                "sha256:b9b4a6ff966b1e2fa3401c262c491d3f77083241ae804863b93d1da2f69d5ca8",
-                9_858_226_u64,
-            ),
-            KernelPlatform::MacOS => (
-                "shoes-x86_64-apple-darwin.tar.gz",
-                "sha256:8894d2de642dfa8f4d51ddc0365e7e687cb39ac4bb028423fb2ccfea4bd82eaf",
-                9_602_068_u64,
-            ),
-        };
-        return Some(GithubRelease {
-            tag_name: SHOES_TAG.to_string(),
-            assets: vec![GithubAsset {
-                name: name.to_string(),
-                browser_download_url: format!(
-                    "https://github.com/mateo-ki/shoes/releases/download/{SHOES_TAG}/{name}"
-                ),
-                size,
-                digest: Some(digest.to_string()),
-            }],
-            fallback: true,
-            from_cache: false,
-        });
-    }
-
     if kind == KernelKind::VpCore {
         // 实测（2026-11-16，v1.7.8 官方 Release，SHA256SUMS.txt + ghfast 实下复核）：
         // Windows zip 8,537,398 字节；Linux musl 8,171,110；macOS darwin 7,111,177。
@@ -1919,7 +1886,8 @@ mod tests {
             KernelKind::Mihomo,
             KernelKind::Xray,
             KernelKind::SingBox,
-            KernelKind::Shoes,
+            KernelKind::Meow,
+            KernelKind::VpCore,
         ] {
             let name = staging_name(kind);
             assert_ne!(name, staging_name(kind), "不同更新尝试不能复用暂存路径");
@@ -1961,13 +1929,6 @@ mod tests {
             Some(KernelArchive::Zip)
         );
 
-        let shoes = KernelKind::Shoes.asset_name_for(KernelPlatform::Linux, "v0.3.3");
-        assert_eq!(shoes, "shoes-x86_64-unknown-linux-gnu.tar.gz");
-        assert_eq!(
-            KernelArchive::from_asset_name(&shoes),
-            Some(KernelArchive::TarGz)
-        );
-
         // 反向对照：Windows 那三行必须一个都没被 Linux 的形状污染。
         assert_eq!(
             KernelKind::Mihomo.asset_name_for(KernelPlatform::Windows, "v1.19.32"),
@@ -1977,19 +1938,14 @@ mod tests {
             KernelKind::Xray.asset_name_for(KernelPlatform::Windows, "v26.3.27"),
             "Xray-windows-64.zip"
         );
-        assert_eq!(
-            KernelKind::Shoes.asset_name_for(KernelPlatform::Windows, "v0.3.3"),
-            "shoes-x86_64-pc-windows-msvc.zip"
-        );
     }
 
-    /// 条目名判据不许只认 `.exe`：Linux 容器里的可执行文件就叫 `mihomo` / `xray` / `sing-box` / `shoes`。
+    /// 条目名判据不许只认 `.exe`：Linux 容器里的可执行文件就叫 `mihomo` / `xray` / `sing-box`。
     #[test]
     fn archive_entries_match_without_an_exe_suffix() {
         assert!(KernelKind::Mihomo.matches_archive_executable("mihomo"));
         assert!(KernelKind::Xray.matches_archive_executable("xray"));
         assert!(KernelKind::SingBox.matches_archive_executable("sing-box"));
-        assert!(KernelKind::Shoes.matches_archive_executable("shoes"));
         assert!(KernelKind::Mihomo.matches_archive_executable("mihomo-windows-amd64.exe"));
         assert!(!KernelKind::Xray.matches_archive_executable("geoip.dat"));
         assert!(!KernelKind::Xray.matches_archive_executable("wv2ray"));

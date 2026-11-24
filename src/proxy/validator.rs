@@ -42,9 +42,7 @@ impl KernelValidator {
         std::fs::create_dir_all(&temp_dir)?;
 
         let config_file_name = match kernel {
-            KernelKind::Mihomo | KernelKind::Shoes | KernelKind::Meow | KernelKind::VpCore => {
-                "config.yaml"
-            }
+            KernelKind::Mihomo | KernelKind::Meow | KernelKind::VpCore => "config.yaml",
             _ => "config.json",
         };
         let config_path = temp_dir.join(config_file_name);
@@ -87,9 +85,6 @@ impl KernelValidator {
                 cmd.current_dir(&effective_asset_dir);
                 cmd.env("XRAY_LOCATION_ASSET", &effective_asset_dir);
                 cmd.arg("run").arg("-test").arg("-c").arg(&config_path);
-            }
-            KernelKind::Shoes => {
-                cmd.arg("check").arg(&config_path);
             }
             KernelKind::Meow => {
                 // meow 与 mihomo 同构：geo 从 -d home 的发现路径加载

@@ -7,7 +7,9 @@ use crate::gui::widgets::{
     status_badge,
 };
 use crate::gui::VpnApp;
-use eframe::egui::{self, Color32, CornerRadius, Frame, Margin, RichText, Stroke, Ui};
+use eframe::egui::{
+    self, Color32, CornerRadius, Frame, Margin, Pos2, RichText, Stroke, StrokeKind, Ui, Vec2,
+};
 
 /// 订阅源行操作菜单动作：右键菜单与操作列「更多」下拉共用。
 #[derive(Debug, Clone)]
@@ -79,36 +81,57 @@ impl VpnApp {
 
         // 第 1 行：新建 拉取全部 代理拉取全部 导入订阅 导出订阅 清空全部
         ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 8.0;
             if ui
-                .add(primary_btn(self.tr("新建")))
+                .add_enabled(
+                    !self.busy,
+                    icons::button_with_icon(Icon::Plus, self.tr("新建"), theme::accent_strong()),
+                )
                 .on_hover_text("新增订阅源配置")
                 .clicked()
             {
                 self.open_create_form();
             }
             if ui
-                .add_enabled(!self.busy, egui::Button::new(self.tr("拉取全部")))
+                .add_enabled(
+                    !self.busy,
+                    icons::button_with_icon(Icon::Sync, self.tr("拉取全部"), theme::text_primary()),
+                )
                 .on_hover_text("后台拉取全部已启用的订阅源")
                 .clicked()
             {
                 self.fetch_all();
             }
             if ui
-                .add_enabled(!self.busy, egui::Button::new(self.tr("代理拉取全部")))
+                .add_enabled(
+                    !self.busy,
+                    icons::button_with_icon(Icon::Shield, self.tr("代理拉取全部"), theme::accent()),
+                )
                 .on_hover_text("通过当前运行中的本地代理拉取全部启用源（防止 GitHub / Raw 阻断）")
                 .clicked()
             {
                 self.fetch_all_via_proxy();
             }
             if ui
-                .add_enabled(!self.busy, egui::Button::new(self.tr("导入订阅")))
+                .add_enabled(
+                    !self.busy,
+                    icons::button_with_icon(
+                        Icon::Clipboard,
+                        self.tr("导入订阅"),
+                        theme::text_primary(),
+                    ),
+                )
                 .on_hover_text("从剪贴板导入 JSON 格式订阅源，自动跳过重复项")
                 .clicked()
             {
                 self.import_sources_from_clipboard();
             }
             if ui
-                .button(self.tr("导出订阅"))
+                .add(icons::button_with_icon(
+                    Icon::Export,
+                    self.tr("导出订阅"),
+                    theme::text_primary(),
+                ))
                 .on_hover_text("导出全部订阅源至剪贴板")
                 .clicked()
             {
@@ -117,7 +140,7 @@ impl VpnApp {
             if ui
                 .add_enabled(
                     !self.busy && !self.sources.is_empty(),
-                    icons::danger_icon_btn(Icon::Trash, self.tr("清空全部")),
+                    icons::button_with_icon(Icon::Trash, self.tr("清空全部"), theme::danger()),
                 )
                 .on_hover_text("清空全部订阅源及关联节点数据库分片")
                 .clicked()
@@ -130,15 +153,22 @@ impl VpnApp {
 
         // 第 2 行：接入openRung节点 原生注册warp节点 反向剔除同质化源
         ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 8.0;
             if ui
-                .add_enabled(!self.busy, egui::Button::new(format!("🌐 {}", self.tr("接入 OpenRung 节点"))))
+                .add_enabled(
+                    !self.busy,
+                    icons::button_with_icon(Icon::Globe, self.tr("接入 OpenRung 节点"), theme::accent()),
+                )
                 .on_hover_text("一键接入 https://github.com/openrung/openrung 官方中继服务，实时获取健康 VLESS-REALITY 节点")
                 .clicked()
             {
                 self.add_openrung_source();
             }
             if ui
-                .add_enabled(!self.busy, egui::Button::new(format!("⚡ {}", self.tr("原生注册 WARP 节点"))))
+                .add_enabled(
+                    !self.busy,
+                    icons::button_with_icon(Icon::Lightning, self.tr("原生注册 WARP 节点"), theme::warning()),
+                )
                 .on_hover_text("原生向 Cloudflare 注册并获取 57 个 WARP MASQUE 节点（免任何 GitHub 账号与仓库）")
                 .clicked()
             {
@@ -147,14 +177,19 @@ impl VpnApp {
 
             if self.is_plugin_installed("gist") {
                 if ui
-                    .add_enabled(!self.busy, egui::Button::new(format!("🔍 {}", self.tr("Gist 发现"))))
+                    .add_enabled(
+                        !self.busy,
+                        icons::button_with_icon(Icon::Search, self.tr("Gist 发现"), theme::accent_strong()),
+                    )
                     .on_hover_text("扫描 GitHub Gist 搜索结果，自动发现公开节点与订阅")
                     .clicked()
                 {
                     self.discover_gists();
                 }
                 if ui
-                    .button(format!("⚙️ {}", self.tr("Gist 配置")))
+                    .add(
+                        icons::button_with_icon(Icon::Gear, self.tr("Gist 配置"), theme::text_secondary()),
+                    )
                     .on_hover_text("配置 Gist 发现协议类型与翻页深度")
                     .clicked()
                 {
@@ -182,11 +217,14 @@ impl VpnApp {
 
         // 第 3 行：名称 + 状态过滤。「刷新」从页签那一行挪到这里，跟在状态筛选后面。
         ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 8.0;
             icon_label(ui, Icon::Search, 13.0, theme::muted());
             let name_hint = self.tr("按名称过滤");
             let name_field = ui.add(
                 egui::TextEdit::singleline(&mut self.source_name_filter)
                     .desired_width(180.0)
+                    .min_size(egui::vec2(0.0, 27.0))
+                    .vertical_align(egui::Align::Center)
                     .hint_text(name_hint),
             );
             crate::gui::widgets::note_text_field(ui, &name_field);
@@ -198,14 +236,32 @@ impl VpnApp {
                     SourceStatusFilter::Failed => self.tr("拉取失败"),
                     SourceStatusFilter::NoNodes => self.tr("无节点"),
                 };
-                if ui
-                    .selectable_label(self.source_status_filter == filter, label)
-                    .clicked()
+                let (accent_color, accent_bg) = match filter {
+                    SourceStatusFilter::All => (theme::accent_strong(), theme::accent_bg()),
+                    SourceStatusFilter::Enabled => (theme::success(), theme::success_bg()),
+                    SourceStatusFilter::Disabled => (theme::muted(), theme::panel_hover()),
+                    SourceStatusFilter::Failed => (theme::danger(), theme::danger_bg()),
+                    SourceStatusFilter::NoNodes => (theme::warning(), theme::warning_bg()),
+                };
+                if render_source_status_chip(
+                    ui,
+                    self.source_status_filter == filter,
+                    label,
+                    accent_color,
+                    accent_bg,
+                )
+                .clicked()
                 {
                     self.source_status_filter = filter;
                 }
             }
-            if ui.button(format!("🔄 {}", self.tr("刷新"))).clicked() {
+            if ui
+                .add_enabled(
+                    !self.busy,
+                    icons::button_with_icon(Icon::Sync, self.tr("刷新"), theme::text_primary()),
+                )
+                .clicked()
+            {
                 self.reload_all();
             }
         });
@@ -1777,6 +1833,59 @@ fn render_bar_chart(
 
 /// 订阅列表这一行该不该显示。**状态判据全部复用表格里已经在用的那几个**：
 /// 「拉取失败」= 状态列那行文字（`source_status_failed`，也就是行尾"重试"按钮用的同一判据），
+pub(crate) fn render_source_status_chip(
+    ui: &mut Ui,
+    selected: bool,
+    label: &str,
+    accent_color: Color32,
+    accent_bg: Color32,
+) -> egui::Response {
+    let padding = Vec2::new(10.0, 6.0);
+    let galley = ui.painter().layout_no_wrap(
+        label.to_string(),
+        egui::FontId::proportional(13.0),
+        if selected {
+            accent_color
+        } else {
+            theme::text_secondary()
+        },
+    );
+    let desired_size = Vec2::new(padding.x * 2.0 + galley.size().x, 27.0);
+    let (rect, resp) = ui.allocate_exact_size(desired_size, egui::Sense::click());
+    if ui.is_rect_visible(rect) {
+        let (bg_fill, border_stroke, text_color) = if selected {
+            (accent_bg, Stroke::new(1.0_f32, accent_color), accent_color)
+        } else if resp.hovered() {
+            (
+                theme::panel_hover(),
+                Stroke::new(1.0_f32, theme::border()),
+                theme::text_primary(),
+            )
+        } else {
+            (
+                theme::panel(),
+                Stroke::new(1.0_f32, theme::border_subtle()),
+                theme::text_secondary(),
+            )
+        };
+
+        ui.painter().rect(
+            rect,
+            CornerRadius::same(6),
+            bg_fill,
+            border_stroke,
+            StrokeKind::Inside,
+        );
+
+        let text_pos = Pos2::new(
+            rect.center().x - galley.size().x / 2.0,
+            (rect.center().y - galley.size().y / 2.0 - 0.5).round(),
+        );
+        ui.painter().galley(text_pos, galley, text_color);
+    }
+    resp
+}
+
 /// 「无节点」= 健康列的「无节点」（`last_node_count == 0`）。没有第三种状态。
 fn source_passes_filter(
     source: &crate::models::Source,
@@ -1938,5 +2047,99 @@ mod source_filter_tests {
         assert!((rem_ratio - 0.8).abs() < 1e-4);
         assert!((used_ratio - 0.2).abs() < 1e-4);
         assert_eq!(remaining, 400 * 1024 * 1024 * 1024);
+    }
+
+    #[test]
+    fn test_all_sources_toolbar_buttons_share_unified_27px_height() {
+        use crate::gui::icons::{self, Icon};
+        use crate::gui::theme;
+        use crate::gui::views::sources::render_source_status_chip;
+        use eframe::egui::{self, Vec2};
+
+        let ctx = egui::Context::default();
+        theme::apply(&ctx, "theme-champagne", false);
+
+        const H: f32 = 27.0;
+        let mut filter_name = String::new();
+
+        let _ = crate::gui::run_test_ui(&ctx, egui::RawInput::default(), |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
+                ui.horizontal_wrapped(|ui| {
+                    // 1. 基准按钮：反向剔除同质化源
+                    let r_benchmark = ui.add(icons::button_with_icon(
+                        Icon::Lightning,
+                        "反向剔除同质化源",
+                        theme::warning(),
+                    ));
+
+                    // 2. 第 1 行按钮
+                    let r_new = ui.add(icons::button_with_icon(Icon::Plus, "新建", theme::accent_strong()));
+                    let r_fetch = ui.add(icons::button_with_icon(Icon::Sync, "拉取全部", theme::text_primary()));
+                    let r_proxy_fetch = ui.add(icons::button_with_icon(Icon::Shield, "代理拉取全部", theme::accent()));
+                    let r_import = ui.add(icons::button_with_icon(Icon::Clipboard, "导入订阅", theme::text_primary()));
+                    let r_export = ui.add(icons::button_with_icon(Icon::Export, "导出订阅", theme::text_primary()));
+                    let r_clear = ui.add(icons::button_with_icon(Icon::Trash, "清空全部", theme::danger()));
+
+                    // 3. 第 2 行按钮
+                    let r_openrung = ui.add(icons::button_with_icon(Icon::Globe, "接入 OpenRung 节点", theme::accent()));
+                    let r_warp = ui.add(icons::button_with_icon(Icon::Lightning, "原生注册 WARP 节点", theme::warning()));
+                    let r_gist = ui.add(icons::button_with_icon(Icon::Search, "Gist 发现", theme::accent_strong()));
+                    let r_gist_cfg = ui.add(icons::button_with_icon(Icon::Gear, "Gist 配置", theme::text_secondary()));
+
+                    // 4. 第 3 行控件与状态筛选胶囊
+                    let r_search = ui.add(
+                        egui::TextEdit::singleline(&mut filter_name)
+                            .desired_width(180.0)
+                            .min_size(Vec2::new(0.0, H))
+                            .vertical_align(egui::Align::Center)
+                            .hint_text("按名称过滤"),
+                    );
+                    let r_chip_all = render_source_status_chip(ui, true, "全部", theme::accent_strong(), theme::accent_bg());
+                    let r_chip_enabled = render_source_status_chip(ui, false, "启用", theme::success(), theme::success_bg());
+                    let r_chip_disabled = render_source_status_chip(ui, false, "停用", theme::muted(), theme::panel_hover());
+                    let r_chip_failed = render_source_status_chip(ui, false, "拉取失败", theme::danger(), theme::danger_bg());
+                    let r_chip_empty = render_source_status_chip(ui, false, "无节点", theme::warning(), theme::warning_bg());
+                    let r_refresh = ui.add(icons::button_with_icon(Icon::Sync, "刷新", theme::text_primary()));
+
+                    let base_top = r_benchmark.rect.min.y;
+                    let base_bot = r_benchmark.rect.max.y;
+
+                    let widgets = [
+                        ("benchmark", r_benchmark.rect),
+                        ("new", r_new.rect),
+                        ("fetch", r_fetch.rect),
+                        ("proxy_fetch", r_proxy_fetch.rect),
+                        ("import", r_import.rect),
+                        ("export", r_export.rect),
+                        ("clear", r_clear.rect),
+                        ("openrung", r_openrung.rect),
+                        ("warp", r_warp.rect),
+                        ("gist", r_gist.rect),
+                        ("gist_cfg", r_gist_cfg.rect),
+                        ("search", r_search.rect),
+                        ("chip_all", r_chip_all.rect),
+                        ("chip_enabled", r_chip_enabled.rect),
+                        ("chip_disabled", r_chip_disabled.rect),
+                        ("chip_failed", r_chip_failed.rect),
+                        ("chip_empty", r_chip_empty.rect),
+                        ("refresh", r_refresh.rect),
+                    ];
+
+                    for (name, rect) in widgets {
+                        assert!(
+                            (rect.height() - H).abs() < 0.1,
+                            "{name} height expected {H}, got {} (rect={rect:?})",
+                            rect.height()
+                        );
+                        assert!(
+                            (rect.min.y - base_top).abs() < 0.1 && (rect.max.y - base_bot).abs() < 0.1,
+                            "{name} vertical edges ({}, {}) misaligned with benchmark ({base_top}, {base_bot})",
+                            rect.min.y,
+                            rect.max.y
+                        );
+                    }
+                });
+            });
+        });
     }
 }

@@ -712,9 +712,6 @@ impl VpnApp {
                             }
                             self.request_full_reload();
                             crate::platform::trim_working_set();
-                            if !self.speedtester.is_cancelled() {
-                                self.export_alive_nodes_snapshot();
-                            }
                             self.trigger_post_speedtest_recovery();
                         }
                         BgMsg::SpeedDone(Err(e)) => {
@@ -1260,7 +1257,6 @@ impl VpnApp {
                                             KernelKind::Mihomo => "mihomo",
                                             KernelKind::SingBox => "sing_box",
                                             KernelKind::Xray => "xray",
-                                            KernelKind::Shoes => "shoes",
                                             KernelKind::Meow => "meow",
                                             KernelKind::VpCore => "vpcore",
                                         });

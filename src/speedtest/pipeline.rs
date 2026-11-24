@@ -1,7 +1,5 @@
 use crate::db::Database;
-use crate::kernel::{
-    select_proxy_kernel, select_proxy_kernel_preference_for_node, KernelKind, KernelPreference,
-};
+use crate::kernel::{select_proxy_kernel, select_proxy_kernel_preference_for_node, KernelKind};
 use crate::models::{LatencyResult, Node, SpeedTestSummary, GOOGLE_PROXY_TEST_KIND};
 use crate::proxy::verify_nodes_with_kernel_progress;
 use crate::proxy_probe::{ProxyProbeProgress, ProxyProbeResult};
@@ -492,7 +490,6 @@ pub async fn run_speedtest_pipeline(
     let mut mihomo_nodes = Vec::new();
     let mut sing_box_nodes = Vec::new();
     let mut xray_nodes = Vec::new();
-    let mut shoes_nodes = Vec::new();
     let mut meow_nodes = Vec::new();
     let mut vpcore_nodes = Vec::new();
     let mut proxy_results = Vec::new();
@@ -500,7 +497,7 @@ pub async fn run_speedtest_pipeline(
 
     for node in actual_candidates {
         let selected_kernel =
-            select_proxy_kernel_preference_for_node(&node, KernelPreference::Auto, true, false)
+            select_proxy_kernel_preference_for_node(&node, opts.kernel_preference, true, false)
                 .map(|(k, _)| k)
                 .or_else(|_| select_proxy_kernel(&node.protocol));
         match selected_kernel {
@@ -515,10 +512,6 @@ pub async fn run_speedtest_pipeline(
             Ok(KernelKind::Xray) => {
                 result_kernels.insert(node.id.clone(), KernelKind::Xray);
                 xray_nodes.push(node);
-            }
-            Ok(KernelKind::Shoes) => {
-                result_kernels.insert(node.id.clone(), KernelKind::Shoes);
-                shoes_nodes.push(node);
             }
             Ok(KernelKind::Meow) => {
                 result_kernels.insert(node.id.clone(), KernelKind::Meow);
@@ -584,23 +577,6 @@ pub async fn run_speedtest_pipeline(
                 verify_nodes_with_kernel_progress(
                     KernelKind::Xray,
                     xray_nodes,
-                    proxy_timeout,
-                    None,
-                    limit,
-                    proxy_batch_size,
-                    conditional_isolation,
-                    test_url,
-                )
-                .await
-            });
-        }
-        if !shoes_nodes.is_empty() {
-            let limit = network_limit.clone();
-            let test_url = speedtest_url.clone();
-            kernel_tasks.spawn(async move {
-                verify_nodes_with_kernel_progress(
-                    KernelKind::Shoes,
-                    shoes_nodes,
                     proxy_timeout,
                     None,
                     limit,
@@ -723,10 +699,10 @@ pub async fn run_speedtest_pipeline(
         let ok_after_xray = ok_after_sing_box + xray_results.iter().filter(|r| r.ok).count();
         proxy_results.extend(xray_results);
 
-        let shoes_results = if !cancelled.load(Ordering::Relaxed) {
+        let meow_results = if !cancelled.load(Ordering::Relaxed) {
             run_sequential_kernel(
-                KernelKind::Shoes,
-                shoes_nodes,
+                KernelKind::Meow,
+                meow_nodes,
                 proxy_timeout,
                 network_limit.clone(),
                 proxy_batch_size,
@@ -742,31 +718,8 @@ pub async fn run_speedtest_pipeline(
         } else {
             Vec::new()
         };
-        let done_after_shoes = done_after_xray + shoes_results.len();
-        let ok_after_shoes = ok_after_xray + shoes_results.iter().filter(|r| r.ok).count();
-        proxy_results.extend(shoes_results);
-
-        let meow_results = if !cancelled.load(Ordering::Relaxed) {
-            run_sequential_kernel(
-                KernelKind::Meow,
-                meow_nodes,
-                proxy_timeout,
-                network_limit.clone(),
-                proxy_batch_size,
-                conditional_isolation,
-                progress.as_ref(),
-                done_after_shoes,
-                ok_after_shoes,
-                proxy_total,
-                started,
-                opts.speedtest_url.clone(),
-            )
-            .await?
-        } else {
-            Vec::new()
-        };
-        let done_after_meow = done_after_shoes + meow_results.len();
-        let ok_after_meow = ok_after_shoes + meow_results.iter().filter(|r| r.ok).count();
+        let done_after_meow = done_after_xray + meow_results.len();
+        let ok_after_meow = ok_after_xray + meow_results.iter().filter(|r| r.ok).count();
         proxy_results.extend(meow_results);
 
         let vpcore_results = if !cancelled.load(Ordering::Relaxed) {

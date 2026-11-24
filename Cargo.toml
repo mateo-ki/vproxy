@@ -1,6 +1,6 @@
 [package]
 name = "vproxy"
-version = "1.16.18"
+version = "1.17.0"
 edition = "2021"
 description = "VProxy: A modern cross-platform proxy workstation with desktop GUI, multi-core compilers and HTTP API"
 license = "MIT"
@@ -34,10 +34,10 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 serde_yaml = "0.9"
-rhai = { version = "1.19", features = ["serde"] }
-sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite", "chrono"] }
+rhai = { version = "1.19", default-features = false, features = ["serde", "std"] }
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite", "chrono", "macros"] }
 thiserror = "2.0"
-tokio = { version = "1", features = ["full"] }
+tokio = { version = "1", default-features = false, features = ["rt-multi-thread", "macros", "sync", "time", "net", "io-util", "process", "signal", "fs"] }
 tower-http = { version = "0.6", features = ["trace"] }
 tracing = "0.1"
 tracing-appender = "0.2"
@@ -94,10 +94,10 @@ split-debuginfo = "unpacked"
 opt-level = 1
 
 [profile.release]
-# fat LTO + 单编译单元：跨 crate 全局优化与死代码消除（48.5MB → 预期 −8~15%）
-# 构建时间约 ×2~3；strip=true 已剥离符号表
-lto = "fat"
+opt-level = "s"
+lto = "thin"
 codegen-units = 1
+panic = "abort"
 strip = true
 incremental = false
 

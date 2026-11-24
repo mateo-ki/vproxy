@@ -392,7 +392,6 @@ async fn proxy_operation_error(st: &AppState, node_id: &str, error: anyhow::Erro
             KernelKind::Mihomo => "mihomo",
             KernelKind::SingBox => "sing_box",
             KernelKind::Xray => "xray",
-            KernelKind::Shoes => "shoes",
             KernelKind::Meow => "meow",
             KernelKind::VpCore => "vpcore",
         });
@@ -693,6 +692,7 @@ async fn speedtest_one(
             dedup_egress: s.speedtest_dedup_egress,
             tcp_ping_only: s.speedtest_tcp_ping_only,
             speedtest_url: Some(s.speedtest_url),
+            kernel_preference: crate::kernel::KernelPreference::Auto,
         },
         Err(_) => SpeedTestOptions::default(),
     };
@@ -731,6 +731,7 @@ async fn speedtest_all(
         dedup_egress: settings.speedtest_dedup_egress,
         tcp_ping_only: settings.speedtest_tcp_ping_only,
         speedtest_url: Some(settings.speedtest_url),
+        kernel_preference: crate::kernel::KernelPreference::Auto,
     };
     match st.speedtester.test_many(ids, opts).await {
         Ok(r) => Json(ApiResponse::ok(r)).into_response(),

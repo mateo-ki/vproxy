@@ -57,7 +57,6 @@ kernel_exe = {
     "mihomo": os.path.join(KERNELS_DIR, "mihomo", "mihomo.exe"),
     "sing-box": os.path.join(KERNELS_DIR, "sing-box", "sing-box.exe"),
     "xray": os.path.join(KERNELS_DIR, "xray", "xray.exe"),
-    "shoes": os.path.join(KERNELS_DIR, "shoes", "shoes.exe"),
     "meow": os.path.join(KERNELS_DIR, "meow", "meow.exe"),
 }
 
@@ -280,7 +279,7 @@ async def amain():
     if os.path.exists(prev_path):
         with open(prev_path, encoding="utf-8") as f:
             results = json.load(f)
-    for kernel in ["mihomo", "sing-box", "xray", "shoes", "meow"]:
+    for kernel in ["mihomo", "sing-box", "xray", "meow"]:
         if only and kernel not in only:
             continue
         if not os.path.exists(kernel_exe[kernel]):

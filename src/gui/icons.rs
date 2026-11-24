@@ -46,6 +46,8 @@ pub enum Icon {
     Folder,
     /// 迷你柱状统计图（速率卡片右上角的流量统计入口）
     Stats,
+    /// GitHub 开源仓库标识（Octocat 极简轮廓）
+    Github,
 }
 
 pub fn draw_icon(painter: &egui::Painter, rect: Rect, icon: Icon, color: Color32) {
@@ -1098,6 +1100,54 @@ pub fn draw_icon(painter: &egui::Painter, rect: Rect, icon: Icon, color: Color32
                 Stroke::new((s * 0.05).clamp(1.0, 1.3), color),
             );
         }
+        Icon::Github => {
+            // 经典 GitHub Octocat 剪影：外环 + 猫头双耳 + 底部肩颈与左弯猫尾
+            painter.circle_stroke(center, s * 0.43, stroke);
+
+            let head_c = Pos2::new(center.x, center.y - s * 0.04);
+            let hr = s * 0.21;
+            painter.circle_filled(head_c, hr, color);
+
+            // 左耳与右耳三角形
+            painter.add(egui::Shape::convex_polygon(
+                vec![
+                    Pos2::new(head_c.x - hr * 0.88, head_c.y - hr * 0.35),
+                    Pos2::new(head_c.x - hr * 0.95, head_c.y - hr * 1.25),
+                    Pos2::new(head_c.x - hr * 0.22, head_c.y - hr * 0.85),
+                ],
+                color,
+                Stroke::NONE,
+            ));
+            painter.add(egui::Shape::convex_polygon(
+                vec![
+                    Pos2::new(head_c.x + hr * 0.22, head_c.y - hr * 0.85),
+                    Pos2::new(head_c.x + hr * 0.95, head_c.y - hr * 1.25),
+                    Pos2::new(head_c.x + hr * 0.88, head_c.y - hr * 0.35),
+                ],
+                color,
+                Stroke::NONE,
+            ));
+
+            // 肩颈躯干连至底环
+            let body = Rect::from_min_max(
+                Pos2::new(center.x - hr * 0.52, head_c.y + hr * 0.65),
+                Pos2::new(center.x + hr * 0.52, center.y + s * 0.41),
+            );
+            painter.rect_filled(body, CornerRadius::same(1), color);
+
+            // 左侧上翘猫尾
+            painter.add(egui::epaint::CubicBezierShape::from_points_stroke(
+                [
+                    Pos2::new(center.x - hr * 0.45, center.y + s * 0.26),
+                    Pos2::new(center.x - s * 0.24, center.y + s * 0.26),
+                    Pos2::new(center.x - s * 0.26, center.y + s * 0.12),
+                    Pos2::new(center.x - s * 0.34, center.y + s * 0.14),
+                ],
+                false,
+                Color32::TRANSPARENT,
+                fine_stroke,
+            ));
+        }
     }
 }
 
@@ -1112,6 +1162,7 @@ pub fn icon_label(ui: &mut Ui, icon: Icon, size: f32, color: Color32) -> egui::R
 #[allow(dead_code)]
 pub fn button_with_icon<'a>(icon: Icon, text: &'a str, color: Color32) -> impl egui::Widget + 'a {
     move |ui: &mut Ui| {
+        let enabled = ui.is_enabled();
         let padding = Vec2::new(10.0, 6.0);
         let icon_size = 14.0;
         let icon_gap = 6.0;
@@ -1122,17 +1173,31 @@ pub fn button_with_icon<'a>(icon: Icon, text: &'a str, color: Color32) -> impl e
 
         let desired_size = Vec2::new(
             padding.x * 2.0 + icon_size + icon_gap + galley.size().x,
-            padding.y * 2.0 + galley.size().y.max(icon_size),
+            27.0,
         );
 
         let (rect, resp) = ui.allocate_exact_size(desired_size, egui::Sense::click());
         if ui.is_rect_visible(rect) {
-            let (bg_fill, border_stroke) = if resp.is_pointer_button_down_on() {
-                (theme::panel_hover(), Stroke::new(1.0_f32, theme::accent()))
+            let (bg_fill, border_stroke, cur_color) = if !enabled {
+                (
+                    theme::panel(),
+                    Stroke::new(1.0_f32, theme::border_subtle()),
+                    theme::muted(),
+                )
+            } else if resp.is_pointer_button_down_on() {
+                (
+                    theme::panel_hover(),
+                    Stroke::new(1.0_f32, theme::accent()),
+                    color,
+                )
             } else if resp.hovered() {
-                (theme::panel_hover(), Stroke::new(1.0_f32, theme::border()))
+                (
+                    theme::panel_hover(),
+                    Stroke::new(1.0_f32, theme::border()),
+                    color,
+                )
             } else {
-                (theme::panel(), Stroke::new(1.0_f32, theme::border()))
+                (theme::panel(), Stroke::new(1.0_f32, theme::border()), color)
             };
 
             ui.painter().rect(
@@ -1147,16 +1212,11 @@ pub fn button_with_icon<'a>(icon: Icon, text: &'a str, color: Color32) -> impl e
                 Pos2::new(rect.min.x + padding.x, rect.center().y - icon_size / 2.0),
                 Vec2::splat(icon_size),
             );
-            let cur_color = if resp.hovered() {
-                theme::icon_primary()
-            } else {
-                color
-            };
             draw_icon(ui.painter(), icon_rect, icon, cur_color);
 
             let text_pos = Pos2::new(
                 icon_rect.max.x + icon_gap,
-                rect.center().y - galley.size().y / 2.0,
+                (rect.center().y - galley.size().y / 2.0 - 0.5).round(),
             );
             ui.painter().galley(text_pos, galley, cur_color);
         }
@@ -1179,7 +1239,7 @@ pub fn primary_icon_btn<'a>(icon: Icon, text: &'a str) -> impl egui::Widget + 'a
 
         let desired_size = Vec2::new(
             padding.x * 2.0 + icon_size + icon_gap + galley.size().x,
-            padding.y * 2.0 + galley.size().y.max(icon_size),
+            27.0,
         );
 
         let (rect, resp) = ui.allocate_exact_size(desired_size, egui::Sense::click());
@@ -1208,7 +1268,7 @@ pub fn primary_icon_btn<'a>(icon: Icon, text: &'a str) -> impl egui::Widget + 'a
 
             let text_pos = Pos2::new(
                 icon_rect.max.x + icon_gap,
-                rect.center().y - galley.size().y / 2.0,
+                (rect.center().y - galley.size().y / 2.0 - 0.5).round(),
             );
             ui.painter().galley(text_pos, galley, theme::on_primary());
         }
@@ -1230,10 +1290,7 @@ pub fn danger_icon_btn<'a>(icon: Icon, text: &'a str) -> impl egui::Widget + 'a 
             .layout_no_wrap(text_str.clone(), font_id.clone(), Color32::WHITE)
             .size();
 
-        let desired_size = Vec2::new(
-            padding.x * 2.0 + icon_size + icon_gap + text_size.x,
-            padding.y * 2.0 + text_size.y.max(icon_size),
-        );
+        let desired_size = Vec2::new(padding.x * 2.0 + icon_size + icon_gap + text_size.x, 27.0);
 
         let (rect, resp) = ui.allocate_exact_size(desired_size, egui::Sense::click());
         if ui.is_rect_visible(rect) {
@@ -1264,7 +1321,7 @@ pub fn danger_icon_btn<'a>(icon: Icon, text: &'a str) -> impl egui::Widget + 'a 
             let galley = ui.painter().layout_no_wrap(text_str, font_id, fg_color);
             let text_pos = Pos2::new(
                 icon_rect.max.x + icon_gap,
-                rect.center().y - galley.size().y / 2.0,
+                (rect.center().y - galley.size().y / 2.0 - 0.5).round(),
             );
             ui.painter().galley(text_pos, galley, fg_color);
         }
@@ -1398,6 +1455,7 @@ mod tests {
                 Icon::SidebarExpand,
                 Icon::SidebarCollapse,
                 Icon::Folder,
+                Icon::Github,
             ] {
                 let before = ctx.graphics_mut(|g| g.entry(layer).all_entries().len());
                 draw_icon(

@@ -1300,7 +1300,6 @@ pub fn is_proxy_core_name(name_lower: &str) -> bool {
         KernelKind::Mihomo,
         KernelKind::Xray,
         KernelKind::SingBox,
-        KernelKind::Shoes,
         KernelKind::Meow,
         KernelKind::VpCore,
     ]
@@ -2510,9 +2509,6 @@ pub fn run_elevated_kernel_supervisor(args: ElevatedKernelArgs) -> Result<()> {
         }
         KernelKind::Xray => {
             command.arg("run").arg("-c").arg(&args.config);
-        }
-        KernelKind::Shoes => {
-            command.arg("--no-reload").arg(&args.config);
         }
         KernelKind::Meow => {
             command

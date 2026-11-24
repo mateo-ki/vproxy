@@ -109,6 +109,9 @@ pub struct MihomoConfigOptions {
     pub rules: Vec<TrafficRule>,
     #[serde(default)]
     pub kernel_preference: KernelPreference,
+    /// 测速内核偏好（默认 Auto 自动按协议最优分配）
+    #[serde(default)]
+    pub speedtest_kernel_preference: KernelPreference,
     /// mihomo `external-controller` 的一次性密钥，不落盘、不跨进程共享。
     #[serde(default, skip)]
     pub controller_secret: String,
@@ -212,6 +215,7 @@ impl Default for MihomoConfigOptions {
             routing_mode: RoutingMode::Rule,
             rules: Vec::new(),
             kernel_preference: KernelPreference::Auto,
+            speedtest_kernel_preference: KernelPreference::Auto,
             controller_secret: String::new(),
             url_test: false,
             auto_strategy: AutoRoutingStrategy::UrlTest,
@@ -244,6 +248,28 @@ impl Default for MihomoConfigOptions {
 }
 
 impl MihomoConfigOptions {
+    /// 某个映射端口对应的目标节点名 —— 也就是编译端真正拿来建监听器的那份。
+    /// 目标节点没解析出来（订阅重建后 ID 失效且无同名节点）时返回 `None`，
+    /// 编译端会整条跳过该映射，绝不静默回落到主节点。
+    pub fn mapping_target_name(&self, port: u16) -> Option<String> {
+        self.port_mapping_nodes
+            .iter()
+            .find(|(node_port, _, _)| *node_port == port)
+            .map(|(_, name, _)| name.clone())
+    }
+
+    /// 编译端真正会建监听器的映射端口。**启动就绪检测必须用这个**：直接遍历
+    /// `port_mappings` 会把被跳过的端口也要求开门，于是内核刚起来就被判启动失败
+    /// 并杀掉 —— 而 `required_ports` 是六个内核共用的形状，换个内核也一样起不来。
+    pub fn mapping_ports_with_listener(&self) -> Vec<u16> {
+        self.port_mappings
+            .iter()
+            .filter(|mapping| mapping.enabled)
+            .filter(|mapping| self.mapping_target_name(mapping.port).is_some())
+            .map(|mapping| mapping.port)
+            .collect()
+    }
+
     /// 判断当前配置是否会激活 GeoSite / GeoIP 分流数据库。
     /// 包含：隐私防追踪广告过滤、自定义规则、国内直连/GFW预设、订阅规则模式、或覆写片段中的 GEOSITE/GEOIP 规则。
     pub fn uses_geo(&self) -> bool {

@@ -4,7 +4,7 @@
   <a href="README.md">简体中文</a> | <b>English</b>
 </p>
 
-A high-performance, modern cross-platform proxy workstation built with Rust and egui: collects subscriptions, parses nodes, drives multi-core compilers (Mihomo / sing-box / VP-Core / Xray / Meow / Shoes), and performs real-world reachability and latency benchmarking.
+A high-performance, modern cross-platform proxy workstation built with Rust and egui: collects subscriptions, parses nodes, drives multi-core compilers (Mihomo / sing-box / VP-Core / Xray / Meow), and performs real-world reachability and latency benchmarking.
 
 <p align="center">
   <img src="docs/images/dashboard.png" alt="VProxy Dashboard" width="100%">
@@ -63,10 +63,9 @@ A high-performance, modern cross-platform proxy workstation built with Rust and 
 | Mihomo | `ss` `ssr` `vmess` `vless` `trojan` `hysteria` `hysteria2` `tuic` `anytls` `snell` `mieru` `openvpn` `wireguard` `masque` `http(s)` `socks5` |
 | sing-box | `ss` `vmess` `vless` `trojan` `hysteria2` `tuic` `anytls` `ssh` `wireguard` `http(s)` `socks5` |
 | Xray | `ss` `vmess` `vless` `trojan` `http(s)` `socks5` |
-| Shoes | `ss` `vmess` `vless` `trojan` `snell` `anytls` `naive` `wireguard` `http(s)` `socks5` |
 | Meow | `ss` `vmess` `vless` `trojan` `hysteria2` `snell` `anytls` `http(s)` `socks5` |
 
-Routing notes: `snell` prefers Shoes, `ssh` prefers sing-box, `naive` and `juicity` run exclusively on VP-Core (Mihomo lacks them and sing-box removed juicity in 1.12), `openvpn` prefers the native VP-Core outbound (verified against VPN Gate, Mihomo fallback); the `xhttp/splithttp` transport is VP-Core-only and automatically reroutes to VP-Core. Parsed protocols without an installable kernel are flagged in the UI instead of being silently dropped.
+Routing notes: `snell` prefers Mihomo, `ssh` prefers sing-box, `naive` and `juicity` run exclusively on VP-Core (Mihomo lacks them and sing-box removed juicity in 1.12), `openvpn` prefers the native VP-Core outbound (verified against VPN Gate, Mihomo fallback); the `xhttp/splithttp` transport is VP-Core-only and automatically reroutes to VP-Core. Parsed protocols without an installable kernel are flagged in the UI instead of being silently dropped.
 
 ## Documentation
 
@@ -124,7 +123,7 @@ VProxy natively supports OpenWrt router environments (x86_64 soft routers and AR
 3. **Zero Telemetry & Local Privacy**: This project adheres strictly to a zero-telemetry policy. There are no tracking, analytics, reporting, or profiling modules in the codebase. All configurations, node records, routing rules, and benchmark logs reside exclusively on the user's local disk (`data/` directory) and are never uploaded to any remote servers. The uninstaller does not forcefully delete local user databases.
 4. **Transparent Network Activity**: In standard operation, network activity is strictly limited to inbound data retrieval: fetching user-specified subscriptions, detecting the public egress IP, checking and downloading application updates from official repositories, downloading proxy kernels and GeoIP/GeoSite rule databases, and performing DNS resolution for routing health checks.
 5. **Explicit User-Initiated Outbound Data**: Beyond default inbound operations, data is only transmitted externally upon explicit manual user interaction: ① Publishing verified nodes to a user-configured self-hosted Web backend; ② Explicitly requesting an IP risk & geolocation inspection (which queries third-party providers ipinfo.io, ip-api.com, and ipwho.is).
-6. **Third-Party Kernels & Rules**: Third-party proxy engines (VP-Core, Mihomo, sing-box, Xray, Meow, Shoes, etc.) and Geo databases are standalone open-source projects maintained by their respective upstreams under their own licenses. Displayed latencies, throughput speeds, and health metrics represent point-in-time local benchmark measurements and do not constitute a guarantee of future stability, availability, or performance.
+6. **Third-Party Kernels & Rules**: Third-party proxy engines (VP-Core, Mihomo, sing-box, Xray, Meow, etc.) and Geo databases are standalone open-source projects maintained by their respective upstreams under their own licenses. Displayed latencies, throughput speeds, and health metrics represent point-in-time local benchmark measurements and do not constitute a guarantee of future stability, availability, or performance.
 
 ## License
 

@@ -477,9 +477,9 @@ impl VpnApp {
                 }
             }
 
-            // 悬停气泡提示
+            // 悬停气泡提示（跟随鼠标悬停柱体位置弹出，避免固定在整张画布左下角）
             if let Some((day, up, down, total)) = hovered_day {
-                response.on_hover_ui(|ui| {
+                response.on_hover_ui_at_pointer(|ui| {
                     ui.set_min_width(140.0);
                     ui.horizontal(|ui| {
                         ui.label(RichText::new("📅 日期:").size(11.0).color(theme::muted()));

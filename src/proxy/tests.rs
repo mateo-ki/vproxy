@@ -3,8 +3,7 @@ use crate::kernel::KernelKind;
 use crate::models::Node;
 use crate::proxy::adapter::kernel_adapter;
 use crate::proxy::compiler::{
-    BackendCompiler, CompiledArtifact, MihomoCompiler, ShoesCompiler, SingBoxCompiler,
-    VpCoreCompiler, XrayCompiler,
+    BackendCompiler, MihomoCompiler, SingBoxCompiler, VpCoreCompiler, XrayCompiler,
 };
 use crate::proxy::ir::{lower_options_to_ir, IRAction, IRMatcher, RuleSource};
 use crate::proxy::mihomo::{URL_TEST_INTERVAL_SECS, URL_TEST_TIMEOUT_MS, URL_TEST_TOLERANCE_MS};
@@ -852,7 +851,6 @@ async fn work_dir_uses_kernel_specific_paths_and_cleans_up() {
         (KernelKind::Mihomo, "config.yaml", "mihomo.log"),
         (KernelKind::SingBox, "config.json", "sing-box.log"),
         (KernelKind::Xray, "config.json", "xray.log"),
-        (KernelKind::Shoes, "config.yaml", "shoes.log"),
         (KernelKind::Meow, "config.yaml", "meow.log"),
         (KernelKind::VpCore, "config.yaml", "vpcore.log"),
     ] {
@@ -867,7 +865,7 @@ async fn work_dir_uses_kernel_specific_paths_and_cleans_up() {
                 work_dir.data_root(),
                 crate::kernel::managed_kernel_root().join("mihomo")
             ),
-            KernelKind::SingBox | KernelKind::Xray | KernelKind::Shoes => {
+            KernelKind::SingBox | KernelKind::Xray => {
                 assert_eq!(work_dir.data_root(), root)
             }
             KernelKind::Meow => assert_eq!(
@@ -1672,46 +1670,6 @@ fn kernel_validator_validates_compiled_configs_with_real_binaries() {
     let plan_wg = lower_options_to_ir(&options_china, Some(&wg_node));
     let sing_box_wg_artifact = SingBoxCompiler::new().compile(&plan_wg).unwrap();
     assert!(KernelValidator::validate_artifact(KernelKind::SingBox, &sing_box_wg_artifact).is_ok());
-
-    // 测试场景 5：Shoes + Shadowsocks / Trojan / VMess / VLESS 编译与校验
-    let shoes_ss_artifact = ShoesCompiler::new().compile(&plan_china).unwrap();
-    KernelValidator::validate_artifact(KernelKind::Shoes, &shoes_ss_artifact)
-        .expect("shoes ss validation failed");
-
-    let shoes_trojan_artifact = ShoesCompiler::new().compile(&plan_trojan).unwrap();
-    assert!(KernelValidator::validate_artifact(KernelKind::Shoes, &shoes_trojan_artifact).is_ok());
-
-    let vmess_node = node(
-        "vmess",
-        json!({
-            "server": "1.2.3.4",
-            "port": 443,
-            "uuid": "550e8400-e29b-41d4-a716-446655440000",
-            "alterId": 0,
-            "cipher": "auto",
-            "network": "ws",
-            "ws-path": "/ws",
-            "tls": true
-        }),
-    );
-    let plan_vmess = lower_options_to_ir(&options_china, Some(&vmess_node));
-    let shoes_vmess_artifact = ShoesCompiler::new().compile(&plan_vmess).unwrap();
-    assert!(KernelValidator::validate_artifact(KernelKind::Shoes, &shoes_vmess_artifact).is_ok());
-
-    let vless_node = node(
-        "vless",
-        json!({
-            "server": "1.2.3.4",
-            "port": 443,
-            "uuid": "550e8400-e29b-41d4-a716-446655440000",
-            "flow": "xtls-rprx-vision",
-            "tls": true,
-            "sni": "example.com"
-        }),
-    );
-    let plan_vless = lower_options_to_ir(&options_china, Some(&vless_node));
-    let shoes_vless_artifact = ShoesCompiler::new().compile(&plan_vless).unwrap();
-    assert!(KernelValidator::validate_artifact(KernelKind::Shoes, &shoes_vless_artifact).is_ok());
 }
 
 #[test]
@@ -1817,28 +1775,7 @@ rules:
         "Sing-box 应成功转译 curl.exe 拦截规则"
     );
 
-    // 3. 验证 Shoes 编译支持
-    let shoes_art = ShoesCompiler::new()
-        .compile(&plan)
-        .expect("Shoes 编译应成功");
-    let shoes_yaml = match shoes_art {
-        CompiledArtifact::Yaml(y) => y,
-        _ => panic!("Shoes 应生成 YAML"),
-    };
-    assert!(
-        shoes_yaml.contains("custom-direct.com"),
-        "Shoes 应包含 custom-direct.com"
-    );
-    assert!(
-        shoes_yaml.contains("custom-proxy"),
-        "Shoes 应包含 custom-proxy"
-    );
-    assert!(
-        shoes_yaml.contains("192.168.99.0/24"),
-        "Shoes 应包含 192.168.99.0/24"
-    );
-
-    // 4. 验证 Xray 编译支持
+    // 3. 验证 Xray 编译支持
     let xray_art = XrayCompiler::new().compile(&plan).expect("Xray 编译应成功");
     let xray_json = xray_art.as_json_value().expect("json");
     let xray_rules = xray_json["routing"]["rules"]
@@ -2499,10 +2436,9 @@ fn test_kernel_chain_proxy_support_matrix() {
     assert!(KernelKind::Meow.supports_chain_proxy());
     assert!(KernelKind::VpCore.supports_chain_proxy());
 
-    // Sing-box / Xray / Shoes 暂不支持链式代理，必须被禁用
+    // Sing-box / Xray 暂不支持链式代理，必须被禁用
     assert!(!KernelKind::SingBox.supports_chain_proxy());
     assert!(!KernelKind::Xray.supports_chain_proxy());
-    assert!(!KernelKind::Shoes.supports_chain_proxy());
 
     // 内核偏好对应矩阵
     assert!(KernelPreference::Auto.supports_chain_proxy());
@@ -2511,5 +2447,137 @@ fn test_kernel_chain_proxy_support_matrix() {
     assert!(KernelPreference::VpCore.supports_chain_proxy());
     assert!(!KernelPreference::SingBox.supports_chain_proxy());
     assert!(!KernelPreference::Xray.supports_chain_proxy());
-    assert!(!KernelPreference::Shoes.supports_chain_proxy());
+}
+
+/// 端到端实测，不是推理：拿**真 mihomo** 跑一份含「未解析端口映射」的配置，断言三件事
+/// —— 内核还活着（没被就绪检测判死杀掉）、控制端口在听、被跳过的那个映射端口没在听。
+/// 回归来自 #15：编译端不再为未解析映射建监听器，而 `required_ports` 还在等那个端口，
+/// 于是内核刚起来就被 `stop_failed_start_child` 杀掉，用户看到的是「启动失败」，
+/// 且因为这条形状六个内核共用，换个内核也一样。
+#[test]
+fn real_mihomo_starts_and_stays_up_with_an_unresolved_port_mapping() {
+    use crate::kernel::find_kernel_executable;
+    use std::net::{TcpListener, TcpStream};
+
+    let exe = match find_kernel_executable(KernelKind::Mihomo) {
+        Some(path) => path,
+        None => {
+            eprintln!("跳过测试：未找到 mihomo 内核二进制（当前环境未预置内核）");
+            return;
+        }
+    };
+
+    // 抢三个空闲端口，绝不碰用户实例在用的 9980/9090
+    let mut free_ports = Vec::new();
+    for _ in 0..3 {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind 空闲端口");
+        free_ports.push(listener.local_addr().expect("local_addr").port());
+    }
+    let (mixed_port, controller_port, mapped_port) = (free_ports[0], free_ports[1], free_ports[2]);
+
+    let main_node = node(
+        "ss",
+        serde_json::json!({
+            "server": "127.0.0.1",
+            "port": 1,
+            "cipher": "aes-128-gcm",
+            "password": "pass"
+        }),
+    );
+    let options = MihomoConfigOptions {
+        mixed_port,
+        controller_port,
+        // Global 模式不引用 GEOSITE/GEOIP，免得判据被规则库存在性绑住
+        routing_mode: RoutingMode::Global,
+        port_mappings: vec![PortMapping {
+            id: "map-stale".into(),
+            port: mapped_port,
+            node_id: "id-no-longer-in-library".into(),
+            node_name: "日本1".into(),
+            enabled: true,
+        }],
+        // 目标节点没解析出来 = 编译端会整条跳过这个映射
+        port_mapping_nodes: vec![],
+        ..Default::default()
+    };
+
+    let plan = lower_options_to_ir(&options, Some(&main_node));
+    // 前提：就绪检测已经不再要求这个端口（由 lower.rs 那条判据钉住，这里再确认一次）
+    assert!(
+        !required_startup_ports(KernelKind::Mihomo, &options).contains(&mapped_port),
+        "就绪检测还在等被跳过的映射端口 {mapped_port}"
+    );
+
+    let artifact = MihomoCompiler::new()
+        .compile(&plan)
+        .expect("编译 mihomo 配置");
+    let config_text = artifact.to_string_pretty().expect("配置文本");
+    assert!(
+        !config_text.contains(&format!("port: {mapped_port}")),
+        "配置里竟然还给被跳过的映射建了监听：{config_text}"
+    );
+
+    let dir = std::env::temp_dir().join(format!("vp-e2e-port-map-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("建临时内核目录");
+    let config_path = dir.join("config.yaml");
+    std::fs::write(&config_path, &config_text).expect("写配置");
+
+    // 带上规则库：临时目录里没有 geosite.dat 时，mihomo 会先去下载它，初始化被网络
+    // 卡住 ⇒ 控制端口迟迟不开，这条判据就会把"夹具缺依赖"报成"内核起不来"。
+    let geo_dir = crate::kernel::managed_kernel_root().join("mihomo");
+    for name in ["geosite.dat", "geoip.dat"] {
+        let from = geo_dir.join(name);
+        if !from.is_file() {
+            let _ = std::fs::remove_dir_all(&dir);
+            eprintln!(
+                "跳过测试：缺规则库 {}（当前环境未下载 geodata）",
+                from.display()
+            );
+            return;
+        }
+        std::fs::copy(&from, dir.join(name)).expect("复制规则库");
+    }
+
+    let mut child = std::process::Command::new(&exe)
+        .arg("-d")
+        .arg(&dir)
+        .arg("-f")
+        .arg(&config_path)
+        .stdout(std::process::Stdio::from(
+            std::fs::File::create(dir.join("kernel.log")).expect("抓内核输出"),
+        ))
+        .stderr(std::process::Stdio::from(
+            std::fs::File::create(dir.join("kernel.err.log")).expect("抓内核错误"),
+        ))
+        .spawn()
+        .expect("启动真 mihomo");
+
+    // 3 秒：旧写法里这段时间足够就绪检测判死并杀掉进程
+    std::thread::sleep(Duration::from_secs(3));
+    let still_alive = child.try_wait().expect("try_wait").is_none();
+    let controller_open = TcpStream::connect(("127.0.0.1", controller_port)).is_ok();
+    let mapped_open = TcpStream::connect(("127.0.0.1", mapped_port)).is_ok();
+    let kernel_log = format!(
+        "stdout: {}\nstderr: {}",
+        std::fs::read_to_string(dir.join("kernel.log")).unwrap_or_default(),
+        std::fs::read_to_string(dir.join("kernel.err.log")).unwrap_or_default()
+    );
+
+    let _ = child.kill();
+    let _ = child.wait();
+    let _ = std::fs::remove_dir_all(&dir);
+
+    assert!(
+        still_alive,
+        "内核已经不在了 = 就绪检测还在等那个永远不会开的端口，把整个内核判死杀掉了\n{kernel_log}"
+    );
+    assert!(
+        controller_open,
+        "控制端口 {controller_port} 没开门，内核自己怎么说：\n{kernel_log}\n--- 配置 ---\n{config_text}"
+    );
+    assert!(
+        !mapped_open,
+        "被跳过的映射端口 {mapped_port} 居然在听：编译端没有真的跳过"
+    );
 }
