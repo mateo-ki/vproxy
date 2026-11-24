@@ -529,6 +529,7 @@ mod port_mapping_lower_tests {
             port,
             node_id: node_id.into(),
             node_name: node_name.into(),
+            source_id: None,
             enabled: true,
         }
     }

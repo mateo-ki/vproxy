@@ -1190,17 +1190,39 @@ async fn connect_saved_proxy_at_login(
         // 该映射，不中止整个登录自动连接。
         let node = match db.get_node(&mapping.node_id).await {
             Ok(Some(node)) => Some(node),
-            Ok(None) => match db.find_node_by_name(&mapping.node_name).await {
-                Ok(found) => found,
-                Err(error) => {
-                    tracing::warn!(
-                        %error,
-                        port = mapping.port,
-                        "按名称查找映射目标节点失败，跳过该映射"
-                    );
-                    None
+            Ok(None) => {
+                let candidate = if let Some(ref source_id) = mapping.source_id {
+                    db.find_node_by_name_in_source(&mapping.node_name, Some(source_id))
+                        .await
+                } else {
+                    match db.find_candidate_nodes_by_name(&mapping.node_name).await {
+                        Ok(candidates) => {
+                            let mut unique_sources = std::collections::HashSet::new();
+                            for c in &candidates {
+                                unique_sources.insert(c.source_id.as_deref());
+                            }
+                            if unique_sources.len() == 1 {
+                                candidates.into_iter().next().map(Ok)
+                            } else {
+                                None
+                            }
+                        }
+                        Err(e) => Some(Err(e)),
+                    }
+                    .transpose()
+                };
+                match candidate {
+                    Ok(found) => found,
+                    Err(error) => {
+                        tracing::warn!(
+                            %error,
+                            port = mapping.port,
+                            "按名称查找映射目标节点失败，跳过该映射"
+                        );
+                        None
+                    }
                 }
-            },
+            }
             Err(error) => {
                 tracing::warn!(
                     %error,

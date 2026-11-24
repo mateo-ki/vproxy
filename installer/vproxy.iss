@@ -63,15 +63,9 @@ begin
   // 1. 按镜像名彻底关闭所有旧版与新版主进程
   // 注意：绝对不能带 /T 参数！老程序点击「更新/安装」时安装包作为子进程运行，
   // 若带 /T 会将整个进程树一并杀死（导致向导自身闪退，表现为"点击安装无反应/弹不出向导"）
+  // VProxy 运行中的子内核均挂载于 JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE 作业对象，主进程退出后子内核由 OS 自动回收。
   Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM vproxy.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM vpn-parser.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-
-  // 2. 防御性终止可能残留的后台代理内核进程，确保 data/kernels 目录下的文件句柄全部释放
-  Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM mihomo.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM sing-box.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM xray.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM meow.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM vp-core.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   Result := True;
 end;
 
@@ -88,6 +82,16 @@ var
   NewDataDir: String;
   ResultCode: Integer;
 begin
+  if CurStep = ssInstall then
+  begin
+    // 安装文件覆写前，仅对当前目标安装目录内残存的内核进程按路径精确释放句柄，绝不误伤系统其他应用
+    Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+      '-NoProfile -ExecutionPolicy Bypass -Command "' +
+      '$target = [regex]::Escape(''' + ExpandConstant('{app}') + '''); ' +
+      'Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and ($_.ExecutablePath -match (''^'' + $target)) } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }" ',
+      '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  end;
+
   if CurStep = ssPostInstall then
   begin
     NewDataDir := ExpandConstant('{app}\data');

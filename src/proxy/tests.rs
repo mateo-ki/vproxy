@@ -1373,6 +1373,7 @@ fn port_mapping_validation_checks() {
             port: 80, // < 1024
             node_id: "n1".into(),
             node_name: "Node 1".into(),
+            source_id: None,
             enabled: true,
         }],
         ..Default::default()
@@ -1403,6 +1404,7 @@ fn port_mapping_validation_checks() {
             port: 10810,
             node_id: "n1".into(),
             node_name: "Node 1".into(),
+            source_id: None,
             enabled: true,
         },
         PortMapping {
@@ -1410,6 +1412,7 @@ fn port_mapping_validation_checks() {
             port: 10810,
             node_id: "n2".into(),
             node_name: "Node 2".into(),
+            source_id: None,
             enabled: true,
         },
     ];
@@ -1436,6 +1439,7 @@ fn port_mappings_generate_mihomo_listeners_and_in_port_rules() {
             port: 10810,
             node_id: mapped_node.id.clone(),
             node_name: mapped_node.name.clone(),
+            source_id: None,
             enabled: true,
         }],
         port_mapping_nodes: vec![(10810, mapped_node.name.clone(), clash_proxies[0].clone())],
@@ -1625,6 +1629,7 @@ fn kernel_validator_validates_compiled_configs_with_real_binaries() {
             port: 19890,
             node_id: "trojan-node".into(),
             node_name: "Trojan Dedicated".into(),
+            source_id: None,
             enabled: true,
         }],
         rules: vec![
@@ -2494,6 +2499,7 @@ fn real_mihomo_starts_and_stays_up_with_an_unresolved_port_mapping() {
             port: mapped_port,
             node_id: "id-no-longer-in-library".into(),
             node_name: "日本1".into(),
+            source_id: None,
             enabled: true,
         }],
         // 目标节点没解析出来 = 编译端会整条跳过这个映射

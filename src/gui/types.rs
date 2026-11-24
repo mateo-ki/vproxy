@@ -546,8 +546,8 @@ pub enum BgMsg {
     /// 测速结束后的运行中代理自检与自愈结果。
     SpeedtestRecoveryDone(crate::proxy::SpeedtestRecoveryOutcome),
     SpeedtestPingResult {
-        ping_ms: i64,
-        jitter_ms: f32,
+        ping_ms: Option<i64>,
+        jitter_ms: Option<f32>,
     },
     SpeedtestLiveSample {
         mbps: f32,

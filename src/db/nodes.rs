@@ -608,18 +608,54 @@ impl Database {
     /// parser/mod.rs 的 build_node），端口映射这类持久化引用在库重建后就按旧 ID
     /// 查不到了——但同名节点还在，用它兜底改绑。多个同名时取 updated_at 最新的。
     pub async fn find_node_by_name(&self, name: &str) -> Result<Option<Node>> {
+        self.find_node_by_name_in_source(name, None).await
+    }
+
+    /// 在限定订阅源范围内安全找回同名节点，防止跨订阅源误绑。
+    pub async fn find_node_by_name_in_source(
+        &self,
+        name: &str,
+        source_id: Option<&str>,
+    ) -> Result<Option<Node>> {
         let name = name.trim();
         if name.is_empty() {
             return Ok(None);
         }
         let summaries = self.load_all_node_summaries().await?;
-        let mut candidates: Vec<&crate::models::NodeSummary> =
-            summaries.iter().filter(|node| node.name == name).collect();
+        let mut candidates: Vec<&crate::models::NodeSummary> = summaries
+            .iter()
+            .filter(|node| {
+                node.name == name
+                    && match source_id {
+                        Some(sid) => node.source_id.as_deref() == Some(sid),
+                        None => true,
+                    }
+            })
+            .collect();
         candidates.sort_by_key(|node| std::cmp::Reverse(node.updated_at));
         match candidates.first() {
             Some(summary) => self.get_node(&summary.id).await,
             None => Ok(None),
         }
+    }
+
+    /// 查找全库所有匹配给定名称的节点候选列表，按更新时间倒序排列。
+    pub async fn find_candidate_nodes_by_name(&self, name: &str) -> Result<Vec<Node>> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Ok(Vec::new());
+        }
+        let summaries = self.load_all_node_summaries().await?;
+        let mut matching: Vec<&crate::models::NodeSummary> =
+            summaries.iter().filter(|node| node.name == name).collect();
+        matching.sort_by_key(|node| std::cmp::Reverse(node.updated_at));
+        let mut result = Vec::new();
+        for summary in matching {
+            if let Some(node) = self.get_node(&summary.id).await? {
+                result.push(node);
+            }
+        }
+        Ok(result)
     }
 
     pub async fn get_node(&self, id: &str) -> Result<Option<Node>> {

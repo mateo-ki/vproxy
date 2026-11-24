@@ -266,6 +266,7 @@ pub struct VpnApp {
     pub(crate) new_mapping_port: String,
     pub(crate) new_mapping_node_id: Option<String>,
     pub(crate) new_mapping_node_name: Option<String>,
+    pub(crate) new_mapping_node_source_id: Option<String>,
     pub(crate) node_picker_open: bool,
     pub(crate) node_picker_search: String,
     pub(crate) node_picker_target_index: Option<usize>,
@@ -808,6 +809,7 @@ impl VpnApp {
             new_mapping_port: String::new(),
             new_mapping_node_id: None,
             new_mapping_node_name: None,
+            new_mapping_node_source_id: None,
             node_picker_open: false,
             node_picker_search: String::new(),
             node_picker_target_index: None,
@@ -3086,25 +3088,40 @@ impl VpnApp {
         self.rt.spawn(async move {
             // 如果不是当前活动节点，拉起独立的临时测速内核，绝不切换、不干扰当前主代理！
             let target_node = if !is_current_active {
-                db.get_node(&id).await.ok().flatten()
+                match db.get_node(&id).await {
+                    Ok(Some(node)) => Some(node),
+                    Ok(None) => {
+                        let _ = tx.send(BgMsg::SpeedDone(Err(format!("测速失败: 未找到待测节点 {id}"))));
+                        return;
+                    }
+                    Err(e) => {
+                        let _ = tx.send(BgMsg::SpeedDone(Err(format!("读取待测节点失败: {e}"))));
+                        return;
+                    }
+                }
             } else {
                 None
             };
 
-            let _temp_runner = if !is_current_active {
-                if let Some(ref node) = target_node {
-                    crate::proxy_probe::spawn_single_node_probe_proxy(node).await.ok()
-                } else {
-                    None
+            let _temp_runner = if let Some(ref node) = target_node {
+                match crate::proxy_probe::spawn_single_node_probe_proxy(node).await {
+                    Ok(runner) => Some(runner),
+                    Err(e) => {
+                        let _ = tx.send(BgMsg::SpeedDone(Err(format!("启动临时测速代理失败: {e}"))));
+                        return;
+                    }
                 }
             } else {
                 None
             };
 
             let effective_port = if let Some(ref runner) = _temp_runner {
-                Some(runner.mixed_port)
+                runner.mixed_port
+            } else if let Some(port) = main_proxy_port {
+                port
             } else {
-                main_proxy_port
+                let _ = tx.send(BgMsg::SpeedDone(Err("主代理未运行且无法拉起独立测速代理".into())));
+                return;
             };
 
             let (ping_url, download_url) = match target_server.as_str() {
@@ -3140,9 +3157,13 @@ impl VpnApp {
 
             let mut builder = reqwest::Client::builder()
                 .timeout(std::time::Duration::from_secs(12));
-            if let Some(port) = effective_port {
-                if let Ok(proxy) = reqwest::Proxy::all(format!("http://127.0.0.1:{port}")) {
+            match reqwest::Proxy::all(format!("http://127.0.0.1:{effective_port}")) {
+                Ok(proxy) => {
                     builder = builder.proxy(proxy);
+                }
+                Err(e) => {
+                    let _ = tx.send(BgMsg::SpeedDone(Err(format!("配置测速代理失败: {e}"))));
+                    return;
                 }
             }
             let client = match builder.build() {
@@ -3171,20 +3192,20 @@ impl VpnApp {
                 let _ = tx.send(BgMsg::SpeedDone(Err("测速已手动停止".into())));
                 return;
             }
-            let ping_ms = if !latencies.is_empty() {
-                latencies.iter().sum::<i64>() / latencies.len() as i64
+            let ping_ms_opt = if !latencies.is_empty() {
+                Some(latencies.iter().sum::<i64>() / latencies.len() as i64)
             } else {
-                85
+                None
             };
-            let jitter_ms = if latencies.len() > 1 {
+            let jitter_ms_opt = if latencies.len() > 1 {
                 let diffs: Vec<i64> = latencies.windows(2).map(|w| (w[1] - w[0]).abs()).collect();
-                (diffs.iter().sum::<i64>() as f32 / diffs.len() as f32 + 0.8).max(0.6)
+                Some(((diffs.iter().sum::<i64>() as f32 / diffs.len() as f32 + 0.8).max(0.6) * 10.0).round() / 10.0)
             } else {
-                1.4
+                None
             };
             let _ = tx.send(BgMsg::SpeedtestPingResult {
-                ping_ms,
-                jitter_ms: (jitter_ms * 10.0).round() / 10.0,
+                ping_ms: ping_ms_opt,
+                jitter_ms: jitter_ms_opt,
             });
 
             // 阶段 2: 真实下载吞吐带宽测速 (流式拉取测速文件块)
@@ -3216,9 +3237,8 @@ impl VpnApp {
             let mut last_bytes = 0u64;
             let mut peak_dl_mbps = 0.0_f32;
             let mut recent_rates = std::collections::VecDeque::new();
-            let dl_baseline = (2800.0 / (ping_ms as f32).max(12.0)).clamp(15.0, 95.0);
 
-            for tick in 1..=48 {
+            for _tick in 1..=48 {
                 if cancel_token.load(std::sync::atomic::Ordering::Relaxed) {
                     dl_done.store(true, std::sync::atomic::Ordering::Relaxed);
                     let _ = tx.send(BgMsg::SpeedDone(Err("测速已手动停止".into())));
@@ -3244,15 +3264,11 @@ impl VpnApp {
 
                 let cur_mbps = if !recent_rates.is_empty() {
                     let avg = recent_rates.iter().sum::<f32>() / recent_rates.len() as f32;
-                    let ripple = 1.0 + 0.08 * (tick as f32 * 1.9).sin() + 0.04 * (tick as f32 * 3.3).cos();
-                    (avg * ripple).max(0.5)
+                    (avg * 10.0).round() / 10.0
                 } else {
-                    let warm = (tick as f32 / 32.0).min(1.0);
-                    let ripple = 1.0 + 0.12 * (tick as f32 * 1.6).sin() + 0.06 * (tick as f32 * 2.8).cos();
-                    (dl_baseline * warm * ripple).max(0.2)
+                    0.0
                 };
 
-                let cur_mbps = (cur_mbps * 10.0).round() / 10.0;
                 if cur_mbps > peak_dl_mbps {
                     peak_dl_mbps = cur_mbps;
                 }
@@ -3264,11 +3280,11 @@ impl VpnApp {
             dl_done.store(true, std::sync::atomic::Ordering::Relaxed);
 
             let total_dl_bytes = dl_counter.load(std::sync::atomic::Ordering::Relaxed);
-            let final_dl_mbps = if total_dl_bytes > 64 * 1024 && peak_dl_mbps > 1.0 {
+            let final_dl_mbps = if total_dl_bytes > 0 && peak_dl_mbps > 0.0 {
                 let avg = (total_dl_bytes as f32 * 8.0) / (3.6 * 1_000_000.0);
                 ((peak_dl_mbps * 0.6 + avg * 0.4) * 10.0).round() / 10.0
             } else {
-                ((peak_dl_mbps.max(dl_baseline * 0.95)) * 10.0).round() / 10.0
+                0.0
             };
 
             if cancel_token.load(std::sync::atomic::Ordering::Relaxed) {
@@ -3320,9 +3336,8 @@ impl VpnApp {
             let mut last_ul_bytes = 0u64;
             let mut peak_ul_mbps = 0.0_f32;
             let mut recent_ul_rates = std::collections::VecDeque::new();
-            let ul_baseline = (final_dl_mbps * 0.16).clamp(3.5, 45.0);
 
-            for tick in 1..=40 {
+            for _tick in 1..=40 {
                 if cancel_token.load(std::sync::atomic::Ordering::Relaxed) {
                     ul_done.store(true, std::sync::atomic::Ordering::Relaxed);
                     let _ = tx.send(BgMsg::SpeedDone(Err("测速已手动停止".into())));
@@ -3348,15 +3363,11 @@ impl VpnApp {
 
                 let cur_mbps = if !recent_ul_rates.is_empty() {
                     let avg = recent_ul_rates.iter().sum::<f32>() / recent_ul_rates.len() as f32;
-                    let ripple = 1.0 + 0.08 * (tick as f32 * 2.1).sin();
-                    (avg * ripple).max(0.3)
+                    (avg * 10.0).round() / 10.0
                 } else {
-                    let warm = (tick as f32 / 26.0).min(1.0);
-                    let ripple = 1.0 + 0.12 * (tick as f32 * 1.8).sin() + 0.05 * (tick as f32 * 3.1).cos();
-                    (ul_baseline * warm * ripple).max(0.2)
+                    0.0
                 };
 
-                let cur_mbps = (cur_mbps * 10.0).round() / 10.0;
                 if cur_mbps > peak_ul_mbps {
                     peak_ul_mbps = cur_mbps;
                 }
@@ -3368,15 +3379,21 @@ impl VpnApp {
             ul_done.store(true, std::sync::atomic::Ordering::Relaxed);
 
             let total_ul_bytes = ul_counter.load(std::sync::atomic::Ordering::Relaxed);
-            let final_ul_mbps = if total_ul_bytes > 32 * 1024 && peak_ul_mbps > 0.5 {
+            let final_ul_mbps = if total_ul_bytes > 0 && peak_ul_mbps > 0.0 {
                 let avg = (total_ul_bytes as f32 * 8.0) / (3.0 * 1_000_000.0);
                 ((peak_ul_mbps * 0.6 + avg * 0.4) * 10.0).round() / 10.0
             } else {
-                ((peak_ul_mbps.max(ul_baseline * 0.95)) * 10.0).round() / 10.0
+                0.0
             };
             let _ = tx.send(BgMsg::SpeedtestLiveSample { mbps: final_ul_mbps, phase: 3 });
 
-            let download_kbps = (final_dl_mbps * 1000.0 / 8.0) as f64;
+            let download_kbps = if final_dl_mbps > 0.0 {
+                Some((final_dl_mbps * 1000.0 / 8.0) as f64)
+            } else {
+                None
+            };
+
+            let is_success = ping_ms_opt.is_some() || download_kbps.is_some();
 
             if cancel_token.load(std::sync::atomic::Ordering::Relaxed) {
                 let _ = tx.send(BgMsg::SpeedDone(Err("测速已手动停止".into())));
@@ -3387,31 +3404,38 @@ impl VpnApp {
             let _ = db
                 .update_node_speed(
                     &id,
-                    true,
-                    Some(ping_ms),
-                    Some(download_kbps),
+                    is_success,
+                    ping_ms_opt,
+                    download_kbps,
                     Some("speedtest"),
                     Some("http_download"),
                 )
                 .await;
 
+            let msg = match (ping_ms_opt, final_dl_mbps > 0.0) {
+                (Some(ms), true) => format!("{ms} ms / {final_dl_mbps:.1} Mbps"),
+                (Some(ms), false) => format!("{ms} ms / 零吞吐"),
+                (None, true) => format!("延迟超时 / {final_dl_mbps:.1} Mbps"),
+                (None, false) => "测速请求均失败".to_string(),
+            };
+
             let summary = SpeedTestSummary {
                 total: 1,
-                ok: 1,
-                fail: 0,
-                avg_ms: Some(ping_ms as f64),
-                avg_download_kbps: Some(download_kbps),
+                ok: if is_success { 1 } else { 0 },
+                fail: if is_success { 0 } else { 1 },
+                avg_ms: ping_ms_opt.map(|ms| ms as f64),
+                avg_download_kbps: download_kbps,
                 results: vec![crate::models::LatencyResult {
                     id: id.clone(),
                     name: String::new(),
                     server: String::new(),
                     port: 0,
-                    ok: true,
-                    latency_ms: Some(ping_ms),
-                    download_kbps: Some(download_kbps),
+                    ok: is_success,
+                    latency_ms: ping_ms_opt,
+                    download_kbps,
                     latency_kernel: Some("speedtest".into()),
                     latency_test_kind: Some("http_download".into()),
-                    message: format!("{ping_ms} ms / {final_dl_mbps:.1} Mbps"),
+                    message: msg,
                 }],
             };
             let _ = tx.send(BgMsg::SpeedDone(Ok(summary)));
@@ -3637,38 +3661,90 @@ impl VpnApp {
                 continue;
             }
             let resolved = match db.get_node(&m.node_id).await {
-                Ok(Some(node)) => Some(node),
-                Ok(None) => match db.find_node_by_name(&m.node_name).await {
-                    Ok(Some(node)) => {
-                        tracing::info!(
-                            port = m.port,
-                            old_id = %m.node_id,
-                            new_id = %node.id,
-                            name = %m.node_name,
-                            "端口映射目标节点 ID 已失效，按同名节点自动改绑"
-                        );
-                        // 双写：持久化（下次启动直接命中）+ 就地改写（调用方
-                        // 后续的整包保存带着新 ID，不会把旧 ID 写回去）。
-                        if let Err(error) =
-                            Self::rebind_port_mapping_node(db, &m.id, &node.id).await
-                        {
-                            tracing::warn!(
-                                %error,
+                Ok(Some(node)) => {
+                    // 若映射尚未记录 source_id，自动以当前命中的有效节点回填锁定
+                    if m.source_id.is_none() && node.source_id.is_some() {
+                        m.source_id = node.source_id.clone();
+                        let _ = Self::rebind_port_mapping_node(
+                            db,
+                            &m.id,
+                            &m.node_id,
+                            m.source_id.as_deref(),
+                        )
+                        .await;
+                    }
+                    Some(node)
+                }
+                Ok(None) => {
+                    let found_candidate = if let Some(ref source_id) = m.source_id {
+                        // 1. 已知源 ID：仅在原订阅源范围内找同名节点，绝不跨源抢绑
+                        db.find_node_by_name_in_source(&m.node_name, Some(source_id))
+                            .await
+                    } else {
+                        // 2. 历史遗留映射未带 source_id：查找全库同名候选
+                        match db.find_candidate_nodes_by_name(&m.node_name).await {
+                            Ok(candidates) => {
+                                let mut unique_sources = std::collections::HashSet::new();
+                                for c in &candidates {
+                                    unique_sources.insert(c.source_id.as_deref());
+                                }
+                                // 仅当全部候选确定归属于唯一个订阅源时才允许安全恢复；
+                                // 若多个订阅源均有同名节点（跨源歧义），绝不静默乱绑，标记失效
+                                if unique_sources.len() == 1 {
+                                    candidates.into_iter().next().map(Ok)
+                                } else {
+                                    tracing::warn!(
+                                        port = m.port,
+                                        name = %m.node_name,
+                                        "同名候选节点跨多个订阅源存在命名歧义，跳过自动改绑"
+                                    );
+                                    None
+                                }
+                            }
+                            Err(e) => Some(Err(e)),
+                        }
+                        .transpose()
+                    };
+
+                    match found_candidate {
+                        Ok(Some(node)) => {
+                            tracing::info!(
                                 port = m.port,
-                                "端口映射自动改绑持久化失败（本次会话内仍生效）"
+                                old_id = %m.node_id,
+                                new_id = %node.id,
+                                name = %m.node_name,
+                                source = ?node.source_id,
+                                "端口映射目标节点 ID 已失效，按同源/唯一同名节点安全改绑"
                             );
+                            m.source_id = node.source_id.clone();
+                            // 双写：持久化（下次启动直接命中）+ 就地改写（调用方
+                            // 后续的整包保存带着新 ID，不会把旧 ID 写回去）。
+                            if let Err(error) = Self::rebind_port_mapping_node(
+                                db,
+                                &m.id,
+                                &node.id,
+                                m.source_id.as_deref(),
+                            )
+                            .await
+                            {
+                                tracing::warn!(
+                                    %error,
+                                    port = m.port,
+                                    "端口映射自动改绑持久化失败（本次会话内仍生效）"
+                                );
+                            }
+                            rebinds.push((m.id.clone(), node.id.clone()));
+                            m.node_id = node.id.clone();
+                            Some(node)
                         }
-                        rebinds.push((m.id.clone(), node.id.clone()));
-                        m.node_id = node.id.clone();
-                        Some(node)
-                    }
-                    other => {
-                        if let Err(error) = other {
-                            tracing::warn!(%error, port = m.port, "按名称查找映射目标节点失败");
+                        other => {
+                            if let Err(error) = other {
+                                tracing::warn!(%error, port = m.port, "按名称安全查找映射目标节点失败");
+                            }
+                            None
                         }
-                        None
                     }
-                },
+                }
                 Err(error) => {
                     tracing::warn!(%error, port = m.port, "读取映射目标节点失败");
                     None
@@ -3699,12 +3775,16 @@ impl VpnApp {
         db: &Database,
         mapping_id: &str,
         node_id: &str,
+        source_id: Option<&str>,
     ) -> anyhow::Result<()> {
         let mut config = db.get_proxy_config().await?;
         let Some(mapping) = config.port_mappings.iter_mut().find(|m| m.id == mapping_id) else {
             return Ok(());
         };
         mapping.node_id = node_id.to_string();
+        if let Some(sid) = source_id {
+            mapping.source_id = Some(sid.to_string());
+        }
         db.update_proxy_config(&config).await?;
         Ok(())
     }
@@ -7949,6 +8029,7 @@ mod port_mapping_prime_tests {
             port: 10820,
             node_id: "stale-id".into(),
             node_name: "日本1".into(),
+            source_id: None,
             enabled: true,
         }];
         let options = MihomoConfigOptions {
@@ -8016,6 +8097,7 @@ mod port_mapping_prime_tests {
             port: 10820,
             node_id: "stale-id".into(),
             node_name: "日本1".into(),
+            source_id: None,
             enabled: true,
         }];
         let options = MihomoConfigOptions {
@@ -8044,6 +8126,104 @@ mod port_mapping_prime_tests {
             saved.port_mappings[0].node_id, "stale-id",
             "库里也不得被改写"
         );
+
+        drop(manager);
+        drop(db);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn prime_port_mapping_does_not_cross_rebind_to_other_source() {
+        // A/B 两个订阅源均有名为「香港01」的节点，A 更新时间更新。
+        // 映射最初绑定于 B 的旧节点，B 的旧节点失效后，改绑绝不能乱窜到 A 的节点！
+        let dir = std::env::temp_dir().join(format!("vproxy-prime-cross-{}", uuid::Uuid::new_v4()));
+        let _ = std::fs::create_dir_all(&dir);
+        let db_path = dir.join("test.db");
+        let db = Database::connect(db_path.to_str().unwrap()).await.unwrap();
+
+        let source_a = db
+            .create_source(crate::models::CreateSource {
+                name: "Source A".into(),
+                url_template: "https://example.com/a".into(),
+                enabled: true,
+                remark: None,
+                user_agent: None,
+            })
+            .await
+            .unwrap()
+            .id;
+
+        let source_b = db
+            .create_source(crate::models::CreateSource {
+                name: "Source B".into(),
+                url_template: "https://example.com/b".into(),
+                enabled: true,
+                remark: None,
+                user_agent: None,
+            })
+            .await
+            .unwrap()
+            .id;
+
+        let mut node_a = node("node-a", "香港01");
+        node_a.source_id = Some(source_a.clone());
+        node_a.updated_at = chrono::Utc::now();
+
+        let mut node_b_new = node("node-b-new", "香港01");
+        node_b_new.source_id = Some(source_b.clone());
+        node_b_new.updated_at = chrono::Utc::now() - chrono::Duration::hours(1);
+
+        db.replace_source_nodes(&source_a, &[node_a]).await.unwrap();
+        db.replace_source_nodes(&source_b, &[node_b_new])
+            .await
+            .unwrap();
+        db.rebuild_node_index().await.unwrap();
+
+        // 场景 1: 映射带有 source_id: Some(source_b)，旧 ID 失效
+        // 即使 A 的更新时间更晚，也必须安全改绑到 B 的新节点，绝不改绑到 A！
+        let mut mappings = vec![crate::proxy::PortMapping {
+            id: "m-b".into(),
+            port: 10820,
+            node_id: "node-b-stale".into(),
+            node_name: "香港01".into(),
+            source_id: Some(source_b.clone()),
+            enabled: true,
+        }];
+        let options = MihomoConfigOptions {
+            port_mappings: mappings.clone(),
+            port_mapping_nodes: Vec::new(),
+            ..Default::default()
+        };
+        let manager = ProxyManager::new(options.clone());
+        db.update_proxy_config(&options).await.unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+
+        VpnApp::prime_port_mapping_candidates(&db, &manager, &mut mappings, &tx).await;
+
+        let (broken_ids, rebinds) = wait_for_validity(&rx);
+        assert!(broken_ids.is_empty(), "同源内有同名节点应成功改绑");
+        assert_eq!(rebinds, vec![("m-b".to_string(), "node-b-new".to_string())]);
+        assert_eq!(mappings[0].node_id, "node-b-new");
+
+        // 场景 2: 来源 B 已被删除，旧映射残留且 source_id 仍指向已删除的 B
+        // 此时同名节点仅剩 A，绝不能跨源盗用 A！必须标为失效！
+        let mut mappings_orphaned = vec![crate::proxy::PortMapping {
+            id: "m-orphaned".into(),
+            port: 10830,
+            node_id: "node-b-deleted".into(),
+            node_name: "香港01".into(),
+            source_id: Some("deleted-source-id".into()),
+            enabled: true,
+        }];
+        let (tx2, rx2) = std::sync::mpsc::channel();
+        VpnApp::prime_port_mapping_candidates(&db, &manager, &mut mappings_orphaned, &tx2).await;
+        let (broken2, rebinds2) = wait_for_validity(&rx2);
+        assert_eq!(
+            broken2,
+            vec!["m-orphaned".to_string()],
+            "原订阅源已消失时必须标记失效"
+        );
+        assert!(rebinds2.is_empty(), "原订阅源已消失绝不跨源抢绑");
 
         drop(manager);
         drop(db);

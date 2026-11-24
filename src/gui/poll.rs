@@ -651,8 +651,8 @@ impl VpnApp {
                         }
                         BgMsg::FailoverTarget(outcome) => self.on_failover_target(outcome),
                         BgMsg::SpeedtestPingResult { ping_ms, jitter_ms } => {
-                            self.speedtest_last_ping_ms = Some(ping_ms);
-                            self.speedtest_last_jitter_ms = Some(jitter_ms);
+                            self.speedtest_last_ping_ms = ping_ms;
+                            self.speedtest_last_jitter_ms = jitter_ms;
                         }
                         BgMsg::SpeedtestLiveSample { mbps, phase } => {
                             if !self.speedtester.is_cancelled() {

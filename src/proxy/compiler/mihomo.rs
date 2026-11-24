@@ -232,6 +232,31 @@ fn classify_regional_candidate(name: &str) -> Option<&'static str> {
     }
 }
 
+/// 语义比对两个 Clash 代理对象是否代表完全一致的出站连接语义（除 name 以外全部配置严格匹配）。
+/// 防止仅凭 server/port/type 误将不同认证凭据（不同密码/UUID/密钥）的不同节点合为一个。
+fn clash_proxies_semantically_equal(a: &Value, b: &Value) -> bool {
+    let (Some(a_map), Some(b_map)) = (a.as_object(), b.as_object()) else {
+        return false;
+    };
+    for (k, v) in a_map {
+        if k == "name" {
+            continue;
+        }
+        if b_map.get(k) != Some(v) {
+            return false;
+        }
+    }
+    for (k, _) in b_map {
+        if k == "name" {
+            continue;
+        }
+        if !a_map.contains_key(k) {
+            return false;
+        }
+    }
+    true
+}
+
 pub struct MihomoCompiler {
     capabilities: CompilerCapabilities,
 }
@@ -531,14 +556,12 @@ impl BackendCompiler for MihomoCompiler {
 
         // 处理一节点一端口映射
         let mut port_listeners: Vec<Value> = Vec::new();
-        let mut port_rules: Vec<String> = Vec::new();
+        let mut mapped_port_targets: std::collections::HashMap<u16, String> =
+            std::collections::HashMap::new();
         for (port, raw_name, clash_obj) in &plan.outbounds.port_mapping_nodes {
             let mut target_proxy_name = None;
             for existing in &candidate_proxies {
-                let is_same = existing.get("server") == clash_obj.get("server")
-                    && existing.get("port") == clash_obj.get("port")
-                    && existing.get("type") == clash_obj.get("type");
-                if is_same {
+                if clash_proxies_semantically_equal(existing, clash_obj) {
                     if let Some(n) = existing.get("name").and_then(Value::as_str) {
                         target_proxy_name = Some(n.to_string());
                         break;
@@ -560,6 +583,7 @@ impl BackendCompiler for MihomoCompiler {
                     name
                 }
             };
+            mapped_port_targets.insert(*port, target_name.clone());
 
             port_listeners.push(json!({
                 "name": format!("inbound-{}", port),
@@ -568,7 +592,6 @@ impl BackendCompiler for MihomoCompiler {
                 "listen": if plan.inbounds.allow_lan { "0.0.0.0" } else { "127.0.0.1" },
                 "proxy": target_name
             }));
-            port_rules.push(format!("IN-PORT,{},{}", port, target_name));
         }
 
         for mapping in &plan.inbounds.port_mappings {
@@ -1194,8 +1217,13 @@ impl BackendCompiler for MihomoCompiler {
                         )
                     }
                     IRMatcher::Inbound(tag) => {
-                        if let Some(port) = tag.strip_prefix("inbound-") {
-                            format!("IN-PORT,{port},{target}")
+                        if let Some(port_str) = tag.strip_prefix("inbound-") {
+                            let rule_target = port_str
+                                .parse::<u16>()
+                                .ok()
+                                .and_then(|p| mapped_port_targets.get(&p))
+                                .unwrap_or(&target);
+                            format!("IN-PORT,{port_str},{rule_target}")
                         } else {
                             format!("IN-NAME,{tag},{target}")
                         }
@@ -1594,6 +1622,7 @@ mod tests {
                 port: 10820,
                 node_id: "stale-id".into(),
                 node_name: "日本1".into(),
+                source_id: None,
                 enabled: true,
             }],
             // prime 未能解析出该映射的节点：port_mapping_nodes 为空
@@ -1629,6 +1658,7 @@ mod tests {
                 port: 10810,
                 node_id: "n1".into(),
                 node_name: "美国2".into(),
+                source_id: None,
                 enabled: true,
             }],
             port_mapping_nodes: vec![(
@@ -1661,6 +1691,54 @@ mod tests {
                 .is_some_and(|text| text == "IN-PORT,10810,美国2")),
             "IN-PORT 规则必须指向映射节点本体"
         );
+    }
+
+    #[test]
+    fn port_mapping_same_endpoint_different_password_keeps_identity() {
+        let options = MihomoConfigOptions {
+            url_test: false,
+            port_mappings: vec![crate::proxy::PortMapping {
+                id: "mapping-b".into(),
+                port: 10820,
+                node_id: "node-b".into(),
+                node_name: "airport-B-test".into(),
+                source_id: None,
+                enabled: true,
+            }],
+            port_mapping_nodes: vec![(
+                10820,
+                "airport-B-test".into(),
+                json!({
+                    "name": "airport-B-test",
+                    "type": "ss",
+                    "server": "203.0.113.1",
+                    "port": 8388,
+                    "cipher": "aes-128-gcm",
+                    "password": "test-only-B"
+                }),
+            )],
+            ..Default::default()
+        };
+        let config = compile_result(options).expect("compile mapping config");
+        let listener = config["listeners"]
+            .as_array()
+            .expect("mapping listeners")
+            .iter()
+            .find(|entry| entry["port"].as_u64() == Some(10820))
+            .expect("port 10820 listener");
+        let target = listener["proxy"].as_str().expect("fixed proxy target");
+        let bound_proxy = config["proxies"]
+            .as_array()
+            .expect("proxies")
+            .iter()
+            .find(|proxy| proxy["name"].as_str() == Some(target))
+            .expect("listener target exists");
+        assert_eq!(bound_proxy["password"].as_str(), Some("test-only-B"));
+        assert!(config["rules"]
+            .as_array()
+            .expect("rules")
+            .iter()
+            .any(|rule| { rule.as_str() == Some("IN-PORT,10820,airport-B-test") }));
     }
 
     #[test]

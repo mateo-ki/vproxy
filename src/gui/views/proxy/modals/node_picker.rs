@@ -102,8 +102,11 @@ impl VpnApp {
                                     egui::Layout::right_to_left(egui::Align::Center),
                                     |ui| {
                                         if ui.button("选择").clicked() {
-                                            picked_node =
-                                                Some((node.id.clone(), node.name.clone()));
+                                            picked_node = Some((
+                                                node.id.clone(),
+                                                node.name.clone(),
+                                                node.source_id.clone(),
+                                            ));
                                         }
                                     },
                                 );
@@ -123,7 +126,7 @@ impl VpnApp {
         if !open {
             self.node_picker_open = false;
         }
-        if let Some((id, name)) = picked_node {
+        if let Some((id, name, source_id)) = picked_node {
             match self.node_picker_target {
                 Some(crate::gui::types::NodePickerTarget::Speedtest) => {
                     self.speedtest_target_node_id = Some(id);
@@ -142,23 +145,27 @@ impl VpnApp {
                     if let Some(mapping) = self.proxy_config.port_mappings.get_mut(target_idx) {
                         mapping.node_id = id;
                         mapping.node_name = name;
+                        mapping.source_id = source_id;
                         self.save_proxy_config();
                     }
                 }
                 Some(crate::gui::types::NodePickerTarget::NewPortMapping) => {
                     self.new_mapping_node_id = Some(id);
                     self.new_mapping_node_name = Some(name);
+                    self.new_mapping_node_source_id = source_id;
                 }
                 None => {
                     if let Some(target_idx) = self.node_picker_target_index {
                         if let Some(mapping) = self.proxy_config.port_mappings.get_mut(target_idx) {
                             mapping.node_id = id;
                             mapping.node_name = name;
+                            mapping.source_id = source_id;
                             self.save_proxy_config();
                         }
                     } else {
                         self.new_mapping_node_id = Some(id);
                         self.new_mapping_node_name = Some(name);
+                        self.new_mapping_node_source_id = source_id;
                     }
                 }
             }

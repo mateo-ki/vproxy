@@ -87,6 +87,8 @@ pub struct PortMapping {
     pub port: u16,
     pub node_id: String,
     pub node_name: String,
+    #[serde(default)]
+    pub source_id: Option<String>,
     #[serde(default = "default_port_mapping_enabled")]
     pub enabled: bool,
 }

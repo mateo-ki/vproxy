@@ -65,6 +65,7 @@ impl VpnApp {
                     {
                         self.new_mapping_node_id = None;
                         self.new_mapping_node_name = None;
+                        self.new_mapping_node_source_id = None;
                     }
 
                 ui.add_space(8.0);
@@ -104,6 +105,7 @@ impl VpnApp {
                                     port,
                                     node_id: self.new_mapping_node_id.take().unwrap_or_default(),
                                     node_name: self.new_mapping_node_name.take().unwrap_or_default(),
+                                    source_id: self.new_mapping_node_source_id.take(),
                                     enabled: true,
                                 };
                                 self.proxy_config.port_mappings.push(mapping);
