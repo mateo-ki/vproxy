@@ -298,6 +298,25 @@ async fn verify_nodes_with_vpcore_path(
 
     let stdout_str = String::from_utf8_lossy(&output.stdout);
     let stderr_str = String::from_utf8_lossy(&output.stderr);
+
+    if !output.status.success() {
+        let err_summary = if !stderr_str.trim().is_empty() {
+            stderr_str.trim()
+        } else {
+            stdout_str.trim()
+        };
+        tracing::warn!(
+            status = %output.status,
+            error = %err_summary,
+            "vpcore test 执行退出码异常"
+        );
+        return Err(anyhow!(
+            "vpcore test 执行退出码异常 ({}): {}",
+            output.status,
+            err_summary
+        ));
+    }
+
     let json_candidate = match (stdout_str.find('{'), stdout_str.rfind('}')) {
         (Some(start), Some(end)) if start <= end => &stdout_str[start..=end],
         _ => stdout_str.trim(),
@@ -306,11 +325,17 @@ async fn verify_nodes_with_vpcore_path(
         match serde_json::from_str(json_candidate) {
             Ok(m) => m,
             Err(e) => {
-                eprintln!(
-                    "vpcore test 输出非 JSON (status: {}): err={}, stderr={}, stdout={}",
-                    output.status, e, stderr_str, stdout_str
+                tracing::warn!(
+                    status = %output.status,
+                    err = %e,
+                    stderr = %stderr_str,
+                    stdout = %stdout_str,
+                    "vpcore test 输出非合法 JSON"
                 );
-                std::collections::HashMap::new()
+                return Err(anyhow!(
+                    "vpcore test 输出非合法 JSON (status: {}): {e}",
+                    output.status
+                ));
             }
         };
 

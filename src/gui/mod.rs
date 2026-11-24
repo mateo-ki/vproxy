@@ -5475,6 +5475,7 @@ impl VpnApp {
                 }
             }
             NodeCardAction::Connect { id, name } => {
+                self.focused_node_id = Some(id.clone());
                 self.switch_proxy_node(id, name, "设为活动节点");
             }
             NodeCardAction::Speedtest(id) => self.speedtest_one(id),

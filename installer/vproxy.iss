@@ -46,6 +46,7 @@ Type: files; Name: "{group}\VPN Parser.lnk"
 
 [Files]
 Source: "..\target\release\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\data\kernels\*"; DestDir: "{app}\data\kernels"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"

@@ -42,7 +42,7 @@ impl VpnApp {
         let running = self.proxy_status.kernel_serving();
         let current_group_now =
             if self.proxy_selected_group == "全部" || self.proxy_selected_group == "PROXY" {
-                if is_auto {
+                if running && is_auto {
                     self.kernel_egress_name()
                 } else {
                     self.selected_proxy_node_id.as_ref().and_then(|id| {
@@ -52,11 +52,13 @@ impl VpnApp {
                             .map(|n| n.name.clone())
                     })
                 }
-            } else {
+            } else if running {
                 self.kernel_groups
                     .iter()
                     .find(|g| g.name == self.proxy_selected_group)
                     .and_then(|g| g.now.clone())
+            } else {
+                None
             };
 
         // ===================================================================
@@ -390,11 +392,15 @@ impl VpnApp {
                                         let node = &self.proxy_nodes[entry.index];
 
                                         // 活跃状态判定：优先匹配当前策略组活跃出口，或者全局选中节点
-                                        let is_active = if let Some(ref now) = current_group_now {
-                                            now == &node.name
-                                        } else if is_auto {
-                                            self.kernel_egress_name().as_deref()
-                                                == Some(node.name.as_str())
+                                        let is_active = if running {
+                                            if let Some(ref now) = current_group_now {
+                                                now == &node.name
+                                            } else if is_auto {
+                                                self.kernel_egress_name().as_deref()
+                                                    == Some(node.name.as_str())
+                                            } else {
+                                                selected_id.as_deref() == Some(&node.id)
+                                            }
                                         } else {
                                             selected_id.as_deref() == Some(&node.id)
                                         };
@@ -532,6 +538,7 @@ impl VpnApp {
 
                                         if menu_action.is_none() {
                                             if double_clicked {
+                                                self.focused_node_id = Some(node_id.clone());
                                                 if is_auto {
                                                     switch_to_manual = true;
                                                 }

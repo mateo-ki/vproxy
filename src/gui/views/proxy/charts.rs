@@ -1539,11 +1539,15 @@ impl VpnApp {
                                     ui.columns(cols, |column_uis| {
                                     for (k, node) in pair.iter().enumerate() {
                                         let column_ui = &mut column_uis[k];
-                                        let is_active = if let Some(ref now) = group.now {
-                                            now == &node.name
+                                        let is_active = if proxy_up {
+                                            if let Some(ref now) = group.now {
+                                                now == &node.name
+                                            } else {
+                                                current_display == node.name
+                                                    || (group.name == "全部" && selected_id.as_deref() == Some(&node.id))
+                                            }
                                         } else {
-                                            current_display == node.name
-                                                || (group.name == "全部" && selected_id.as_deref() == Some(&node.id))
+                                            selected_id.as_deref() == Some(&node.id)
                                         };
                                         let is_focused = focused_id.as_deref() == Some(node.id.as_str());
                                         let is_switching = switching_id.as_deref() == Some(&node.id);
@@ -1650,9 +1654,11 @@ impl VpnApp {
 
                                         if menu_action.is_none() {
                                             if double_clicked {
+                                                self.focused_node_id = Some(node_id.clone());
                                                 clicked_node = Some(node.clone());
                                                 force_manual = true;
                                             } else if clicked {
+                                                self.focused_node_id = Some(node_id.clone());
                                                 if !is_active && manual_mode {
                                                     clicked_node = Some(node.clone());
                                                 } else if !manual_mode {

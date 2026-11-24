@@ -24,7 +24,10 @@ pub fn compact_node_card(
         } else if is_active {
             (theme::accent_bg(), Stroke::new(1.5_f32, theme::accent()))
         } else if is_focused {
-            (theme::panel_hover(), Stroke::new(1.0_f32, theme::border()))
+            (
+                theme::panel_hover(),
+                Stroke::new(1.5_f32, theme::accent().gamma_multiply(0.85)),
+            )
         } else {
             (theme::panel(), Stroke::new(1.0_f32, theme::border_subtle()))
         };
@@ -41,6 +44,13 @@ pub fn compact_node_card(
                 blur: 16,
                 spread: 0,
                 color: theme::accent().gamma_multiply(0.22),
+            });
+        } else if is_focused {
+            frame = frame.shadow(egui::epaint::Shadow {
+                offset: [0, 2],
+                blur: 8,
+                spread: 0,
+                color: theme::accent().gamma_multiply(0.12),
             });
         }
 
@@ -165,11 +175,11 @@ pub fn compact_node_card(
                 Stroke::new(1.5_f32, theme::accent()),
                 egui::StrokeKind::Inside,
             );
-        } else if response.hovered() && !is_active && !is_focused && !is_switching {
+        } else if response.hovered() && !is_active && !is_switching {
             ui.painter().rect_stroke(
                 response.rect,
                 CornerRadius::same(10),
-                Stroke::new(1.0_f32, theme::accent().gamma_multiply(0.4)),
+                Stroke::new(1.0_f32, theme::accent().gamma_multiply(0.5)),
                 egui::StrokeKind::Inside,
             );
         }
