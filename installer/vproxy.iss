@@ -46,7 +46,7 @@ Type: files; Name: "{group}\VPN Parser.lnk"
 
 [Files]
 Source: "..\target\release\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\data\kernels\*"; DestDir: "{app}\data\kernels"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "*.backup*,*.old*,*.tmp*,.release-cache*,.cache*"
+Source: "..\data\kernels\*"; DestDir: "{app}\data\kernels"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist; Excludes: "*.backup*,*.old*,*.tmp*,.release-cache*,.cache*"
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"
@@ -84,11 +84,11 @@ var
 begin
   if CurStep = ssInstall then
   begin
-    // 安装文件覆写前，仅对当前目标安装目录内残存的内核进程按路径精确释放句柄，绝不误伤系统其他应用
+    // 安装文件覆写前，仅对当前目标安装目录内残存的内核进程按路径精确释放句柄，绝不误伤系统其他应用或同名邻近目录
     Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
       '-NoProfile -ExecutionPolicy Bypass -Command "' +
-      '$target = [regex]::Escape(''' + ExpandConstant('{app}') + '''); ' +
-      'Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and ($_.ExecutablePath -match (''^'' + $target)) } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }" ',
+      '$target = (''' + ExpandConstant('{app}') + ''').TrimEnd(''\'') + ''\''; ' +
+      'Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith($target, [System.StringComparison]::OrdinalIgnoreCase) } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }" ',
       '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   end;
 

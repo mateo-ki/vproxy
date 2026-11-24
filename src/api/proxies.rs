@@ -289,14 +289,17 @@ pub async fn get_proxy_delay(
     }
 }
 
-/// `POST /proxies/delay`：高并发批量 RESTful 探针
+/// `POST /proxies/delay`：高并发批量 RESTful 探针（限制最大并发窗口，避免突发耗尽系统句柄）
 pub async fn batch_proxy_delay(
     State(st): State<Arc<AppState>>,
     Json(body): Json<BatchProxyDelayRequest>,
 ) -> impl IntoResponse {
+    const MAX_BATCH_CONCURRENCY: usize = 64;
+    let concurrency = Arc::new(tokio::sync::Semaphore::new(MAX_BATCH_CONCURRENCY));
     let mut tasks = tokio::task::JoinSet::new();
     for name in body.names {
         let st = st.clone();
+        let concurrency = concurrency.clone();
         let query = ProxyDelayQuery {
             url: body.url.clone(),
             timeout: body.timeout,
@@ -304,6 +307,12 @@ pub async fn batch_proxy_delay(
             mode: body.mode.clone(),
         };
         tasks.spawn(async move {
+            let Ok(_permit) = concurrency.acquire_owned().await else {
+                return (
+                    name,
+                    Err((StatusCode::SERVICE_UNAVAILABLE, "探针并发队列已关闭".into())),
+                );
+            };
             let res = probe_proxy_delay_inner(&st, &name, query).await;
             (name, res)
         });
@@ -470,9 +479,9 @@ async fn probe_node_delay_multistage(
         }
     }
 
-    // 阶 3: HTTP / SOCKS 协议直通探活
+    // 阶 3: 无认证/非 TLS 的 HTTP / SOCKS 明文直通探活
     let proto = node.protocol.to_ascii_lowercase();
-    if proto == "http" || proto == "socks5" || proto == "socks" {
+    if can_use_direct_proxy_probe(node) {
         return run_direct_proxy_probe(st, node, test_url, timeout_dur).await;
     }
 
@@ -493,7 +502,42 @@ async fn probe_node_delay_multistage(
         }
     }
 
-    run_kernel_proxy_probe(st, node, test_url, timeout_dur).await
+    run_kernel_proxy_probe(st, node, test_url, timeout_dur, mode).await
+}
+
+fn can_use_direct_proxy_probe(node: &Node) -> bool {
+    let proto = node.protocol.to_ascii_lowercase();
+    if proto != "http" && proto != "socks5" && proto != "socks" {
+        return false;
+    }
+    let has_tls = node.config.get("tls").and_then(|v| v.as_bool()) == Some(true)
+        || node
+            .config
+            .get("security")
+            .and_then(|v| v.as_str())
+            .is_some_and(|s| s.eq_ignore_ascii_case("tls"));
+    if has_tls {
+        return false;
+    }
+    let has_auth = node
+        .config
+        .get("username")
+        .and_then(|v| v.as_str())
+        .is_some_and(|s| !s.is_empty())
+        || node
+            .config
+            .get("password")
+            .and_then(|v| v.as_str())
+            .is_some_and(|s| !s.is_empty());
+    !has_auth
+}
+
+fn format_host_port(host: &str, port: u16) -> String {
+    if host.contains(':') && !host.starts_with('[') {
+        format!("[{host}]:{port}")
+    } else {
+        format!("{host}:{port}")
+    }
 }
 
 async fn run_direct_proxy_probe(
@@ -507,7 +551,8 @@ async fn run_direct_proxy_probe(
     } else {
         "socks5h"
     };
-    let proxy_url = format!("{scheme}://{}:{}", node.server, node.port);
+    let host_port = format_host_port(&node.server, node.port);
+    let proxy_url = format!("{scheme}://{host_port}");
     let proxy = reqwest::Proxy::all(&proxy_url)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     let client = reqwest::Client::builder()
@@ -537,6 +582,7 @@ async fn run_kernel_proxy_probe(
     node: &Node,
     test_url: &str,
     timeout_dur: Duration,
+    mode: &str,
 ) -> Result<i64, (StatusCode, String)> {
     let _permit = KERNEL_PROBE_SEMAPHORE
         .acquire()
@@ -575,8 +621,20 @@ async fn run_kernel_proxy_probe(
             }
         }
         Err(e) => {
-            tracing::warn!(node_id = %node.id, %e, "单节点探针内核启动不可用，回退至 TCP Ping 延迟");
-            run_tcp_ping(st, node, timeout_dur).await
+            let err_text = e.to_string();
+            // 仅在 auto 模式下且属于缺少内核可执行文件时允许降级为 TCP 握手；
+            // real 模式或节点配置自身错误绝不静默伪装成连通成功
+            if mode != "real" && err_text.contains("未找到") {
+                tracing::warn!(node_id = %node.id, %e, "单节点探针内核未安装，auto 模式降级至 TCP Ping");
+                run_tcp_ping(st, node, timeout_dur).await
+            } else {
+                tracing::warn!(node_id = %node.id, %e, "单节点探针内核启动失败");
+                record_delay_async(st, &node.id, false, 0, "mihomo_probe");
+                Err((
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    format!("探针启动失败: {e}"),
+                ))
+            }
         }
     }
 }
@@ -607,7 +665,7 @@ async fn check_tcp_reachability(
     port: u16,
     timeout_dur: Duration,
 ) -> Result<i64, String> {
-    let addrs = match tokio::net::lookup_host(format!("{host}:{port}")).await {
+    let addrs = match tokio::net::lookup_host((host, port)).await {
         Ok(iter) => iter.collect::<Vec<_>>(),
         Err(e) => return Err(format!("DNS 解析失败: {e}")),
     };
@@ -737,5 +795,48 @@ mod tests {
             .unwrap_err();
         assert_eq!(err.0, StatusCode::GATEWAY_TIMEOUT);
         assert_eq!(err.1, "Timeout");
+    }
+
+    #[test]
+    fn test_direct_proxy_probe_eligibility_and_ipv6_formatting() {
+        assert_eq!(format_host_port("1.2.3.4", 8080), "1.2.3.4:8080");
+        assert_eq!(format_host_port("2001:db8::1", 1080), "[2001:db8::1]:1080");
+        assert_eq!(
+            format_host_port("[2001:db8::1]", 1080),
+            "[2001:db8::1]:1080"
+        );
+
+        let now = chrono::Utc::now();
+        let make_node = |protocol: &str, config: Value| Node {
+            id: "id".into(),
+            source_id: None,
+            protocol: protocol.into(),
+            name: "test".into(),
+            server: "1.2.3.4".into(),
+            port: 1080,
+            raw: String::new(),
+            config,
+            country: None,
+            latency_ms: None,
+            latency_ok: None,
+            download_kbps: None,
+            latency_kernel: None,
+            latency_test_kind: None,
+            latency_tested_at: None,
+            created_at: now,
+            updated_at: now,
+        };
+
+        assert!(can_use_direct_proxy_probe(&make_node("http", json!({}))));
+        assert!(can_use_direct_proxy_probe(&make_node("socks5", json!({}))));
+        assert!(!can_use_direct_proxy_probe(&make_node(
+            "http",
+            json!({ "tls": true })
+        )));
+        assert!(!can_use_direct_proxy_probe(&make_node(
+            "socks5",
+            json!({ "username": "u", "password": "p" })
+        )));
+        assert!(!can_use_direct_proxy_probe(&make_node("vless", json!({}))));
     }
 }

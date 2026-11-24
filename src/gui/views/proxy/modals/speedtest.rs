@@ -1087,11 +1087,6 @@ impl VpnApp {
 
                                     let ul_val_str = if let Some(ul) = self.speedtest_last_ul_mbps {
                                         format!("{ul:.1} Mbps")
-                                    } else if let Some(dl) = self.speedtest_last_dl_mbps {
-                                        format!("{:.1} Mbps", dl * 0.12)
-                                    } else if self.traffic_up_rate > 0 {
-                                        let mbps = (self.traffic_up_rate as f32 * 8.0 / 1_000_000.0).max(0.0);
-                                        format!("{mbps:.1} Mbps")
                                     } else {
                                         "--".into()
                                     };
@@ -1106,8 +1101,6 @@ impl VpnApp {
 
                                     let jit_val_str = if let Some(jit) = self.speedtest_last_jitter_ms {
                                         format!("{jit:.1} ms")
-                                    } else if let Some(ref node) = selected_node {
-                                        node.latency_ms.map(|ms| format!("{:.1} ms", ((ms % 23) as f32) / 8.0 + 1.2)).unwrap_or_else(|| "--".into())
                                     } else {
                                         "--".into()
                                     };

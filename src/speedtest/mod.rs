@@ -690,37 +690,4 @@ mod tests {
             "被投毒的域名应放行进入第二阶段真实内核测试"
         );
     }
-
-    #[tokio::test]
-    #[ignore = "10k 真实节点全量测速基准，按需手动运行"]
-    async fn inspect_and_test_vpcore_on_vproxy_db_nodes() {
-        if let Ok(mut db) = Database::connect("data/vproxy.db").await {
-            db.node_root = std::path::PathBuf::from("data/subscriptions");
-            let loukas_id = "96a211ab-a815-4c4a-911e-3989938779f8";
-            let loukas_nodes = db.load_nodes(Some(loukas_id)).await.unwrap_or_default();
-            let total_loukas = loukas_nodes.len();
-
-            let network_limit = std::sync::Arc::new(tokio::sync::Semaphore::new(128));
-            let start = std::time::Instant::now();
-            let vp_res = crate::proxy_probe::verify_nodes_with_vpcore_progress_limited(
-                loukas_nodes,
-                std::time::Duration::from_millis(3000),
-                None::<fn(crate::proxy_probe::ProxyProbeProgress)>,
-                network_limit.clone(),
-                100,
-                false,
-                Some("http://cp.cloudflare.com/generate_204".into()),
-            )
-            .await;
-            let elapsed = start.elapsed();
-
-            if let Ok(ref vp) = vp_res {
-                let vp_ok = vp.iter().filter(|r| r.ok).count();
-                println!(
-                    ">>> VPCORE FINAL ON ALL {} LOUKAS NODES: {} OK in {:?} <<<",
-                    total_loukas, vp_ok, elapsed
-                );
-            }
-        }
-    }
 }

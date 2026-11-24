@@ -149,17 +149,11 @@ pub async fn verify_nodes_with_vpcore_progress_limited(
         return Ok(Vec::new());
     }
     let vpcore = crate::kernel::find_kernel_executable(crate::kernel::KernelKind::VpCore)
-        .or_else(|| {
-            let dev =
-                std::path::PathBuf::from(r"D:\project\rust\VP_Core\target\release\vpcore.exe");
-            if dev.is_file() {
-                Some(dev)
-            } else {
-                None
-            }
-        })
         .ok_or_else(|| {
-            anyhow!("未找到 vpcore.exe；请先下载或在 data/kernels/vpcore/ 放置 VP-Core 内核")
+            anyhow!(
+                "未找到 {}；请先下载或在 data/kernels/vpcore/ 放置 VP-Core 内核",
+                crate::kernel::KernelKind::VpCore.executable_name()
+            )
         })?;
     let total = nodes.len();
     let started = tokio::time::Instant::now();
@@ -230,6 +224,14 @@ pub async fn verify_nodes_with_vpcore_progress_limited(
     Ok(results)
 }
 
+struct TempDirGuard(std::path::PathBuf);
+
+impl Drop for TempDirGuard {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
 async fn verify_nodes_with_vpcore_path(
     nodes: Vec<Node>,
     timeout: Duration,
@@ -249,6 +251,7 @@ async fn verify_nodes_with_vpcore_path(
 
     let work_dir = std::env::temp_dir().join(format!("vproxy-vpcore-{}", Uuid::new_v4()));
     tokio::fs::create_dir_all(&work_dir).await?;
+    let _dir_guard = TempDirGuard(work_dir.clone());
 
     let member_names: Vec<String> = prepared.iter().map(|p| p.name.clone()).collect();
     let proxies_val: Vec<Value> = prepared.iter().map(|p| p.config.clone()).collect();
@@ -282,7 +285,9 @@ async fn verify_nodes_with_vpcore_path(
         .arg(&config_path)
         .arg("--timeout")
         .arg(timeout_ms.to_string())
-        .arg("--json");
+        .arg("--json")
+        .kill_on_drop(true)
+        .stdin(Stdio::null());
 
     if let Some(ref url) = test_url {
         command.arg("--url").arg(url);
@@ -293,8 +298,16 @@ async fn verify_nodes_with_vpcore_path(
         command.creation_flags(0x0800_0000);
     }
 
-    let output = command.output().await.context("执行 vpcore test 失败")?;
-    let _ = tokio::fs::remove_dir_all(&work_dir).await;
+    let batch_budget = timeout.saturating_mul(6).max(Duration::from_secs(60));
+    let output = tokio::time::timeout(batch_budget, command.output())
+        .await
+        .map_err(|_| {
+            anyhow!(
+                "vpcore test 批次执行超时（超过 {}s）",
+                batch_budget.as_secs()
+            )
+        })?
+        .context("执行 vpcore test 失败")?;
 
     let stdout_str = String::from_utf8_lossy(&output.stdout);
     let stderr_str = String::from_utf8_lossy(&output.stderr);
@@ -310,6 +323,13 @@ async fn verify_nodes_with_vpcore_path(
             error = %err_summary,
             "vpcore test 执行退出码异常"
         );
+        if err_summary.contains("unexpected argument")
+            || err_summary.contains("unrecognized option")
+        {
+            return Err(anyhow!(
+                "当前 VP-Core 内核版本不支持原生批量测速参数 (--timeout/--json)，请升级 VP-Core 或切换测速内核为自动分配"
+            ));
+        }
         return Err(anyhow!(
             "vpcore test 执行退出码异常 ({}): {}",
             output.status,
