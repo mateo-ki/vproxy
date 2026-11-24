@@ -26,6 +26,8 @@ use tokio::sync::oneshot;
 use tokio::sync::Mutex as TokioMutex;
 use tower_http::trace::TraceLayer;
 
+pub mod proxies;
+
 #[derive(Clone)]
 pub struct AppState {
     pub db: Database,
@@ -78,6 +80,44 @@ pub fn router(state: AppState, api_token: Option<String>) -> Router {
         .route("/api/export/clash", get(export_clash))
         .route("/api/export/uri", get(export_uri))
         .route("/api/export/vp", get(export_vp))
+        // 标准 Clash / Mihomo / Sing-box RESTful 探针与节点接口
+        .route(
+            "/proxies",
+            get(proxies::get_proxies).options(proxies::cors_preflight),
+        )
+        .route(
+            "/proxies/{name}",
+            get(proxies::get_proxy_detail).options(proxies::cors_preflight),
+        )
+        .route(
+            "/proxies/{name}/delay",
+            get(proxies::get_proxy_delay).options(proxies::cors_preflight),
+        )
+        .route(
+            "/proxies/delay",
+            post(proxies::batch_proxy_delay).options(proxies::cors_preflight),
+        )
+        // VProxy API 命名空间别名
+        .route(
+            "/api/proxies",
+            get(proxies::get_proxies).options(proxies::cors_preflight),
+        )
+        .route(
+            "/api/proxies/{name}",
+            get(proxies::get_proxy_detail).options(proxies::cors_preflight),
+        )
+        .route(
+            "/api/proxies/{name}/delay",
+            get(proxies::get_proxy_delay).options(proxies::cors_preflight),
+        )
+        .route(
+            "/api/proxies/delay",
+            post(proxies::batch_proxy_delay).options(proxies::cors_preflight),
+        )
+        .route(
+            "/api/nodes/{id}/delay",
+            get(proxies::get_proxy_delay).options(proxies::cors_preflight),
+        )
         .layer(middleware::from_fn(move |request, next: Next| {
             let expected = api_token.clone();
             async move { authenticate_request(request, next, expected.as_deref()).await }
@@ -187,16 +227,19 @@ impl ApiServerController {
     }
 }
 
-/// 允许 `?token=` 的只读导出路由前缀：导出订阅链接要贴进浏览器 / 其他客户端，
-/// token 只能随 URL 走；其余 GET 一律要求 Bearer 头，避免 token 经浏览器历史、
-/// 访问日志、Referer 泄露后拿到全量节点凭据。
-const QUERY_TOKEN_ALLOWED_PREFIXES: &[&str] = &["/api/export/"];
+/// 允许 `?token=` 或 `?secret=` 的只读导出与探针路由前缀：
+/// 导出订阅与外部 Clash 控制器探针（如 FlClash、Clash Verge）允许通过 query 参数携带凭据。
+const QUERY_TOKEN_ALLOWED_PREFIXES: &[&str] =
+    &["/api/export/", "/proxies", "/api/proxies", "/api/nodes/"];
 
 async fn authenticate_request(
     request: Request<Body>,
     next: Next,
     expected: Option<&str>,
 ) -> Response {
+    if request.method() == Method::OPTIONS {
+        return next.run(request).await;
+    }
     let Some(expected) = expected else {
         return next.run(request).await;
     };
@@ -217,7 +260,7 @@ async fn authenticate_request(
                 .split('&')
                 .find_map(|pair| {
                     let (key, value) = pair.split_once('=')?;
-                    (key == "token").then(|| value.to_owned())
+                    (key == "token" || key == "secret").then(|| value.to_owned())
                 })
                 .unwrap_or_default()
         })
@@ -958,6 +1001,11 @@ mod tests {
         let app = Router::new()
             .route("/api/export/uri", get(|| async { "export-ok" }))
             .route("/api/nodes", get(|| async { "nodes-ok" }))
+            .route("/proxies", get(|| async { "proxies-ok" }))
+            .route(
+                "/proxies/node-1/delay",
+                axum::routing::options(|| async { "" }),
+            )
             .layer(axum::middleware::from_fn(
                 |req: Request<Body>, next: Next| async move {
                     authenticate_request(req, next, Some("secret")).await
@@ -973,6 +1021,26 @@ mod tests {
             .oneshot(get("/api/export/uri?token=secret"))
             .await
             .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        // Clash /proxies 路由：?secret= 或 ?token= 放行
+        let resp = app
+            .clone()
+            .oneshot(get("/proxies?secret=secret"))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let resp = app
+            .clone()
+            .oneshot(get("/proxies?token=secret"))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        // OPTIONS 跨域预检请求：免密放行
+        let options_req = http_request(Method::OPTIONS, "/proxies/node-1/delay");
+        let resp = app.clone().oneshot(options_req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
 
         // 同样的 token 打到普通 GET：拒绝

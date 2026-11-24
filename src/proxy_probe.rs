@@ -136,6 +136,202 @@ pub async fn verify_nodes_with_mihomo_progress_limited(
     Ok(results)
 }
 
+pub async fn verify_nodes_with_vpcore_progress_limited(
+    nodes: Vec<Node>,
+    timeout: Duration,
+    progress: Option<impl Fn(ProxyProbeProgress) + Send + Sync>,
+    network_limit: Arc<Semaphore>,
+    batch_size: usize,
+    conditional_isolation: bool,
+    test_url: Option<String>,
+) -> Result<Vec<ProxyProbeResult>> {
+    if nodes.is_empty() {
+        return Ok(Vec::new());
+    }
+    let vpcore = crate::kernel::find_kernel_executable(crate::kernel::KernelKind::VpCore)
+        .or_else(|| {
+            let dev =
+                std::path::PathBuf::from(r"D:\project\rust\VP_Core\target\release\vpcore.exe");
+            if dev.is_file() {
+                Some(dev)
+            } else {
+                None
+            }
+        })
+        .ok_or_else(|| {
+            anyhow!("未找到 vpcore.exe；请先下载或在 data/kernels/vpcore/ 放置 VP-Core 内核")
+        })?;
+    let total = nodes.len();
+    let started = tokio::time::Instant::now();
+    let batches = nodes
+        .chunks(batch_size.max(1))
+        .map(|batch| batch.to_vec())
+        .collect::<Vec<_>>();
+    let batch_total = batches.len();
+    let mut batches = batches.into_iter();
+    let mut tasks = JoinSet::new();
+    let mut results = Vec::with_capacity(total);
+    let batch_concurrency = if network_limit.available_permits() <= 32 {
+        1
+    } else if network_limit.available_permits() <= 64 {
+        2
+    } else {
+        4
+    };
+    let mut completed_batches = 0usize;
+    loop {
+        while tasks.len() < batch_concurrency {
+            let Some(batch) = batches.next() else { break };
+            let ids = batch.iter().map(|node| node.id.clone()).collect::<Vec<_>>();
+            let vpcore = vpcore.clone();
+            let network_limit = network_limit.clone();
+            let test_url = test_url.clone();
+            tasks.spawn(async move {
+                let outcome = verify_nodes_with_vpcore_path(
+                    batch,
+                    timeout,
+                    &vpcore,
+                    None::<fn(ProxyProbeProgress)>,
+                    network_limit,
+                    conditional_isolation,
+                    test_url,
+                )
+                .await;
+                (ids, outcome)
+            });
+        }
+        let Some(joined) = tasks.join_next().await else {
+            break;
+        };
+        let (ids, outcome) = joined.map_err(|error| anyhow!("VP-Core 测速批次失败: {error}"))?;
+        match outcome {
+            Ok(mut batch_results) => results.append(&mut batch_results),
+            Err(error) => results.extend(ids.into_iter().map(|id| ProxyProbeResult {
+                id,
+                ok: false,
+                latency_ms: None,
+                message: format!("VP-Core 测速批次失败: {error}"),
+            })),
+        }
+        completed_batches += 1;
+        if let Some(progress) = progress.as_ref() {
+            let ok = results.iter().filter(|result| result.ok).count();
+            progress(ProxyProbeProgress {
+                done: results.len(),
+                total,
+                ok,
+                fail: results.len().saturating_sub(ok),
+                elapsed: started.elapsed(),
+                batch_index: Some(completed_batches),
+                batch_total: Some(batch_total),
+            });
+        }
+    }
+    Ok(results)
+}
+
+async fn verify_nodes_with_vpcore_path(
+    nodes: Vec<Node>,
+    timeout: Duration,
+    vpcore: &Path,
+    progress: Option<impl Fn(ProxyProbeProgress) + Send + Sync>,
+    _network_limit: Arc<Semaphore>,
+    _conditional_isolation: bool,
+    test_url: Option<String>,
+) -> Result<Vec<ProxyProbeResult>> {
+    let total = nodes.len();
+    let started = tokio::time::Instant::now();
+    let (prepared, mut results) = prepare_proxies(&nodes);
+    report_proxy_progress(&progress, &results, total, started.elapsed());
+    if prepared.is_empty() {
+        return Ok(results.into_iter().flatten().collect());
+    }
+
+    let work_dir = std::env::temp_dir().join(format!("vproxy-vpcore-{}", Uuid::new_v4()));
+    tokio::fs::create_dir_all(&work_dir).await?;
+
+    let member_names: Vec<String> = prepared.iter().map(|p| p.name.clone()).collect();
+    let proxies_val: Vec<Value> = prepared.iter().map(|p| p.config.clone()).collect();
+    let group = json!({
+        "name": "PROBE_ALL",
+        "type": "select",
+        "proxies": member_names,
+    });
+    let config = json!({
+        "mixed-port": 0,
+        "mode": "rule",
+        "proxies": proxies_val,
+        "proxy-groups": [group],
+        "rules": ["MATCH,PROBE_ALL"],
+    });
+
+    let config_path = work_dir.join("config.yaml");
+    tokio::fs::write(&config_path, serde_yaml::to_string(&config)?).await?;
+
+    let timeout_ms = (timeout.as_millis() as u64).max(500);
+    let mut command = Command::new(vpcore);
+    command
+        .env_remove("HTTP_PROXY")
+        .env_remove("http_proxy")
+        .env_remove("HTTPS_PROXY")
+        .env_remove("https_proxy")
+        .env_remove("ALL_PROXY")
+        .env_remove("all_proxy")
+        .arg("test")
+        .arg("-c")
+        .arg(&config_path)
+        .arg("--timeout")
+        .arg(timeout_ms.to_string())
+        .arg("--json");
+
+    if let Some(ref url) = test_url {
+        command.arg("--url").arg(url);
+    }
+
+    #[cfg(windows)]
+    {
+        command.creation_flags(0x0800_0000);
+    }
+
+    let output = command.output().await.context("执行 vpcore test 失败")?;
+    let _ = tokio::fs::remove_dir_all(&work_dir).await;
+
+    let stdout_str = String::from_utf8_lossy(&output.stdout);
+    let stderr_str = String::from_utf8_lossy(&output.stderr);
+    let json_candidate = match (stdout_str.find('{'), stdout_str.rfind('}')) {
+        (Some(start), Some(end)) if start <= end => &stdout_str[start..=end],
+        _ => stdout_str.trim(),
+    };
+    let map: std::collections::HashMap<String, Option<i64>> =
+        match serde_json::from_str(json_candidate) {
+            Ok(m) => m,
+            Err(e) => {
+                eprintln!(
+                    "vpcore test 输出非 JSON (status: {}): err={}, stderr={}, stdout={}",
+                    output.status, e, stderr_str, stdout_str
+                );
+                std::collections::HashMap::new()
+            }
+        };
+
+    for proxy in &prepared {
+        let latency_opt = map.get(&proxy.name).copied().flatten();
+        results[proxy.index] = Some(ProxyProbeResult {
+            id: proxy.id.clone(),
+            ok: latency_opt.is_some(),
+            latency_ms: latency_opt,
+            message: if latency_opt.is_some() {
+                "OK".into()
+            } else {
+                "Timeout".into()
+            },
+        });
+    }
+
+    report_proxy_progress(&progress, &results, total, started.elapsed());
+    Ok(results.into_iter().flatten().collect())
+}
+
 async fn verify_nodes_with_mihomo_path(
     nodes: Vec<Node>,
     timeout: Duration,
@@ -1105,5 +1301,29 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(300)).await;
             assert!(!dir.exists());
         }
+    }
+
+    #[tokio::test]
+    async fn test_verify_nodes_with_vpcore_mock() {
+        let Some(vpcore) = crate::kernel::find_kernel_executable(crate::kernel::KernelKind::VpCore)
+        else {
+            return;
+        };
+        let dummy = node("http", json!({"server":"127.0.0.1","port":9999}));
+        let network_limit = Arc::new(Semaphore::new(10));
+        let results = verify_nodes_with_vpcore_path(
+            vec![dummy],
+            Duration::from_millis(500),
+            &vpcore,
+            None::<fn(ProxyProbeProgress)>,
+            network_limit,
+            false,
+            None,
+        )
+        .await
+        .unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].id, "http-id");
+        assert!(!results[0].ok);
     }
 }

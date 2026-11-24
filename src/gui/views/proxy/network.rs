@@ -173,6 +173,55 @@ impl VpnApp {
                                 self.save_proxy_config_quiet();
                             }
                         });
+                        ui.add_space(6.0);
+                        ui.horizontal(|ui| {
+                            ui.label("测速内核");
+                            let prev_sp_pref = self.proxy_config.speedtest_kernel_preference;
+                            egui::ComboBox::from_id_salt("proxy_speedtest_kernel_preference")
+                                .selected_text(match self.proxy_config.speedtest_kernel_preference {
+                                    KernelPreference::Auto => "自动分配",
+                                    KernelPreference::VpCore => "VP-Core（极速纯 Rust）",
+                                    KernelPreference::Mihomo => "Mihomo",
+                                    KernelPreference::SingBox => "Sing-box",
+                                    KernelPreference::Xray => "Xray",
+                                    KernelPreference::Meow => "Meow",
+                                })
+                                .show_ui(ui, |ui| {
+                                    ui.selectable_value(
+                                        &mut self.proxy_config.speedtest_kernel_preference,
+                                        KernelPreference::Auto,
+                                        "自动分配",
+                                    );
+                                    ui.selectable_value(
+                                        &mut self.proxy_config.speedtest_kernel_preference,
+                                        KernelPreference::VpCore,
+                                        "VP-Core（极速纯 Rust）",
+                                    );
+                                    ui.selectable_value(
+                                        &mut self.proxy_config.speedtest_kernel_preference,
+                                        KernelPreference::Mihomo,
+                                        "Mihomo",
+                                    );
+                                    ui.selectable_value(
+                                        &mut self.proxy_config.speedtest_kernel_preference,
+                                        KernelPreference::SingBox,
+                                        "Sing-box",
+                                    );
+                                    ui.selectable_value(
+                                        &mut self.proxy_config.speedtest_kernel_preference,
+                                        KernelPreference::Xray,
+                                        "Xray",
+                                    );
+                                    ui.selectable_value(
+                                        &mut self.proxy_config.speedtest_kernel_preference,
+                                        KernelPreference::Meow,
+                                        "Meow",
+                                    );
+                                });
+                            if self.proxy_config.speedtest_kernel_preference != prev_sp_pref {
+                                self.save_proxy_config_quiet();
+                            }
+                        });
                         ui.add_space(8.0);
                         ui.horizontal_wrapped(|ui| {
                             ui.label("Mixed 端口");

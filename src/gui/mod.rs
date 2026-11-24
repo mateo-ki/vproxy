@@ -1153,7 +1153,7 @@ impl VpnApp {
             dedup_egress: self.settings.speedtest_dedup_egress,
             tcp_ping_only: self.settings.speedtest_tcp_ping_only,
             speedtest_url: Some(self.settings.speedtest_url.clone()),
-            kernel_preference: KernelPreference::Auto,
+            kernel_preference: self.proxy_config.speedtest_kernel_preference,
         }
     }
 

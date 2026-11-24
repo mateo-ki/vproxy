@@ -454,7 +454,7 @@ impl KernelAdapter for VpCoreAdapter {
         test_url: Option<String>,
     ) -> Pin<Box<dyn std::future::Future<Output = Result<Vec<ProxyProbeResult>>> + Send + 'a>> {
         Box::pin(async move {
-            crate::proxy_probe::verify_nodes_with_mihomo_progress_limited(
+            crate::proxy_probe::verify_nodes_with_vpcore_progress_limited(
                 nodes,
                 timeout,
                 progress.map(|callback| move |state| callback(state)),

@@ -1120,6 +1120,10 @@ impl ProxyManager {
             .clone()
     }
 
+    pub async fn current_node(&self) -> Option<Node> {
+        self.runtime.lock().await.current_node.clone()
+    }
+
     #[cfg_attr(not(feature = "gui"), allow(dead_code))]
     pub(crate) async fn config_snapshot(&self) -> ProxyConfigSnapshot {
         let runtime = self.runtime.lock().await;

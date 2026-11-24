@@ -690,4 +690,72 @@ mod tests {
             "被投毒的域名应放行进入第二阶段真实内核测试"
         );
     }
+
+    #[tokio::test]
+    #[ignore = "10k 真实节点全量测速基准，按需手动运行"]
+    async fn inspect_and_test_vpcore_on_vproxy_db_nodes() {
+        if let Ok(mut db) = Database::connect("data/vproxy.db").await {
+            db.node_root = std::path::PathBuf::from("data/subscriptions");
+            let nodes = db.load_nodes(None).await.unwrap_or_default();
+            println!(
+                ">>> DATA/VPROXY.DB + SUBSCRIPTIONS CONTAINS {} NODES <<<",
+                nodes.len()
+            );
+
+            let with_latency: Vec<_> = nodes
+                .iter()
+                .filter(|n| n.latency_ms.is_some())
+                .cloned()
+                .collect();
+            println!(
+                ">>> NODES WITH RECORDED LATENCY IN DB: {} <<<",
+                with_latency.len()
+            );
+            for n in with_latency.iter().take(5) {
+                println!(
+                    "  Prior OK Node: id={} name={} proto={} server={}:{} latency={:?}",
+                    n.id, n.name, n.protocol, n.server, n.port, n.latency_ms
+                );
+            }
+
+            let test_count = 10_000.min(nodes.len());
+            let test_nodes = nodes.into_iter().take(test_count).collect::<Vec<_>>();
+
+            let network_limit = std::sync::Arc::new(tokio::sync::Semaphore::new(128));
+            let start = std::time::Instant::now();
+            let results = crate::proxy_probe::verify_nodes_with_vpcore_progress_limited(
+                test_nodes,
+                std::time::Duration::from_millis(2000),
+                Some(|p: crate::proxy_probe::ProxyProbeProgress| {
+                    println!(
+                        "Progress: done={}/{} ok={} fail={} (batch {:?}/{:?}) elapsed={:?}",
+                        p.done, p.total, p.ok, p.fail, p.batch_index, p.batch_total, p.elapsed
+                    );
+                }),
+                network_limit,
+                200,
+                false,
+                Some("http://cp.cloudflare.com/generate_204".into()),
+            )
+            .await;
+            let elapsed = start.elapsed();
+            match results {
+                Ok(res) => {
+                    let ok_count = res.iter().filter(|r| r.ok).count();
+                    println!(
+                        "SUCCESS: tested {} nodes, {} OK in {:?}",
+                        res.len(),
+                        ok_count,
+                        elapsed
+                    );
+                    for r in res.iter().filter(|r| r.ok).take(5) {
+                        println!("  OK Node {} latency={:?}", r.id, r.latency_ms);
+                    }
+                }
+                Err(e) => {
+                    println!("ERROR: {:?}", e);
+                }
+            }
+        }
+    }
 }
