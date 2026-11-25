@@ -2650,4 +2650,108 @@ mod source_tests {
         let _ = std::fs::remove_dir_all(&dir);
         assert!(!entries.is_empty());
     }
+
+    #[tokio::test]
+    #[ignore = "真实网络手测，依次测试 5 个内核的历史列表拉取与下载安装校验"]
+    async fn real_network_all_kernels_history_download_and_verify() {
+        let dir = std::env::temp_dir().join(format!("vproxy-hist-all-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let updater = KernelUpdater::new(dir.clone(), Some("http://127.0.0.1:9980")).unwrap();
+        let cancelled = AtomicBool::new(false);
+
+        let kinds = [
+            KernelKind::Mihomo,
+            KernelKind::Xray,
+            KernelKind::SingBox,
+            KernelKind::Meow,
+            KernelKind::VpCore,
+        ];
+        let mut results = Vec::new();
+        for kind in kinds {
+            let entries = updater
+                .list_history(kind, None, 15)
+                .await
+                .unwrap_or_else(|e| panic!("{} list_history failed: {e:#}", kind.display_name()));
+            assert!(
+                !entries.is_empty(),
+                "{} history should not be empty",
+                kind.display_name()
+            );
+            let sha_count = entries.iter().filter(|e| e.has_sha256).count();
+            // 优先选第 2 条（真实“历史旧版”而非最新一版），若无则回退到首个带 SHA-256 的条目
+            let target = entries
+                .iter()
+                .skip(1)
+                .find(|e| e.has_sha256)
+                .or_else(|| entries.iter().find(|e| e.has_sha256))
+                .unwrap_or_else(|| {
+                    panic!(
+                        "{} has no entry with sha256 out of {} entries",
+                        kind.display_name(),
+                        entries.len()
+                    )
+                })
+                .clone();
+
+            let started = std::time::Instant::now();
+            // 先按默认镜像 ghfast 测；若镜像失败再试应用内代理，并打印两者的实际表现
+            let install_res = match updater
+                .install_tag(
+                    kind,
+                    &target.tag_name,
+                    KernelSource::GhFast,
+                    &cancelled,
+                    &|_| {},
+                )
+                .await
+            {
+                Ok(res) => ("ghfast", res),
+                Err(err) => {
+                    println!(
+                        "[WARN] {} {} via ghfast failed: {err:#}; retrying via proxy...",
+                        kind.display_name(),
+                        target.tag_name
+                    );
+                    let res = updater
+                        .install_tag(
+                            kind,
+                            &target.tag_name,
+                            KernelSource::Proxy,
+                            &cancelled,
+                            &|_| {},
+                        )
+                        .await
+                        .unwrap_or_else(|e| {
+                            panic!(
+                                "{} {} install failed on both ghfast and proxy: {e:#}",
+                                kind.display_name(),
+                                target.tag_name
+                            )
+                        });
+                    ("proxy(fallback)", res)
+                }
+            };
+            let (via, res) = install_res;
+            let bin_path = dir.join(kind.directory_name()).join(kind.executable_name());
+            assert!(
+                bin_path.is_file(),
+                "{} binary missing at {}",
+                kind.display_name(),
+                bin_path.display()
+            );
+            println!(
+                "[OK] {:8} | entries={:2} (sha256={:2}) | tag={:<18} | via={:<15} | ver={:?} | {:.2}s",
+                kind.display_name(),
+                entries.len(),
+                sha_count,
+                target.tag_name,
+                via,
+                res.version,
+                started.elapsed().as_secs_f64()
+            );
+            results.push((kind, target.tag_name, via, res.version));
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(results.len(), 5);
+    }
 }
