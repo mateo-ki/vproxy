@@ -35,4 +35,4 @@ pub const XRAY_TAG: &str = "v24.12.31";
 pub const MEOW_TAG: &str = "v0.26.1";
 
 /// 默认内置锁定的 VP-Core 资产版本（兜底下载用；随每次 VP-Core 发版同步更新）
-pub const VPCORE_TAG: &str = "v1.7.9";
+pub const VPCORE_TAG: &str = "v1.7.10";

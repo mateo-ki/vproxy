@@ -30,7 +30,8 @@ A high-performance, modern cross-platform proxy workstation built with Rust and 
 - Automatic failover history and logging
 
 ### 🧠 Smart Policy Routing
-- Kernel-layer routing: `PROXY(select) -> Auto(url-test) -> Fallback`, seamlessly switching egress without reloading configurations
+- Kernel-layer routing: `PROXY(select) -> Auto(url-test) -> Fallback`, seamlessly switching egress without reloading configurations, with bidirectional sync between UI active node state and live kernel `PROXY` egress
+- Isolated IP risk & geolocation inspection dialog for any node without switching the active running proxy node or overwriting homepage egress status
 - Application-layer failover scheduler: EWMA smoothed latency + circuit breaker + hysteresis + cooldown intervals
 - Built-in smart policy groups: AI service unlocking, US streaming optimization, multi-thread download aggregation, and DIRECT bypass for domestic traffic
 

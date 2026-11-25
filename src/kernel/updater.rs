@@ -1474,24 +1474,24 @@ fn fallback_release(kind: KernelKind) -> Option<GithubRelease> {
     }
 
     if kind == KernelKind::VpCore {
-        // 实测（v1.7.9 官方 Release，GitHub API assets 核对）：
-        // Windows zip 8,545,992 字节；Linux musl 8,193,329；macOS darwin 7,129,517。
+        // 实测（v1.7.10 官方 Release，GitHub API assets 核对）：
+        // Windows zip 8,580,610 字节；Linux musl 8,217,161；macOS darwin 7,155,575。
         // VPCORE_TAG 随每次 VP-Core 发版同步 bump，否则兜底会装回旧版。
         let (name, digest, size) = match KernelPlatform::current() {
             KernelPlatform::Windows => (
                 format!("vpcore-{VPCORE_TAG}-x86_64-pc-windows-msvc.zip"),
-                "sha256:394f0dfedcf9b928eda08660a35874e4cc31cb5a233049bf0f450f8bcfcbebcd",
-                8_545_992_u64,
+                "sha256:1846a1951b8eafda631bd888c1d771a3cdf666f715fd268f9fd06a373096bb80",
+                8_580_610_u64,
             ),
             KernelPlatform::Linux => (
                 format!("vpcore-{VPCORE_TAG}-x86_64-unknown-linux-musl.tar.gz"),
-                "sha256:27c4090fe57259427617a1133a57e4cfb2142479e55c419dfa9a6dba86b18108",
-                8_193_329_u64,
+                "sha256:10dcd64cb4e3a349b960c1751415bda6dd0fa76ffca3ac3863769ffa95911939",
+                8_217_161_u64,
             ),
             KernelPlatform::MacOS => (
                 format!("vpcore-{VPCORE_TAG}-aarch64-apple-darwin.tar.gz"),
-                "sha256:ac42a83c28c967f1a6f1fff2771c87e577b9dc8fa6ad799c92ad57c1da32ac5a",
-                7_129_517_u64,
+                "sha256:e13fbd33fbcda8e54755bf5d2e5f609da6001eb16aef75e47f402aadce80ba68",
+                7_155_575_u64,
             ),
         };
         return Some(GithubRelease {

@@ -34,7 +34,7 @@ Mihomo YAML │ sing-box JSON │ Xray JSON │ VP-Core DSL(.vp) │ Meow 配置
 | `src/proxy/ir` | 内核无关的编译中间层（RoutingPlan / OutboundKind / TransportSpec） |
 | `src/proxy` | 进程生命周期、端口就绪检测、降级状态、系统代理会话 |
 | `src/speedtest`、`src/proxy_probe.rs` | TCP 预筛 + 多内核并发真实握手测速（Mihomo / VP-Core `vpcore test`）+ 单节点实测 |
-| `src/gui`、`src/api` | egui 界面（多语言、多主题）与本地 HTTP API（bearer 鉴权，含 Clash 兼容 `/proxies` 与 `/delay` 探针接口） |
+| `src/gui`、`src/api` | egui 界面（多语言、多主题、弹窗状态隔离的 IP 检测与活动节点双向同步）与本地 HTTP API（bearer 鉴权，含 Clash 兼容 `/proxies` 与 `/delay` 探针接口） |
 | `src/db` | 主库 `vproxy.db` + 按源分片的 `data/subscriptions/*.db` |
 
 ## 3. 协议支持矩阵
