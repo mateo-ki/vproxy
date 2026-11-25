@@ -1066,7 +1066,48 @@ pub fn installer_cache_dir() -> PathBuf {
 }
 
 /// 下载安装包并校验 SHA-256，成功返回本地路径。校验不过直接报错，绝不返回半截或换过内容的文件。
+/// 若 Release 资产在客户端检查更新后被重新发布导致大小/摘要漂移，会自动重拉一次最新 Release 元数据重试。
 pub async fn download<F>(
+    info: &AppReleaseInfo,
+    app_proxy: Option<&str>,
+    cancelled: &AtomicBool,
+    progress: &F,
+) -> Result<PathBuf>
+where
+    F: Fn(AppUpdateProgress) + Send + Sync,
+{
+    match download_with_info(info, app_proxy, cancelled, progress).await {
+        Ok(path) => Ok(path),
+        Err(first_err) => {
+            let msg = first_err.to_string();
+            let looks_like_stale_asset =
+                msg.contains("大小与预期不符") || msg.contains("SHA-256 校验失败");
+            if !looks_like_stale_asset || cancelled.load(Ordering::Relaxed) {
+                return Err(first_err);
+            }
+            let channel = if info.prerelease {
+                UpdateChannel::Insider
+            } else {
+                UpdateChannel::Stable
+            };
+            if let Ok(fresh) = check(app_proxy, &info.current_version, channel).await {
+                let asset_changed = fresh.tag == info.tag
+                    && fresh.asset.as_ref().map(|a| (a.size, a.sha256.as_ref()))
+                        != info.asset.as_ref().map(|a| (a.size, a.sha256.as_ref()));
+                if asset_changed {
+                    crate::startup_log(&format!(
+                        "[更新] 检测到 {} 发布资产元数据已更新，自动刷新后重试下载",
+                        fresh.tag
+                    ));
+                    return download_with_info(&fresh, app_proxy, cancelled, progress).await;
+                }
+            }
+            Err(first_err)
+        }
+    }
+}
+
+async fn download_with_info<F>(
     info: &AppReleaseInfo,
     app_proxy: Option<&str>,
     cancelled: &AtomicBool,
@@ -1220,7 +1261,10 @@ async fn stream(
     std::io::Write::flush(&mut file)?;
     drop(file);
     if asset.size > 0 && written != asset.size {
-        bail!("只下到 {written} / {} 字节", asset.size);
+        bail!(
+            "下载大小与预期不符：收到 {written} 字节，预期 {} 字节",
+            asset.size
+        );
     }
     if written == 0 {
         bail!("下载文件为空（0 字节）");

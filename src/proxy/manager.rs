@@ -2351,6 +2351,10 @@ impl ProxyManager {
                         || lower.contains("[info]")
                         || lower.contains("level=warn")
                         || lower.contains("level=info")
+                        || lower.contains(" warn ")
+                        || lower.contains(" info ")
+                        || lower.contains("\twarn\t")
+                        || lower.contains("\tinfo\t")
                     {
                         return false;
                     }
@@ -2368,8 +2372,18 @@ impl ProxyManager {
                     || detail.contains("not found in")
                     || (detail.contains("category") && detail.contains("not found"));
 
+                let is_corrupt_mmdb = detail.contains("could not find MaxMind DB metadata")
+                    || (detail.contains("invalid database") && detail.contains("MaxMind"));
+
                 let message = if let Some(error) = readiness_error {
                     format!("{} 启动失败: {error:#}", kernel.display_name())
+                } else if is_corrupt_mmdb {
+                    let kernel_dir = managed_kernel_root().join(kernel.directory_name());
+                    crate::geo::purge_corrupt_geo_files(&kernel_dir);
+                    format!(
+                        "{} 启动失败：Country.mmdb 地理数据库损坏或非有效 MaxMind DB，已自动清理损坏文件。请重新点击「启动代理」以自动重新下载完整库。",
+                        kernel.display_name()
+                    )
                 } else if is_not_found {
                     format!(
                         "{} 启动失败：分流规则中引用了不存在的分类（已保留规则库，无需重新下载）。请检查自定义规则或切换默认推荐规则。",
@@ -2386,18 +2400,24 @@ impl ProxyManager {
                 } else if let Some(err) = fatal_line {
                     format!("{} 启动失败: {}", kernel.display_name(), err.trim())
                 } else if !detail_trimmed.is_empty() {
+                    let tail = last_nonempty_line(detail_trimmed);
                     if let Some(status) = exit_status {
                         format!(
-                            "{} 启动失败 (退出码 {:?}): {}",
+                            "{} 启动失败 (退出码 {:?}): {tail}",
                             kernel.display_name(),
                             status.code(),
-                            last_nonempty_line(detail_trimmed)
+                        )
+                    } else if tail.contains("WinTun") || tail.contains("Creating adapter") {
+                        format!(
+                            "{} 启动超时（{} 秒）：WinTun 虚拟网卡创建未完成（可重试，或先停用/切换代理模式释放残留网卡）；最后日志: {tail}",
+                            kernel.display_name(),
+                            STARTUP_PROXY_TOTAL_TIMEOUT.as_secs(),
                         )
                     } else {
                         format!(
-                            "{} 启动失败: {}",
+                            "{} 启动超时（{} 秒，端口 {port} 未就绪）；最后日志: {tail}",
                             kernel.display_name(),
-                            last_nonempty_line(detail_trimmed)
+                            STARTUP_PROXY_TOTAL_TIMEOUT.as_secs(),
                         )
                     }
                 } else if let Some(status) = exit_status {

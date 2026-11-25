@@ -17,7 +17,10 @@ pub const MIN_GEOSITE_BYTES: u64 = 8_000_000;
 pub const MIN_GEOIP_BYTES: u64 = 8_000_000;
 
 pub fn min_bytes_for_file(name: &str) -> u64 {
-    if name.to_ascii_lowercase().contains("geosite") {
+    let lower = name.to_ascii_lowercase();
+    if lower.ends_with(".mmdb") {
+        MIN_MMDB_BYTES
+    } else if lower.contains("geosite") {
         MIN_GEOSITE_BYTES
     } else {
         MIN_GEOIP_BYTES
@@ -51,17 +54,22 @@ pub fn mihomo_dir() -> PathBuf {
     crate::kernel::managed_kernel_root().join("mihomo")
 }
 
-/// 清理已损坏的 Geo 规则库文件（如被截断、解析报错的 GeoSite.dat / GeoIP.dat）
+/// 清理已损坏的 Geo 规则库文件（如被截断、解析报错的 GeoSite.dat / GeoIP.dat / Country.mmdb）
 pub fn purge_corrupt_geo_files(dir: &Path) {
     for name in &[
         "geosite.dat",
         "GeoSite.dat",
         "geoip.dat",
         "GeoIP.dat",
+        "Country.mmdb",
+        "country.mmdb",
+        "geoip.metadb",
         "geosite.dat.part",
         "geoip.dat.part",
+        "Country.mmdb.part",
         "GeoSite.dat.download",
         "GeoIP.dat.download",
+        "Country.mmdb.download",
     ] {
         let p = dir.join(name);
         if p.exists() {
@@ -102,6 +110,43 @@ pub fn geo_ready(dir: &Path) -> bool {
 
 /// meow 的 GEOIP 用 MaxMind MMDB（meta-rules-dat 的 country.mmdb），完整库约 7.6MB。
 pub const MIN_MMDB_BYTES: u64 = 4_000_000;
+const MMDB_METADATA_MARKER: &[u8] = b"\xab\xcd\xefMaxMind.com";
+
+/// 校验字节切片是否为合法的 MaxMind DB：体积达标且尾部 128KB 内包含 MaxMind 元数据标记。
+pub fn is_valid_mmdb_bytes(bytes: &[u8]) -> bool {
+    if (bytes.len() as u64) < MIN_MMDB_BYTES {
+        return false;
+    }
+    let tail_start = bytes.len().saturating_sub(128 * 1024);
+    bytes[tail_start..]
+        .windows(MMDB_METADATA_MARKER.len())
+        .any(|w| w == MMDB_METADATA_MARKER)
+}
+
+/// 校验磁盘上的 `.mmdb` 文件大小达标且包含 MaxMind 元数据标记（防止把 GeoIP.dat 等错拷成 Country.mmdb）。
+pub fn is_valid_mmdb_file(path: &Path) -> bool {
+    use std::io::{Read, Seek, SeekFrom};
+    let Ok(mut file) = std::fs::File::open(path) else {
+        return false;
+    };
+    let Ok(meta) = file.metadata() else {
+        return false;
+    };
+    let len = meta.len();
+    if len < MIN_MMDB_BYTES {
+        return false;
+    }
+    let read_len = len.min(128 * 1024) as usize;
+    if file.seek(SeekFrom::End(-(read_len as i64))).is_err() {
+        return false;
+    }
+    let mut tail = vec![0u8; read_len];
+    if file.read_exact(&mut tail).is_err() {
+        return false;
+    }
+    tail.windows(MMDB_METADATA_MARKER.len())
+        .any(|w| w == MMDB_METADATA_MARKER)
+}
 
 /// 硬链接或复制文件：优先使用硬链接（0 额外磁盘占用，毫秒级就绪，更新时自动保持一致）；失败时回退为物理拷贝
 pub fn link_or_copy(src: &Path, dst: &Path) -> std::io::Result<()> {
@@ -136,22 +181,27 @@ pub fn sync_geo_to_all_kernels(src_dir: &Path) -> Vec<String> {
     ];
 
     for (name, min_len) in geo_files {
+        let is_mmdb = name.eq_ignore_ascii_case("Country.mmdb");
+        let alt_name = if name == "geosite.dat" {
+            "GeoSite.dat"
+        } else if name == "geoip.dat" {
+            "GeoIP.dat"
+        } else {
+            "country.mmdb"
+        };
         let candidate_srcs = [
             src_dir.join(name),
-            src_dir.join(if name == "geosite.dat" {
-                "GeoSite.dat"
-            } else {
-                "GeoIP.dat"
-            }),
+            src_dir.join(alt_name),
             root.join("mihomo").join(name),
             root.join("meow").join(name),
             root.join("vp_core").join(name),
             root.join("vpcore").join(name),
         ];
         let Some(valid_src) = candidate_srcs.iter().find(|p| {
-            std::fs::metadata(p)
+            let size_ok = std::fs::metadata(p)
                 .map(|m| m.len() >= min_len)
-                .unwrap_or(false)
+                .unwrap_or(false);
+            size_ok && (!is_mmdb || is_valid_mmdb_file(p))
         }) else {
             continue;
         };
@@ -168,7 +218,8 @@ pub fn sync_geo_to_all_kernels(src_dir: &Path) -> Vec<String> {
             let dst = dst_dir.join(name);
             let is_same = std::fs::metadata(&dst)
                 .map(|m| m.len() == src_len)
-                .unwrap_or(false);
+                .unwrap_or(false)
+                && (!is_mmdb || is_valid_mmdb_file(&dst));
             if !is_same {
                 if let Ok(()) = link_or_copy(valid_src, &dst) {
                     reports.push(format!(
@@ -228,24 +279,22 @@ pub async fn ensure_meow_home_geo(home: &Path, proxy_url: Option<&str>) -> Resul
 
     // 3. Country.mmdb —— 25 秒硬上限：meow 启动时若发现缺库会自己拉取并阻塞
     // 监听端口，而它默认走节点（节点劣化 = 无限卡死"正在启动"）。这里限时
-    // 抢先备好；失败也放行（meow 会用配置里的镜像 URL 自愈，失败则快速报错）。
+    // 抢先备好；若盘上文件损坏/被旧版错拷成 GeoIP.dat（缺少 MaxMind 元数据标记），先删再重下。
     let mmdb = home.join("Country.mmdb");
-    let mut mmdb_ok = std::fs::metadata(&mmdb)
-        .map(|m| m.len() >= MIN_MMDB_BYTES)
-        .unwrap_or(false);
+    let mut mmdb_ok = is_valid_mmdb_file(&mmdb);
+    if !mmdb_ok && mmdb.exists() {
+        let _ = std::fs::remove_file(&mmdb);
+    }
     if !mmdb_ok {
         let root = crate::kernel::managed_kernel_root();
         for vp_cand in [
             root.join("vpcore").join("Country.mmdb"),
             root.join("vp_core").join("Country.mmdb"),
+            mihomo.join("Country.mmdb"),
         ] {
-            if std::fs::metadata(&vp_cand)
-                .map(|m| m.len() >= MIN_MMDB_BYTES)
-                .unwrap_or(false)
-                && link_or_copy(&vp_cand, &mmdb).is_ok()
-            {
+            if is_valid_mmdb_file(&vp_cand) && link_or_copy(&vp_cand, &mmdb).is_ok() {
                 mmdb_ok = true;
-                report.push("Country.mmdb 已从 VP-Core 复用".into());
+                report.push("Country.mmdb 已从本机规则库复用".into());
                 break;
             }
         }
@@ -333,17 +382,14 @@ pub async fn ensure_vpcore_geo(home: &Path, proxy_url: Option<&str>) -> Result<S
         }
     }
 
-    // Country.mmdb 也优先从 meow 复用
+    // Country.mmdb 也优先从 meow 复用（需校验真实 MaxMind DB 元数据标记）
     let mmdb_dst = home.join("Country.mmdb");
-    if !std::fs::metadata(&mmdb_dst)
-        .map(|m| m.len() >= MIN_MMDB_BYTES)
-        .unwrap_or(false)
-    {
+    if !is_valid_mmdb_file(&mmdb_dst) {
+        if mmdb_dst.exists() {
+            let _ = std::fs::remove_file(&mmdb_dst);
+        }
         let meow_mmdb = meow.join("Country.mmdb");
-        if std::fs::metadata(&meow_mmdb)
-            .map(|m| m.len() >= MIN_MMDB_BYTES)
-            .unwrap_or(false)
-        {
+        if is_valid_mmdb_file(&meow_mmdb) {
             let _ = link_or_copy(&meow_mmdb, &mmdb_dst);
         }
     }
@@ -365,10 +411,7 @@ pub async fn ensure_vpcore_geo(home: &Path, proxy_url: Option<&str>) -> Result<S
             && std::fs::metadata(home.join("GeoIP.dat"))
                 .map(|m| m.len() >= MIN_GEOIP_BYTES)
                 .unwrap_or(false))
-        || (home.join("Country.mmdb").exists()
-            && std::fs::metadata(home.join("Country.mmdb"))
-                .map(|m| m.len() >= MIN_MMDB_BYTES)
-                .unwrap_or(false))
+        || is_valid_mmdb_file(&home.join("Country.mmdb"))
         || home.join("geoip.metadb").exists();
 
     let mut needed = Vec::new();
@@ -409,7 +452,7 @@ pub fn populate_vpcore_work_dir(vpcore_home: &Path, work_dir_root: &Path) {
     }
 }
 
-/// 校验响应体：够大、且不是镜像挂了返回的 HTML。
+/// 校验响应体：够大、不是镜像挂了返回的 HTML，且与目标类型格式一致（`.mmdb` 验 MaxMind 元数据，`.dat` 验 protobuf tag）。
 fn validate_geo_body(name: &str, bytes: &[u8]) -> Result<u64> {
     let min_len = min_bytes_for_file(name);
     if (bytes.len() as u64) < min_len {
@@ -422,7 +465,15 @@ fn validate_geo_body(name: &str, bytes: &[u8]) -> Result<u64> {
     if bytes.starts_with(b"<") {
         return Err(anyhow!("拿回来的是 HTML，这个源不可用"));
     }
-    // geo 数据是 protobuf：第一个字节是 field1+LD 的 tag (0x0a)。
+    if name.to_ascii_lowercase().ends_with(".mmdb") {
+        if !is_valid_mmdb_bytes(bytes) {
+            return Err(anyhow!(
+                "文件缺少 MaxMind DB 元数据标记，非有效 MMDB 数据库"
+            ));
+        }
+        return Ok(bytes.len() as u64);
+    }
+    // geo .dat 数据是 protobuf：第一个字节是 field1+LD 的 tag (0x0a)。
     if bytes[0] != 0x0a {
         return Err(anyhow!("文件头不是 geo 数据（首字节 {:#04x}）", bytes[0]));
     }
@@ -502,7 +553,7 @@ async fn download_into(client: &Client, url: &str, target: &Path, name: &str) ->
     };
     let bytes = validate_geo_body(name, &body)?;
     // 先落到 .part 再替换：内核永远不会看到写了一半的库。
-    let part = target.with_extension("dat.part");
+    let part = PathBuf::from(format!("{}.part", target.display()));
     std::fs::write(&part, &body)?;
     let _ = std::fs::remove_file(target);
     std::fs::rename(&part, target)?;
@@ -791,5 +842,38 @@ mod tests {
         link_or_copy(&src, &dst).unwrap();
         assert_eq!(std::fs::read(&dst).unwrap(), b"hello geo sync");
         let _ = std::fs::remove_dir_all(&temp);
+    }
+
+    #[test]
+    fn mmdb_validation_accepts_real_mmdb_and_rejects_protobuf_geoip() {
+        assert_eq!(min_bytes_for_file("Country.mmdb"), MIN_MMDB_BYTES);
+        assert_eq!(min_bytes_for_file("country.mmdb"), MIN_MMDB_BYTES);
+
+        // 模拟被错误拷成 Country.mmdb 的 GeoIP.dat（体积 >= 7.6MB 且以 0x0a 开头，无 MaxMind 元数据标记）
+        let fake_protobuf_mmdb = vec![0x0a; 7_630_477];
+        assert!(validate_geo_body("Country.mmdb", &fake_protobuf_mmdb).is_err());
+
+        // 合法 MMDB：7.63MB（< 8MB）且尾部带有 \xab\xcd\xefMaxMind.com 元数据标记
+        let mut real_mmdb = vec![0u8; 7_630_477];
+        let marker = b"\xab\xcd\xefMaxMind.com";
+        let start = real_mmdb.len() - 64;
+        real_mmdb[start..start + marker.len()].copy_from_slice(marker);
+        assert_eq!(
+            validate_geo_body("Country.mmdb", &real_mmdb).unwrap(),
+            7_630_477
+        );
+
+        let dir = std::env::temp_dir().join(format!("vproxy-mmdb-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mmdb_path = dir.join("Country.mmdb");
+        std::fs::write(&mmdb_path, &fake_protobuf_mmdb).unwrap();
+        assert!(!is_valid_mmdb_file(&mmdb_path));
+
+        std::fs::write(&mmdb_path, &real_mmdb).unwrap();
+        assert!(is_valid_mmdb_file(&mmdb_path));
+
+        purge_corrupt_geo_files(&dir);
+        assert!(!mmdb_path.exists());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
