@@ -200,6 +200,7 @@ impl VpnApp {
         let mut open = true;
         let mut refresh_clicked = false;
         let mut install_tag: Option<(String, KernelSource)> = None;
+        let mut history_source_popup_layer: Option<egui::LayerId> = None;
 
         const MODAL_W: f32 = 540.0;
         let screen = ctx.viewport_rect();
@@ -228,10 +229,15 @@ impl VpnApp {
                             .color(theme::text_secondary()),
                     );
                     let cur_source = source_from_id(&self.kernel_history_source);
-                    egui::ComboBox::from_id_salt("kernel_history_source_combo")
-                        .selected_text(cur_source.label())
-                        .width(170.0)
-                        .show_ui(ui, |ui| {
+                    // 注意：弹窗本身位于 Order::Tooltip（压在 Network 抽屉 Foreground 之上），
+                    // 而 egui::ComboBox 默认把弹出层挂在 Order::Foreground，会被遮罩和弹窗挡住导致
+                    // 点了看似没反应。这里改用 PopupKind::Tooltip 并在帧末置顶，确保菜单悬浮在弹窗前方。
+                    history_source_popup_layer = show_tooltip_dropdown(
+                        ui,
+                        egui::Id::new("kernel_history_source_combo"),
+                        cur_source.label(),
+                        170.0,
+                        |ui| {
                             for opt in SOURCE_OPTIONS
                                 .iter()
                                 .filter(|o| o.id != KernelSource::Local.id())
@@ -242,7 +248,8 @@ impl VpnApp {
                                     opt.label,
                                 );
                             }
-                        });
+                        },
+                    );
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if ui
@@ -452,6 +459,10 @@ impl VpnApp {
                 });
             });
 
+        if let Some(layer_id) = history_source_popup_layer {
+            ctx.move_to_top(layer_id);
+        }
+
         self.show_kernel_history_dialog = open;
         if refresh_clicked {
             self.refresh_kernel_history(kind);
@@ -459,5 +470,190 @@ impl VpnApp {
         if let Some((tag, source)) = install_tag {
             self.install_kernel_version(kind, tag, source);
         }
+    }
+}
+
+/// 在 `Order::Tooltip` 模态弹窗内渲染下拉框：使用 `PopupKind::Tooltip` 避免被同级/下级遮罩盖住。
+fn show_tooltip_dropdown(
+    ui: &mut egui::Ui,
+    id: egui::Id,
+    selected_text: &str,
+    width: f32,
+    menu_contents: impl FnOnce(&mut egui::Ui),
+) -> Option<egui::LayerId> {
+    let popup_id = id.with("popup");
+    let is_open = egui::Popup::is_id_open(ui.ctx(), popup_id);
+    let height = ui.spacing().interact_size.y.max(24.0);
+    let (_, rect) = ui.allocate_space(Vec2::new(width, height));
+    let btn_resp = ui.interact(rect, id, Sense::click());
+
+    if ui.is_rect_visible(rect) {
+        let visuals = if is_open {
+            &ui.visuals().widgets.open
+        } else {
+            ui.style().interact(&btn_resp)
+        };
+        ui.painter().rect(
+            rect,
+            visuals.corner_radius,
+            visuals.weak_bg_fill,
+            visuals.bg_stroke,
+            egui::epaint::StrokeKind::Inside,
+        );
+        let pad_x = ui.spacing().button_padding.x.max(8.0);
+        let icon_w = 10.0;
+        let galley = ui.painter().layout_no_wrap(
+            selected_text.to_string(),
+            egui::FontId::proportional(13.0),
+            visuals.text_color(),
+        );
+        let text_pos = egui::pos2(rect.min.x + pad_x, rect.center().y - galley.size().y * 0.5);
+        let text_clip = rect.shrink2(Vec2::new(pad_x, 0.0));
+        ui.painter()
+            .with_clip_rect(egui::Rect::from_min_max(
+                text_clip.min,
+                egui::pos2(
+                    (rect.max.x - pad_x - icon_w).max(text_clip.min.x),
+                    text_clip.max.y,
+                ),
+            ))
+            .galley(text_pos, galley, visuals.text_color());
+
+        let cx = rect.max.x - pad_x - icon_w * 0.4;
+        let cy = rect.center().y + 1.0;
+        ui.painter().add(egui::Shape::convex_polygon(
+            vec![
+                egui::pos2(cx - 3.5, cy - 2.0),
+                egui::pos2(cx + 3.5, cy - 2.0),
+                egui::pos2(cx, cy + 2.5),
+            ],
+            visuals.fg_stroke.color,
+            Stroke::NONE,
+        ));
+    }
+
+    egui::Popup::menu(&btn_resp)
+        .id(popup_id)
+        .kind(egui::PopupKind::Tooltip)
+        .width(width)
+        .close_behavior(egui::PopupCloseBehavior::CloseOnClick)
+        .show(|ui| {
+            ui.set_min_width(ui.available_width());
+            ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
+            menu_contents(ui);
+        })
+        .map(|ir| ir.response.layer_id)
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::gui::run_test_ui;
+    use crate::gui::views::nodes::empty_pool_modal_tests::app_with_an_empty_library;
+    use crate::kernel::KernelKind;
+    use eframe::egui;
+
+    fn screen_input(events: Vec<egui::Event>) -> egui::RawInput {
+        egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1280.0, 800.0),
+            )),
+            events,
+            ..Default::default()
+        }
+    }
+
+    fn click_events(pos: egui::Pos2) -> Vec<egui::Event> {
+        vec![
+            egui::Event::PointerMoved(pos),
+            egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: egui::Modifiers::NONE,
+            },
+            egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: egui::Modifiers::NONE,
+            },
+        ]
+    }
+
+    #[test]
+    fn kernel_history_source_dropdown_opens_above_tooltip_dialog_and_selects() {
+        let mut app = app_with_an_empty_library();
+        app.show_kernel_history_dialog = true;
+        app.kernel_history_kind = Some(KernelKind::Mihomo);
+        app.kernel_history_source = "ghfast".to_string();
+
+        let ctx = egui::Context::default();
+        let combo_id = egui::Id::new("kernel_history_source_combo");
+        let popup_id = combo_id.with("popup");
+        let dialog_layer =
+            egui::LayerId::new(egui::Order::Tooltip, egui::Id::new("kernel-history-dialog"));
+
+        // 前 3 帧让居中 Window 完成尺寸测算与锚点落位
+        for _ in 0..3 {
+            let _ = run_test_ui(&ctx, screen_input(vec![]), |_ui| {
+                app.ui_kernel_history_dialog(&ctx);
+            });
+        }
+        let trigger_rect = ctx
+            .read_response(combo_id)
+            .expect("dropdown trigger should exist")
+            .rect;
+
+        // 真实鼠标交互顺序：先移动悬停，再按下并抬起触发点击
+        let _ = run_test_ui(
+            &ctx,
+            screen_input(vec![egui::Event::PointerMoved(trigger_rect.center())]),
+            |_ui| {
+                app.ui_kernel_history_dialog(&ctx);
+            },
+        );
+        let _ = run_test_ui(
+            &ctx,
+            screen_input(click_events(trigger_rect.center())),
+            |_ui| {
+                app.ui_kernel_history_dialog(&ctx);
+            },
+        );
+        assert!(
+            egui::Popup::is_id_open(&ctx, popup_id),
+            "clicking dropdown trigger should open popup (hit_before={:?})",
+            ctx.layer_id_at(trigger_rect.center())
+        );
+        // 再跑一帧以拿到稳定布局的弹出层区域与图层顺序
+        let _ = run_test_ui(&ctx, screen_input(vec![]), |_ui| {
+            app.ui_kernel_history_dialog(&ctx);
+        });
+
+        let popup_layer = egui::LayerId::new(egui::Order::Tooltip, popup_id);
+        let popup_rect = ctx
+            .read_response(popup_id)
+            .expect("popup area response should exist")
+            .rect;
+        // SOURCE_OPTIONS[0] 是默认的 ghfast，点击最后一项（不在首行）验证确实切走了来源且弹出层处于模态窗口上方
+        let last_item_pos = egui::pos2(popup_rect.center().x, popup_rect.max.y - 16.0);
+        let _ = run_test_ui(
+            &ctx,
+            screen_input(vec![egui::Event::PointerMoved(last_item_pos)]),
+            |_ui| {
+                app.ui_kernel_history_dialog(&ctx);
+            },
+        );
+        assert_eq!(
+            ctx.layer_id_at(last_item_pos),
+            Some(popup_layer),
+            "popup layer must be top-most hit target above dialog ({dialog_layer:?})"
+        );
+        let _ = run_test_ui(&ctx, screen_input(click_events(last_item_pos)), |_ui| {
+            app.ui_kernel_history_dialog(&ctx);
+        });
+
+        assert_ne!(app.kernel_history_source, "ghfast");
+        assert!(!egui::Popup::is_id_open(&ctx, popup_id));
     }
 }
