@@ -8,7 +8,7 @@
 
 VProxy 是 Rust + egui 的桌面代理工作站：采集订阅 → 解析节点 → 编译为各内核配置 → 驱动内核常驻运行 → 实测可用性与延迟。
 
-配套内核仓库 **VP-Core**（`D:\project\rust\VP_Core`，独立发版）是纯 Rust 实现的全协议内核，VProxy 将其作为一等内核驱动，并承担其配置编译（VP-DSL）与节点解析的前置工作。
+配套内核仓库 **VP-Core**（[mateo-ki/vp_core](https://github.com/mateo-ki/vp_core)，独立发版）是纯 Rust 实现的全协议内核，VProxy 将其作为一等内核驱动，并承担其配置编译（VP-DSL）与节点解析的前置工作。
 
 ```
 订阅源 / 分享链接
@@ -33,8 +33,8 @@ Mihomo YAML │ sing-box JSON │ Xray JSON │ VP-Core DSL(.vp) │ Meow 配置
 | `src/proxy/compiler` | 每内核一个编译器：`mihomo` / `sing_box` / `xray` / `vp_core`（VP-DSL）/ `meow` |
 | `src/proxy/ir` | 内核无关的编译中间层（RoutingPlan / OutboundKind / TransportSpec） |
 | `src/proxy` | 进程生命周期、端口就绪检测、降级状态、系统代理会话 |
-| `src/speedtest` | TCP 预筛 + 内核真实握手测速 + 可选吞吐探测 |
-| `src/gui`、`src/api` | egui 界面（多语言、多主题）与本地 HTTP API（bearer 鉴权） |
+| `src/speedtest`、`src/proxy_probe.rs` | TCP 预筛 + 多内核并发真实握手测速（Mihomo / VP-Core `vpcore test`）+ 单节点实测 |
+| `src/gui`、`src/api` | egui 界面（多语言、多主题）与本地 HTTP API（bearer 鉴权，含 Clash 兼容 `/proxies` 与 `/delay` 探针接口） |
 | `src/db` | 主库 `vproxy.db` + 按源分片的 `data/subscriptions/*.db` |
 
 ## 3. 协议支持矩阵

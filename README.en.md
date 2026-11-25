@@ -24,8 +24,8 @@ A high-performance, modern cross-platform proxy workstation built with Rust and 
 - Native Cloudflare WARP MASQUE registration and OpenRung official relay integration
 
 ### ⚡ Verification & Health
-- TCP pre-screening followed by authentic kernel-level Google `generate_204` handshake latency benchmarking
-- Optional real packet download throughput probing
+- TCP pre-screening followed by authentic kernel-level HTTP 204 latency benchmarking (supporting Mihomo controller & VP-Core native concurrent probe)
+- Optional single-node real download/upload throughput probing (strictly authentic measurements, zero synthetic estimates)
 - 24-hour health timeline graphs based on true connectivity measurements
 - Automatic failover history and logging
 
@@ -47,7 +47,7 @@ A high-performance, modern cross-platform proxy workstation built with Rust and 
 - Windows system tray, single-instance mutex, and local loopback firewall auto-configuration
 
 ### 🔌 Developer & API Services
-- Local RESTful HTTP API (default `127.0.0.1:9980`, secured via Bearer token)
+- Local RESTful HTTP API (default `127.0.0.1:8080`, secured via Bearer token) with Clash-compatible `/proxies`, `/proxies/{name}/delay`, and batch `POST /proxies/delay` endpoints
 - Remote publisher service for cluster node distribution
 
 ## Supported Protocols
