@@ -1022,7 +1022,7 @@ impl KernelManager {
     ) -> Result<Vec<KernelHistoryEntry>> {
         let info = self.detect(kind).await;
         updater::KernelUpdater::new(managed_kernel_root(), proxy_url.as_deref())?
-            .list_history(kind, info.version.as_deref(), 25)
+            .list_history(kind, info.version.as_deref(), 15)
             .await
     }
 

@@ -448,14 +448,26 @@ impl KernelSource {
 }
 
 async fn fetch_json<T: DeserializeOwned>(client: &Client, url: &str) -> Result<T> {
+    fetch_json_with_timeout(client, url, std::time::Duration::from_secs(8)).await
+}
+
+async fn fetch_json_with_timeout<T: DeserializeOwned>(
+    client: &Client,
+    url: &str,
+    total_timeout: std::time::Duration,
+) -> Result<T> {
     let response = client
         .get(url)
-        .timeout(std::time::Duration::from_secs(8))
+        .timeout(total_timeout)
         .send()
         .await
         .map_err(|error| anyhow::anyhow!("{error:#}"))?
         .error_for_status()?;
-    response.json::<T>().await.map_err(|error| error.into())
+    let bytes = response
+        .bytes()
+        .await
+        .map_err(|error| anyhow::anyhow!("读取响应体失败: {error:#}"))?;
+    serde_json::from_slice::<T>(&bytes).map_err(|error| anyhow::anyhow!("解析 JSON 失败: {error}"))
 }
 
 impl KernelUpdater {
@@ -1168,15 +1180,22 @@ impl KernelUpdater {
         const CONNECT_AND_HEADER_TIMEOUT: Duration = Duration::from_secs(12);
         const CHUNK_IDLE_TIMEOUT: Duration = Duration::from_secs(12);
 
-        let response =
-            match tokio::time::timeout(CONNECT_AND_HEADER_TIMEOUT, client.get(&url).send()).await {
-                Ok(Ok(response)) => match response.error_for_status() {
-                    Ok(response) => response,
-                    Err(error) => bail!("HTTP 失败: {error}"),
-                },
-                Ok(Err(error)) => bail!("{error:#}"),
-                Err(_) => bail!("连接或响应头超时 (12s)"),
-            };
+        let response = match tokio::time::timeout(
+            CONNECT_AND_HEADER_TIMEOUT,
+            client
+                .get(&url)
+                .header(reqwest::header::ACCEPT_ENCODING, "identity")
+                .send(),
+        )
+        .await
+        {
+            Ok(Ok(response)) => match response.error_for_status() {
+                Ok(response) => response,
+                Err(error) => bail!("HTTP 失败: {error}"),
+            },
+            Ok(Err(error)) => bail!("{error:#}"),
+            Err(_) => bail!("连接或响应头超时 (12s)"),
+        };
 
         let mut response = response;
         let started = std::time::Instant::now();
@@ -1330,7 +1349,14 @@ impl KernelUpdater {
         );
         let mut failures = Vec::new();
         for transport in &self.transports {
-            match fetch_json::<Vec<GithubRelease>>(&transport.client, &url).await {
+            // sing-box 等内核单次多版本列表即便经 gzip 仍有数百 KB，给 30 秒完整读完正文，避免 8 秒截断
+            match fetch_json_with_timeout::<Vec<GithubRelease>>(
+                &transport.client,
+                &url,
+                std::time::Duration::from_secs(30),
+            )
+            .await
+            {
                 Ok(mut list) => {
                     for r in &mut list {
                         r.from_cache = false;
@@ -2523,5 +2549,105 @@ mod source_tests {
         assert_eq!(entries[1].asset_size, 1999);
         assert!(!entries[1].has_sha256);
         assert!(!entries[1].is_current);
+    }
+
+    #[tokio::test]
+    async fn fetch_json_with_timeout_decodes_gzip_and_reports_read_or_parse_errors() {
+        use flate2::{write::GzEncoder, Compression};
+        use std::io::Write;
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use tokio::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let server = tokio::spawn(async move {
+            // Case 1: gzipped valid release list
+            let (mut sock, _) = listener.accept().await.unwrap();
+            let mut buf = [0u8; 1024];
+            let _ = sock.read(&mut buf).await;
+            let raw_json = br#"[{"tag_name":"v1.14.0","assets":[]}]"#;
+            let mut enc = GzEncoder::new(Vec::new(), Compression::default());
+            enc.write_all(raw_json).unwrap();
+            let gz = enc.finish().unwrap();
+            let head = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Encoding: gzip\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                gz.len()
+            );
+            sock.write_all(head.as_bytes()).await.unwrap();
+            sock.write_all(&gz).await.unwrap();
+            drop(sock);
+
+            // Case 2: invalid JSON
+            let (mut sock, _) = listener.accept().await.unwrap();
+            let _ = sock.read(&mut buf).await;
+            let bad = b"not-json";
+            let head = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                bad.len()
+            );
+            sock.write_all(head.as_bytes()).await.unwrap();
+            sock.write_all(bad).await.unwrap();
+            drop(sock);
+
+            // Case 3: headers sent, body stalls past short timeout
+            let (mut sock, _) = listener.accept().await.unwrap();
+            let _ = sock.read(&mut buf).await;
+            let head = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 100\r\nConnection: close\r\n\r\n[";
+            sock.write_all(head.as_bytes()).await.unwrap();
+            tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+        });
+
+        let client = Client::builder().no_proxy().build().unwrap();
+        let base = format!("http://{addr}");
+
+        let list: Vec<GithubRelease> =
+            fetch_json_with_timeout(&client, &base, std::time::Duration::from_secs(2))
+                .await
+                .unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].tag_name, "v1.14.0");
+
+        let parse_err = fetch_json_with_timeout::<Vec<GithubRelease>>(
+            &client,
+            &base,
+            std::time::Duration::from_secs(2),
+        )
+        .await
+        .unwrap_err()
+        .to_string();
+        assert!(parse_err.contains("解析 JSON 失败"), "{parse_err}");
+
+        let read_err = fetch_json_with_timeout::<Vec<GithubRelease>>(
+            &client,
+            &base,
+            std::time::Duration::from_millis(120),
+        )
+        .await
+        .unwrap_err()
+        .to_string();
+        assert!(read_err.contains("读取响应体失败"), "{read_err}");
+
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    #[ignore = "真实网络手测，要能连上 api.github.com"]
+    async fn real_network_singbox_history_succeeds() {
+        let dir = std::env::temp_dir().join(format!("vproxy-sb-hist-{}", std::process::id()));
+        let updater = KernelUpdater::new(dir.clone(), Some("http://127.0.0.1:9980")).unwrap();
+        let started = std::time::Instant::now();
+        let entries = updater
+            .list_history(KernelKind::SingBox, None, 15)
+            .await
+            .unwrap();
+        println!(
+            "sing-box history loaded {} entries in {:.2}s (first={})",
+            entries.len(),
+            started.elapsed().as_secs_f64(),
+            entries.first().map(|e| e.tag_name.as_str()).unwrap_or("")
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(!entries.is_empty());
     }
 }
