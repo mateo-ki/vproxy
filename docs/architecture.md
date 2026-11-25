@@ -29,7 +29,7 @@ Mihomo YAML │ sing-box JSON │ Xray JSON │ VP-Core DSL(.vp) │ Meow 配置
 | :--- | :--- |
 | `src/parser` | 分享链接与订阅正文解析（URI scheme 见 §3）；Clash YAML、Base64、混合文本 |
 | `src/export` | 节点 → Clash 代理 JSON / 分享链接（含各协议 URI 重建） |
-| `src/kernel` | 内核资产管理、版本检测、更新器、**内核选路**（§5） |
+| `src/kernel` | 内核资产管理、版本检测、更新器（含历史版本列表与按 Tag SHA-256 安装替换）、**内核选路**（§5） |
 | `src/proxy/compiler` | 每内核一个编译器：`mihomo` / `sing_box` / `xray` / `vp_core`（VP-DSL）/ `meow` |
 | `src/proxy/ir` | 内核无关的编译中间层（RoutingPlan / OutboundKind / TransportSpec） |
 | `src/proxy` | 进程生命周期、端口就绪检测、降级状态、系统代理会话 |

@@ -45,6 +45,7 @@ A high-performance, modern cross-platform proxy workstation built with Rust and 
 - 5 curated color themes + dark mode toggle
 - Vector icon consistency and DPI-aware scaling (85% to 140%)
 - Windows system tray, single-instance mutex, and local loopback firewall auto-configuration
+- Kernel management drawer with online updates, historical release rollback modal (`list_history` + SHA-256 verified replacement across all 5 cores), and lightweight kernel-free Windows installer packaging
 
 ### 🔌 Developer & API Services
 - Local RESTful HTTP API (default `127.0.0.1:8080`, secured via Bearer token) with Clash-compatible `/proxies`, `/proxies/{name}/delay`, and batch `POST /proxies/delay` endpoints
