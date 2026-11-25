@@ -8,7 +8,7 @@ impl VpnApp {
         if !self.show_ip_risk_dialog {
             return;
         }
-        if self.ip_risk_busy || self.ip_risk_egress_pending {
+        if self.ip_risk_dialog_busy || self.ip_risk_egress_pending {
             ctx.request_repaint_after(std::time::Duration::from_millis(150));
         }
 
@@ -24,7 +24,7 @@ impl VpnApp {
             .default_width(430.0)
             .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
             .show(ctx, |ui| {
-                if self.ip_risk_busy {
+                if self.ip_risk_dialog_busy {
                     ui.horizontal(|ui| {
                         ui.spinner();
                         ui.label(RichText::new(&self.status).color(theme::text_primary()));
@@ -32,7 +32,7 @@ impl VpnApp {
                     return;
                 }
 
-                if let Some(error) = &self.ip_risk_error {
+                if let Some(error) = &self.ip_risk_dialog_error {
                     Frame::NONE
                         .fill(theme::danger_bg())
                         .stroke(Stroke::new(1.0_f32, theme::danger()))
@@ -56,7 +56,7 @@ impl VpnApp {
                     return;
                 }
 
-                let Some(risk) = self.ip_risk.as_ref() else {
+                let Some(risk) = self.ip_risk_dialog_front.as_ref() else {
                     ui.label(RichText::new("还没有查询结果。").color(theme::muted()));
                     return;
                 };
@@ -143,7 +143,8 @@ impl VpnApp {
                 let current = self.proxy_status.node_id.as_deref();
                 let target_is_running = self.proxy_status.local_proxy_active()
                     && matches!((target, current), (Some(a), Some(b)) if a == b);
-                let egress_belongs_to_target = self.ip_risk_egress_for.is_some()
+                let egress_belongs_to_target = target_is_running
+                    && self.ip_risk_egress_for.is_some()
                     && self.ip_risk_egress_for == self.ip_risk_target;
                 let egress = if egress_belongs_to_target {
                     self.ip_risk_egress.as_ref()
@@ -155,7 +156,7 @@ impl VpnApp {
                 } else {
                     None
                 };
-                if self.ip_risk_egress_pending {
+                if target_is_running && self.ip_risk_egress_pending {
                     ui.horizontal(|ui| {
                         ui.spinner();
                         ui.label(
@@ -242,12 +243,14 @@ impl VpnApp {
                 ui.horizontal(|ui| {
                     if ui.button("复制").clicked() {
                         let mut text = format!("入口：{}\n{}", risk.headline(), risk.verdict);
-                        if let Some(egress) = &self.ip_risk_egress {
-                            text.push_str(&format!(
-                                "\n出口：{}\n{}",
-                                egress.headline(),
-                                egress.verdict
-                            ));
+                        if egress_belongs_to_target {
+                            if let Some(egress) = &self.ip_risk_egress {
+                                text.push_str(&format!(
+                                    "\n出口：{}\n{}",
+                                    egress.headline(),
+                                    egress.verdict
+                                ));
+                            }
                         }
                         copy_payload = Some(text);
                     }
@@ -258,7 +261,11 @@ impl VpnApp {
             });
 
         if retry {
-            self.ip_risk = None;
+            self.ip_risk_dialog_front = None;
+            self.ip_risk_dialog_error = None;
+            if self.ip_risk_target.as_deref() == self.proxy_status.node_id.as_deref() {
+                self.ip_risk = None;
+            }
             if let Some(target) = self.ip_risk_target.clone() {
                 self.check_ip_risk_for(&target);
             }

@@ -2886,6 +2886,19 @@ impl ProxyManager {
         self.switch_node_for_request(node, request).await
     }
 
+    /// 热切换（PUT /proxies/PROXY）或内核自动选优切流后同步运行态节点元数据，
+    /// 使 status.node_id 与真实出口保持一致（不重建配置、不断开已有连接）。
+    pub async fn sync_active_node(&self, node: Node) {
+        let mut runtime = self.runtime.lock().await;
+        if matches!(
+            runtime.status.state,
+            ProxyState::Running | ProxyState::Degraded | ProxyState::Starting
+        ) {
+            runtime.status.node_id = Some(node.id.clone());
+            runtime.current_node = Some(node);
+        }
+    }
+
     pub async fn switch_node_for_request(&self, node: &Node, request: u64) -> Result<()> {
         let _operation = self.operation.lock().await;
         if !self.request_is_current(request) {

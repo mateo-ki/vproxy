@@ -761,10 +761,21 @@ impl VpnApp {
                             }
                         }
                         BgMsg::Kernels(kernels) => self.kernels = kernels,
-                        BgMsg::IpRisk(Ok(risk), manual) => {
-                            self.ip_risk_busy = false;
-                            self.ip_risk_error = None;
-                            self.ip_risk_failed_for = None;
+                        BgMsg::IpRisk(target_id, Ok(risk), manual) => {
+                            let is_active_node = self.proxy_status.node_id.as_deref()
+                                == Some(target_id.as_str())
+                                || self.ip_risk_auto_for.as_deref() == Some(target_id.as_str());
+                            if manual && self.ip_risk_target.as_deref() == Some(target_id.as_str())
+                            {
+                                self.ip_risk_dialog_busy = false;
+                                self.ip_risk_dialog_error = None;
+                                self.ip_risk_dialog_front = Some(risk.clone());
+                            }
+                            if !manual || is_active_node {
+                                self.ip_risk_busy = false;
+                                self.ip_risk_error = None;
+                                self.ip_risk_failed_for = None;
+                            }
                             crate::startup_log(&format!(
                                 "[出口归属] 服务器归属查到：{}",
                                 risk.headline()
@@ -774,50 +785,58 @@ impl VpnApp {
                             }
                             // 若查验到有效的国家/地区代码，自动同步并纠正节点国家归属
                             if !risk.country.is_empty() {
-                                let target_id = if manual {
-                                    self.ip_risk_target.clone()
-                                } else {
-                                    self.ip_risk_auto_for.clone()
-                                };
-                                if let Some(target_id) = target_id {
-                                    let db = self.db.clone();
-                                    let country = risk.country.clone();
-                                    let tid = target_id.clone();
-                                    self.rt.spawn(async move {
-                                        let _ = db.update_node_country(&tid, &country).await;
-                                    });
-                                    if let Some(node) =
-                                        self.nodes.iter_mut().find(|n| n.id == target_id)
-                                    {
-                                        node.country = Some(risk.country.clone());
-                                    }
-                                    if let Some(node) =
-                                        self.proxy_nodes.iter_mut().find(|n| n.id == target_id)
-                                    {
-                                        node.country = Some(risk.country.clone());
-                                    }
+                                let db = self.db.clone();
+                                let country = risk.country.clone();
+                                let tid = target_id.clone();
+                                self.rt.spawn(async move {
+                                    let _ = db.update_node_country(&tid, &country).await;
+                                });
+                                if let Some(node) =
+                                    self.nodes.iter_mut().find(|n| n.id == target_id)
+                                {
+                                    node.country = Some(risk.country.clone());
+                                }
+                                if let Some(node) =
+                                    self.proxy_nodes.iter_mut().find(|n| n.id == target_id)
+                                {
+                                    node.country = Some(risk.country.clone());
                                 }
                             }
-                            self.ip_risk = Some(risk);
+                            if !manual || is_active_node {
+                                self.ip_risk = Some(risk);
+                            }
                         }
-                        BgMsg::IpRisk(Err(error), manual) => {
-                            self.ip_risk_busy = false;
-                            self.ip_risk = None;
-                            // 记下这颗查失败过：徽章要区分「没查过」和「查了没查到」。
-                            self.ip_risk_failed_for = if manual {
-                                self.ip_risk_target.clone()
-                            } else {
-                                self.ip_risk_auto_for.clone()
-                            };
+                        BgMsg::IpRisk(target_id, Err(error), manual) => {
+                            let is_active_node = self.proxy_status.node_id.as_deref()
+                                == Some(target_id.as_str())
+                                || self.ip_risk_auto_for.as_deref() == Some(target_id.as_str());
+                            if manual && self.ip_risk_target.as_deref() == Some(target_id.as_str())
+                            {
+                                self.ip_risk_dialog_busy = false;
+                                self.ip_risk_dialog_front = None;
+                                self.ip_risk_dialog_error = Some(error.clone());
+                            }
+                            if !manual || is_active_node {
+                                self.ip_risk_busy = false;
+                                self.ip_risk = None;
+                                // 记下这颗查失败过：徽章要区分「没查过」和「查了没查到」。
+                                self.ip_risk_failed_for = Some(target_id);
+                                self.ip_risk_error = Some(error.clone());
+                            }
                             crate::startup_log(&format!("[出口归属] 服务器归属查询失败：{error}"));
-                            self.ip_risk_error = Some(error);
                             if manual {
                                 self.status = "IP 检测查询失败".into();
                             }
                         }
                         BgMsg::IpEgress(node_id, Ok(egress), manual) => {
-                            self.ip_risk_egress_pending = false;
-                            self.ip_risk_egress_error = None;
+                            let is_active_node = self.proxy_status.node_id.is_none()
+                                || self.proxy_status.node_id.as_deref() == Some(node_id.as_str());
+                            if is_active_node {
+                                self.ip_risk_egress_pending = false;
+                                self.ip_risk_egress_error = None;
+                                self.ip_risk_egress_for = Some(node_id);
+                                self.ip_risk_egress = Some(egress.clone());
+                            }
                             crate::startup_log(&format!(
                                 "[出口归属] 出口查到：{}",
                                 egress.headline()
@@ -825,15 +844,17 @@ impl VpnApp {
                             if manual {
                                 self.status = format!("出口 {}", egress.headline());
                             }
-                            self.ip_risk_egress_for = Some(node_id);
-                            self.ip_risk_egress = Some(egress);
                         }
                         BgMsg::IpEgress(node_id, Err(error), _manual) => {
-                            self.ip_risk_egress_pending = false;
-                            self.ip_risk_egress = None;
-                            self.ip_risk_egress_for = Some(node_id);
+                            let is_active_node = self.proxy_status.node_id.is_none()
+                                || self.proxy_status.node_id.as_deref() == Some(node_id.as_str());
+                            if is_active_node {
+                                self.ip_risk_egress_pending = false;
+                                self.ip_risk_egress = None;
+                                self.ip_risk_egress_for = Some(node_id);
+                                self.ip_risk_egress_error = Some(error.clone());
+                            }
                             crate::startup_log(&format!("[出口归属] 出口查询失败：{error}"));
-                            self.ip_risk_egress_error = Some(error);
                         }
                         BgMsg::KernelReleases(Ok(releases)) => {
                             // 以前这里只存数据不写状态，状态栏会一直停在
@@ -1616,6 +1637,29 @@ impl VpnApp {
                             if let Some((grp, mbr)) = self.pending_group_pick.take() {
                                 if self.kernel_groups.iter().any(|g| g.name == grp) {
                                     self.select_kernel_member(grp, mbr);
+                                }
+                            } else if self.proxy_status.kernel_serving()
+                                && self.switching_node_id.is_none()
+                                && self.last_kernel_group_pick_at.is_none_or(|at| {
+                                    at.elapsed() >= std::time::Duration::from_millis(1500)
+                                })
+                            {
+                                // 内核实际出口变化（例如 url-test 自动选优或通过策略组视图切换）时，
+                                // 同步 proxy_status.node_id 与主页出口画像，防止主页显示旧节点。
+                                if let Some(actual_name) = self.kernel_egress_name() {
+                                    if let Some(actual_node) =
+                                        self.resolve_node_by_name(&actual_name)
+                                    {
+                                        if self.proxy_status.node_id.as_deref()
+                                            != Some(actual_node.id.as_str())
+                                        {
+                                            self.sync_active_running_node(
+                                                actual_node.id,
+                                                actual_node.name,
+                                                true,
+                                            );
+                                        }
+                                    }
                                 }
                             }
                         }

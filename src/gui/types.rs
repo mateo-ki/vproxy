@@ -459,9 +459,8 @@ pub enum BgMsg {
         broken_ids: Vec<String>,
         rebinds: Vec<(String, String)>,
     },
-    /// 节点落地 IP 的机房/风控画像。
-    /// 节点落地 IP 的机房/风控画像。
-    IpRisk(Result<crate::ip_risk::IpRisk, String>, bool),
+    /// 节点落地 IP 的机房/风控画像（第一个字段为所属节点 ID）。
+    IpRisk(String, Result<crate::ip_risk::IpRisk, String>, bool),
     /// 出口 IP 画像，第一个字段是它属于哪个节点（自动查=当前运行节点，手动=被实测的节点）。
     /// 尾巴那颗 bool = 这次是用户手动点的。汇总卡片那颗徽章会自己静默跟随当前出口，
     /// 那种回信不许改状态栏文案，否则会把「代理已启动」这类要紧的话顶掉。

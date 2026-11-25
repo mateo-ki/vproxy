@@ -651,9 +651,19 @@ fn node_ip_kind_color(kind: NodeIpKind) -> Color32 {
 
 impl VpnApp {
     pub(crate) fn ui_proxy_charts(&mut self, ui: &mut Ui) {
-        let selected_node = self
-            .selected_proxy_node_id
-            .as_ref()
+        let is_running = matches!(
+            self.proxy_status.state,
+            ProxyState::Running | ProxyState::Degraded
+        );
+        let display_node_id = if is_running {
+            self.proxy_status
+                .node_id
+                .as_ref()
+                .or(self.selected_proxy_node_id.as_ref())
+        } else {
+            self.selected_proxy_node_id.as_ref()
+        };
+        let selected_node = display_node_id
             .and_then(|id| {
                 self.proxy_nodes
                     .iter()
@@ -661,11 +671,6 @@ impl VpnApp {
                     .find(|node| &node.id == id)
             })
             .cloned();
-
-        let is_running = matches!(
-            self.proxy_status.state,
-            ProxyState::Running | ProxyState::Degraded
-        );
         let is_starting = matches!(self.proxy_status.state, ProxyState::Starting);
         let prepared = crate::gui::prepare::is_prepared(
             self.kernel_installed_cached(),
@@ -719,7 +724,7 @@ impl VpnApp {
     }
 
     /// 按名称在节点库（可用节点 + 全量节点）里找节点。
-    fn resolve_node_by_name(&self, name: &str) -> Option<crate::models::NodeSummary> {
+    pub(crate) fn resolve_node_by_name(&self, name: &str) -> Option<crate::models::NodeSummary> {
         self.proxy_nodes
             .iter()
             .chain(self.nodes.iter())
@@ -1659,9 +1664,7 @@ impl VpnApp {
                                                 force_manual = true;
                                             } else if clicked {
                                                 self.focused_node_id = Some(node_id.clone());
-                                                if !is_active && manual_mode {
-                                                    clicked_node = Some(node.clone());
-                                                } else if !manual_mode {
+                                                if !manual_mode {
                                                     clicked_auto = true;
                                                 }
                                             }

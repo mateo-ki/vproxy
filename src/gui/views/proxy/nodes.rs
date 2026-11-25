@@ -628,7 +628,7 @@ impl VpnApp {
     }
 
     /// url-test 开着时真正的出口：`PROXY.now` 若指向「自动选择」，再取该组选中的成员。
-    fn kernel_egress_name(&self) -> Option<String> {
+    pub(crate) fn kernel_egress_name(&self) -> Option<String> {
         let proxy = self
             .kernel_groups
             .iter()

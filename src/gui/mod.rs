@@ -455,10 +455,13 @@ pub struct VpnApp {
     pub(crate) network_doctor_busy: bool,
     pub(crate) network_doctor_repairing: bool,
     pub(crate) network_doctor_message: Option<String>,
-    /// 弹窗当前展示的是哪个节点。
+    /// 弹窗当前展示的是哪个节点（与主界面活跃出口状态隔离，避免查其它节点覆盖主页出口）。
     pub(crate) ip_risk_target: Option<String>,
+    pub(crate) ip_risk_dialog_front: Option<crate::ip_risk::IpRisk>,
+    pub(crate) ip_risk_dialog_busy: bool,
+    pub(crate) ip_risk_dialog_error: Option<String>,
     pub(crate) ip_risk_egress: Option<crate::ip_risk::IpRisk>,
-    /// 上面这条出口属于哪个节点：只有和 `ip_risk_target` 一致才能显示，否则会张冠李戴。
+    /// 上面这条出口属于哪个节点：只有和当前运行节点一致才能显示，否则会张冠李戴。
     pub(crate) ip_risk_egress_for: Option<String>,
     pub(crate) ip_risk_egress_pending: bool,
     pub(crate) ip_risk_egress_error: Option<String>,
@@ -466,6 +469,8 @@ pub struct VpnApp {
     pub(crate) ip_risk_auto_for: Option<String>,
     /// 归属查询失败时，那次查询是为哪颗节点跑的（徽章要能说「查失败」而不是装没查过）。
     pub(crate) ip_risk_failed_for: Option<String>,
+    /// 最近一次手动向内核下发 PUT /proxies/PROXY 的时刻，防止滞后到达的轮询快照回弹旧值。
+    pub(crate) last_kernel_group_pick_at: Option<std::time::Instant>,
     pub(crate) show_route_trace_dialog: bool,
     pub(crate) route_trace_target: String,
     pub(crate) route_trace_node: Option<NodeSummary>,
@@ -922,12 +927,16 @@ impl VpnApp {
             network_doctor_repairing: false,
             network_doctor_message: None,
             ip_risk_target: None,
+            ip_risk_dialog_front: None,
+            ip_risk_dialog_busy: false,
+            ip_risk_dialog_error: None,
             ip_risk_egress: None,
             ip_risk_egress_for: None,
             ip_risk_egress_pending: false,
             ip_risk_egress_error: None,
             ip_risk_auto_for: None,
             ip_risk_failed_for: None,
+            last_kernel_group_pick_at: None,
             show_route_trace_dialog: false,
             route_trace_target: "github.com:443".to_string(),
             route_trace_node: None,
@@ -3499,7 +3508,15 @@ impl VpnApp {
                 let _ = db.record_egress_switch(&record).await;
             });
         }
+        let kernel_matches_target = self
+            .kernel_groups
+            .iter()
+            .find(|group| group.name == "PROXY")
+            .and_then(|group| group.now.as_deref())
+            .is_none_or(|now| now == name);
         if self.selected_proxy_node_id.as_deref() == Some(&id)
+            && self.proxy_status.node_id.as_deref() == Some(&id)
+            && kernel_matches_target
             && self.switching_node_id.is_none()
             && matches!(
                 self.proxy_status.state,
@@ -5125,6 +5142,19 @@ impl VpnApp {
                 return;
             }
         }
+        // 先乐观更新本地策略组选中态与活动出口元数据，确保主页状态卡 / 出口 IP 检测立刻跟进，
+        // 避免 PUT /proxies/PROXY 后 proxy_status.node_id 仍卡在旧节点上。
+        if let Some(g) = self.kernel_groups.iter_mut().find(|g| g.name == group) {
+            g.now = Some(target.clone());
+        }
+        if group == "PROXY" {
+            self.last_kernel_group_pick_at = Some(std::time::Instant::now());
+            if let Some(actual_name) = self.kernel_egress_name() {
+                if let Some(node) = self.resolve_node_by_name(&actual_name) {
+                    self.sync_active_running_node(node.id, node.name, true);
+                }
+            }
+        }
         // 出口变化：服务连通性立即重测（先清掉旧结果，卡片转入"检测中"）
         self.last_service_check = std::time::Instant::now() - std::time::Duration::from_secs(61);
         self.service_checks = None;
@@ -5167,6 +5197,38 @@ impl VpnApp {
                 unlock: false,
             });
         });
+    }
+
+    /// 同步正在运行的活动节点元数据（热切 PROXY 或内核自动选优切换后使用），
+    /// 并按需重测主页实时出口归属。不改 `selected_proxy_node_id` 以外的重启配置，也不打断现有连接。
+    pub(crate) fn sync_active_running_node(
+        &mut self,
+        id: String,
+        _name: String,
+        refresh_egress: bool,
+    ) {
+        let changed = self.proxy_status.node_id.as_deref() != Some(id.as_str());
+        self.proxy_status.node_id = Some(id.clone());
+        self.router.set_active(&id);
+        let db = self.db.clone();
+        let manager = self.proxy_manager.clone();
+        let sync_id = id.clone();
+        self.rt.spawn(async move {
+            if let Ok(Some(node)) = db.get_node(&sync_id).await {
+                manager.sync_active_node(node).await;
+            }
+        });
+        if refresh_egress && (changed || self.ip_risk_egress_for.as_deref() != Some(id.as_str())) {
+            self.ip_risk = None;
+            self.ip_risk_error = None;
+            self.ip_risk_auto_for = None;
+            self.ip_risk_failed_for = None;
+            self.ip_risk_egress = None;
+            self.ip_risk_egress_for = None;
+            self.ip_risk_egress_error = None;
+            self.ip_risk_egress_pending = false;
+            self.refresh_egress_silently();
+        }
     }
 
     pub(crate) fn close_connection(&mut self, id: String) {
@@ -5414,10 +5476,16 @@ impl VpnApp {
 
     /// 面板列表里没有这颗节点时的路：直接去库里取它自己的 server 再查归属。
     fn lookup_ip_risk_from_db(&mut self, node_id: &str, manual: bool) {
-        self.ip_risk_busy = true;
-        self.ip_risk_error = None;
+        let is_current = self.proxy_status.node_id.as_deref() == Some(node_id);
         if manual {
+            self.ip_risk_dialog_busy = true;
+            self.ip_risk_dialog_error = None;
+            self.ip_risk_dialog_front = None;
             self.status = "正在查这颗节点的服务器归属...".into();
+        }
+        if !manual || is_current {
+            self.ip_risk_busy = true;
+            self.ip_risk_error = None;
         }
         let db = self.db.clone();
         let tx = self.tx.clone();
@@ -5443,21 +5511,27 @@ impl VpnApp {
                     .await
                     .map_err(|error| error.to_string())
             };
-            let _ = tx.send(BgMsg::IpRisk(front, manual));
+            let _ = tx.send(BgMsg::IpRisk(id, front, manual));
         });
         self.start_egress_lookup_if_current(node_id, manual);
     }
 
-    /// `manual = false` 那条只更新数据：不弹框、不写状态栏。
+    /// `manual = false` 那条只更新数据：不弹框、不写状态栏；
+    /// `manual = true` 查别的节点时绝不切换在用节点、也不抹除主页当前运行节点的出口信息。
     fn request_ip_risk_for(&mut self, node_id: &str, manual: bool) {
+        let is_current = self.proxy_status.node_id.as_deref() == Some(node_id);
         if manual {
             self.show_ip_risk_dialog = true;
             self.ip_risk_target = Some(node_id.to_owned());
+            self.ip_risk_dialog_error = None;
+            self.ip_risk_dialog_front = None;
         }
-        self.ip_risk_egress = None;
-        self.ip_risk_egress_for = None;
-        self.ip_risk_egress_error = None;
-        self.ip_risk_egress_pending = false;
+        if !manual || is_current {
+            self.ip_risk_egress = None;
+            self.ip_risk_egress_for = None;
+            self.ip_risk_egress_error = None;
+            self.ip_risk_egress_pending = false;
+        }
         let server = self
             .proxy_nodes
             .iter()
@@ -5470,26 +5544,38 @@ impl VpnApp {
             self.lookup_ip_risk_from_db(node_id, manual);
             return;
         };
-        if self.ip_risk_busy {
+        if if manual {
+            self.ip_risk_dialog_busy
+        } else {
+            self.ip_risk_busy
+        } {
             return;
         }
-        if self
-            .ip_risk
-            .as_ref()
-            .is_some_and(|risk| risk.hostname == server || risk.ip == server)
+        if is_current
+            && self
+                .ip_risk
+                .as_ref()
+                .is_some_and(|risk| risk.hostname == server || risk.ip == server)
         {
             if manual {
+                self.ip_risk_dialog_front = self.ip_risk.clone();
+                self.ip_risk_dialog_busy = false;
                 self.status = format!("IP 检测：{}", self.ip_risk.as_ref().unwrap().headline());
             }
             self.start_egress_lookup_if_current(node_id, manual);
             return;
         }
-        self.ip_risk_busy = true;
-        self.ip_risk_error = None;
         if manual {
+            self.ip_risk_dialog_busy = true;
+            self.ip_risk_dialog_error = None;
             self.status = format!("正在查询 {server} 的归属...");
         }
+        if !manual || is_current {
+            self.ip_risk_busy = true;
+            self.ip_risk_error = None;
+        }
         let tx = self.tx.clone();
+        let id = node_id.to_owned();
         let proxy_url = if matches!(
             self.proxy_status.state,
             ProxyState::Running | ProxyState::Degraded
@@ -5503,7 +5589,7 @@ impl VpnApp {
             let front = crate::ip_risk::lookup_smart(&server, proxy_url.as_deref())
                 .await
                 .map_err(|error| error.to_string());
-            let _ = tx.send(BgMsg::IpRisk(front, manual));
+            let _ = tx.send(BgMsg::IpRisk(id, front, manual));
         });
         self.start_egress_lookup_if_current(node_id, manual);
     }
@@ -8289,5 +8375,144 @@ mod port_mapping_prime_tests {
         drop(manager);
         drop(db);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn test_node_summary(id: &str, name: &str, server: &str, country: &str) -> NodeSummary {
+        NodeSummary {
+            id: id.into(),
+            source_id: Some("src-1".into()),
+            name: name.into(),
+            protocol: "vless".into(),
+            server: server.into(),
+            port: 443,
+            country: Some(country.into()),
+            latency_ms: Some(45),
+            latency_ok: Some(true),
+            download_kbps: None,
+            latency_kernel: None,
+            latency_test_kind: None,
+            latency_tested_at: None,
+            updated_at: chrono::Utc::now(),
+        }
+    }
+
+    fn test_ip_risk(ip: &str, country: &str) -> crate::ip_risk::IpRisk {
+        crate::ip_risk::IpRisk {
+            hostname: ip.into(),
+            ip: ip.into(),
+            country: country.into(),
+            org: "AS13335 TestNet".into(),
+            datacenter: true,
+            public_proxy: false,
+            verdict: "机房".into(),
+        }
+    }
+
+    #[test]
+    fn ip_risk_check_on_non_running_node_never_switches_or_clobbers_active_egress() {
+        let mut app = crate::gui::views::nodes::empty_pool_modal_tests::app_with_an_empty_library();
+        let (tx, rx) = std::sync::mpsc::channel();
+        app.tx = tx;
+        app.rx = rx;
+        app.last_service_check = std::time::Instant::now();
+        app.last_lan_ip_check = std::time::Instant::now();
+
+        let us = test_node_summary("us-id", "US-01", "1.1.1.1", "US");
+        let sg = test_node_summary("sg-id", "SG-01", "2.2.2.2", "SG");
+        app.proxy_nodes = vec![us.clone(), sg.clone()];
+        app.nodes = vec![us, sg];
+        app.selected_proxy_node_id = Some("us-id".into());
+        app.selected_proxy_node_name = Some("US-01".into());
+        app.proxy_status.state = ProxyState::Running;
+        app.proxy_status.node_id = Some("us-id".into());
+        app.proxy_status.local_proxy_ready = true;
+        app.ip_risk_auto_for = Some("us-id".into());
+        app.ip_risk = Some(test_ip_risk("1.1.1.1", "US"));
+        app.ip_risk_egress_for = Some("us-id".into());
+        app.ip_risk_egress = Some(test_ip_risk("1.1.1.2", "US"));
+
+        app.check_ip_risk_for("sg-id");
+        assert_eq!(app.selected_proxy_node_id.as_deref(), Some("us-id"));
+        assert_eq!(app.proxy_status.node_id.as_deref(), Some("us-id"));
+        assert_eq!(app.ip_risk_egress_for.as_deref(), Some("us-id"));
+        assert_eq!(
+            app.ip_risk_egress.as_ref().map(|r| r.ip.as_str()),
+            Some("1.1.1.2")
+        );
+
+        app.tx
+            .send(BgMsg::IpRisk(
+                "sg-id".into(),
+                Ok(test_ip_risk("2.2.2.2", "SG")),
+                true,
+            ))
+            .unwrap();
+        let ctx = eframe::egui::Context::default();
+        app.poll_bg(&ctx);
+
+        // 主页活跃出口与选定节点纹丝不动；弹窗展示 SG-01 的查询结果。
+        assert_eq!(app.selected_proxy_node_id.as_deref(), Some("us-id"));
+        assert_eq!(app.proxy_status.node_id.as_deref(), Some("us-id"));
+        assert_eq!(app.ip_risk_egress_for.as_deref(), Some("us-id"));
+        assert_eq!(app.ip_risk.as_ref().map(|r| r.country.as_str()), Some("US"));
+        assert_eq!(
+            app.ip_risk_dialog_front
+                .as_ref()
+                .map(|r| r.country.as_str()),
+            Some("SG")
+        );
+    }
+
+    #[test]
+    fn kernel_groups_egress_change_syncs_proxy_status_node_and_refreshes_egress() {
+        let mut app = crate::gui::views::nodes::empty_pool_modal_tests::app_with_an_empty_library();
+        let (tx, rx) = std::sync::mpsc::channel();
+        app.tx = tx;
+        app.rx = rx;
+        app.last_service_check = std::time::Instant::now();
+        app.last_lan_ip_check = std::time::Instant::now();
+
+        let us = test_node_summary("us-id", "US-01", "1.1.1.1", "US");
+        let sg = test_node_summary("sg-id", "SG-01", "2.2.2.2", "SG");
+        app.proxy_nodes = vec![us.clone(), sg.clone()];
+        app.nodes = vec![us, sg];
+        app.selected_proxy_node_id = Some("us-id".into());
+        app.selected_proxy_node_name = Some("US-01".into());
+        app.proxy_status.state = ProxyState::Running;
+        app.proxy_status.node_id = Some("us-id".into());
+        app.proxy_status.local_proxy_ready = true;
+        app.ip_risk_auto_for = Some("us-id".into());
+        app.ip_risk = Some(test_ip_risk("1.1.1.1", "US"));
+        app.ip_risk_egress_for = Some("us-id".into());
+        app.ip_risk_egress = Some(test_ip_risk("1.1.1.2", "US"));
+
+        let groups = vec![
+            crate::gui::types::KernelGroup {
+                name: "PROXY".into(),
+                kind: "Selector".into(),
+                now: Some(crate::proxy::URL_TEST_GROUP.into()),
+                members: vec![
+                    crate::proxy::URL_TEST_GROUP.into(),
+                    "US-01".into(),
+                    "SG-01".into(),
+                ],
+            },
+            crate::gui::types::KernelGroup {
+                name: crate::proxy::URL_TEST_GROUP.into(),
+                kind: "URLTest".into(),
+                now: Some("SG-01".into()),
+                members: vec!["US-01".into(), "SG-01".into()],
+            },
+        ];
+        let ctx = eframe::egui::Context::default();
+        app.tx
+            .send(BgMsg::KernelGroups(groups, Vec::new()))
+            .unwrap();
+        app.poll_bg(&ctx);
+
+        assert_eq!(app.proxy_status.node_id.as_deref(), Some("sg-id"));
+        assert!(app.ip_risk_egress.is_none());
+        assert!(app.ip_risk_egress_for.is_none());
+        assert!(app.ip_risk_auto_for.is_none());
     }
 }
