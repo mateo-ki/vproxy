@@ -858,6 +858,21 @@ impl VpnApp {
                         BgMsg::KernelReleases(Err(error)) => {
                             self.status = format!("内核更新检查失败: {error}");
                         }
+                        BgMsg::KernelHistoryLoaded { kind, result } => {
+                            if self.kernel_history_kind == Some(kind) {
+                                self.kernel_history_loading = false;
+                                match result {
+                                    Ok(entries) => {
+                                        self.kernel_history_entries = entries;
+                                        self.kernel_history_error = None;
+                                    }
+                                    Err(err) => {
+                                        self.kernel_history_entries.clear();
+                                        self.kernel_history_error = Some(err);
+                                    }
+                                }
+                            }
+                        }
                         BgMsg::KernelProgress(progress) => {
                             self.kernel_progress = Some(progress);
                         }

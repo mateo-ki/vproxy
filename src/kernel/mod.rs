@@ -10,8 +10,9 @@ use crate::models::Node;
 mod updater;
 
 pub use updater::{
-    proxy_candidates, source_from_id, KernelReleaseInfo, KernelSource, KernelUpdateProgress,
-    KernelUpdateResult, KernelUpdateStage, ASSET_MIRROR_PREFIXES, SOURCE_OPTIONS,
+    proxy_candidates, source_from_id, KernelHistoryEntry, KernelReleaseInfo, KernelSource,
+    KernelUpdateProgress, KernelUpdateResult, KernelUpdateStage, ASSET_MIRROR_PREFIXES,
+    SOURCE_OPTIONS,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -1011,6 +1012,34 @@ impl KernelManager {
     {
         updater::KernelUpdater::new(managed_kernel_root(), proxy_url.as_deref())?
             .update(kind, source, local_file.as_deref(), &cancelled, &progress)
+            .await
+    }
+
+    pub async fn list_history_with_proxy(
+        &self,
+        kind: KernelKind,
+        proxy_url: Option<String>,
+    ) -> Result<Vec<KernelHistoryEntry>> {
+        let info = self.detect(kind).await;
+        updater::KernelUpdater::new(managed_kernel_root(), proxy_url.as_deref())?
+            .list_history(kind, info.version.as_deref(), 25)
+            .await
+    }
+
+    pub async fn install_version_with_proxy<F>(
+        &self,
+        kind: KernelKind,
+        tag: String,
+        proxy_url: Option<String>,
+        source: KernelSource,
+        cancelled: Arc<AtomicBool>,
+        progress: F,
+    ) -> Result<KernelUpdateResult>
+    where
+        F: Fn(KernelUpdateProgress) + Send + Sync,
+    {
+        updater::KernelUpdater::new(managed_kernel_root(), proxy_url.as_deref())?
+            .install_tag(kind, &tag, source, &cancelled, &progress)
             .await
     }
 }

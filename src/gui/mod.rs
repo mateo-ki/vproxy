@@ -575,6 +575,13 @@ pub struct VpnApp {
     pub(crate) kernel_dialog_path: String,
     /// 弹框是为哪个内核开的。
     pub(crate) kernel_dialog_kind: Option<crate::kernel::KernelKind>,
+    /// 「内核历史版本」弹框：选定内核、加载状态、历史版本列表与错误提示。
+    pub(crate) show_kernel_history_dialog: bool,
+    pub(crate) kernel_history_kind: Option<crate::kernel::KernelKind>,
+    pub(crate) kernel_history_loading: bool,
+    pub(crate) kernel_history_entries: Vec<crate::kernel::KernelHistoryEntry>,
+    pub(crate) kernel_history_error: Option<String>,
+    pub(crate) kernel_history_source: String,
     /// 防火墙规则最近一次写入结果，弹框右侧显示，避免"到底加没加"看不出来。
     pub(crate) firewall_status: Option<String>,
     /// 只在第一次拿到设置时按开关自动加一次规则。
@@ -1006,6 +1013,12 @@ impl VpnApp {
             kernel_dialog_source: crate::kernel::KernelSource::GhFast.id().to_string(),
             kernel_dialog_path: String::new(),
             kernel_dialog_kind: None,
+            show_kernel_history_dialog: false,
+            kernel_history_kind: None,
+            kernel_history_loading: false,
+            kernel_history_entries: Vec::new(),
+            kernel_history_error: None,
+            kernel_history_source: crate::kernel::KernelSource::GhFast.id().to_string(),
             firewall_status: None,
             firewall_seeded: false,
             connections_filter: String::new(),
@@ -3913,6 +3926,78 @@ impl VpnApp {
         });
     }
 
+    pub(crate) fn open_kernel_history_dialog(&mut self, kind: KernelKind) {
+        self.kernel_history_kind = Some(kind);
+        self.show_kernel_history_dialog = true;
+        self.kernel_history_source = self.edit_kernel_source.clone();
+        self.refresh_kernel_history(kind);
+    }
+
+    pub(crate) fn refresh_kernel_history(&mut self, kind: KernelKind) {
+        self.kernel_history_loading = true;
+        self.kernel_history_error = None;
+        self.kernel_history_entries.clear();
+        let manager = self.kernel_manager.clone();
+        let tx = self.tx.clone();
+        let proxy_url = self
+            .proxy_status
+            .local_proxy_active()
+            .then(|| format!("http://127.0.0.1:{}", self.proxy_status.mixed_port));
+        self.rt.spawn(async move {
+            let result = manager
+                .list_history_with_proxy(kind, proxy_url)
+                .await
+                .map_err(|e| e.to_string());
+            let _ = tx.send(BgMsg::KernelHistoryLoaded { kind, result });
+        });
+    }
+
+    pub(crate) fn install_kernel_version(
+        &mut self,
+        kind: KernelKind,
+        tag: String,
+        source: crate::kernel::KernelSource,
+    ) {
+        self.restart_after_kernel_update = self.proxy_status.kernel_in_use(kind);
+        let manager = self.kernel_manager.clone();
+        let tx = self.tx.clone();
+        let cancelled = self.kernel_cancel.clone();
+        let proxy_url = self
+            .proxy_status
+            .local_proxy_active()
+            .then(|| format!("http://127.0.0.1:{}", self.proxy_status.mixed_port));
+        cancelled.store(false, Ordering::Relaxed);
+        self.kernel_busy = true;
+        self.kernel_progress = None;
+        self.edit_kernel_source = source.id().to_string();
+        self.save_settings();
+        self.status = if self.restart_after_kernel_update {
+            format!(
+                "{} 正在运行，切换至 {tag} 完成后将自动重启代理",
+                kind.display_name()
+            )
+        } else {
+            format!(
+                "正在下载 {} {tag}（{}）...",
+                kind.display_name(),
+                source.label()
+            )
+        };
+        self.rt.spawn(async move {
+            let result = manager
+                .install_version_with_proxy(kind, tag, proxy_url, source, cancelled, {
+                    let tx = tx.clone();
+                    move |progress| {
+                        let _ = tx.send(BgMsg::KernelProgress(progress));
+                    }
+                })
+                .await
+                .map(|result| result.message)
+                .map_err(|error| error.to_string());
+            let _ = tx.send(BgMsg::KernelUpdated(result));
+        });
+    }
+
     /// 代理配置进 UI 状态的唯一入口。
     fn set_proxy_config(&mut self, mut config: MihomoConfigOptions) {
         if self.custom_rules_text.trim().is_empty() {
@@ -6588,6 +6673,7 @@ impl eframe::App for VpnApp {
         self.ui_route_trace_dialog(ctx);
         self.ui_speedtest_dialog(ctx);
         self.ui_kernel_dialog(ctx);
+        self.ui_kernel_history_dialog(ctx);
         self.ui_network_doctor_dialog(ctx);
         self.ui_switch_log(ctx);
         self.ui_command_palette(ctx);

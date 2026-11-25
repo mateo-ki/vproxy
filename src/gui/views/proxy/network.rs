@@ -401,6 +401,7 @@ impl VpnApp {
 
                 ui.add_space(8.0);
                 let mut update_kind = None;
+                let mut history_kind = None;
 
                 // 响应式网格：抽屉内宽度受限，排 2 列或单列，绝不能单行排 6 个把卡片挤爆
                 let cols = if ui.available_width() >= 520.0 { 2 } else { 1 };
@@ -411,14 +412,19 @@ impl VpnApp {
                                 let ui = &mut column_uis[i];
                                 let col_max_w = ui.available_width();
                                 ui.set_max_width(col_max_w);
-                                self.render_kernel_card(ui, kernel, &mut update_kind);
+                                self.render_kernel_card(
+                                    ui,
+                                    kernel,
+                                    &mut update_kind,
+                                    &mut history_kind,
+                                );
                             }
                         });
                         ui.add_space(6.0);
                     }
                 } else {
                     for kernel in &self.kernels {
-                        self.render_kernel_card(ui, kernel, &mut update_kind);
+                        self.render_kernel_card(ui, kernel, &mut update_kind, &mut history_kind);
                         ui.add_space(6.0);
                     }
                 }
@@ -426,6 +432,9 @@ impl VpnApp {
                 ui.add_space(12.0);
                 if let Some(kind) = update_kind {
                     self.open_kernel_download(kind);
+                }
+                if let Some(kind) = history_kind {
+                    self.open_kernel_history_dialog(kind);
                 }
             });
     }
@@ -435,6 +444,7 @@ impl VpnApp {
         ui: &mut Ui,
         kernel: &crate::kernel::KernelInfo,
         update_kind: &mut Option<KernelKind>,
+        history_kind: &mut Option<KernelKind>,
     ) {
         let version = kernel.version.as_deref().unwrap_or("未检测到");
         let release = self
@@ -672,12 +682,8 @@ impl VpnApp {
                             .map(|name| name.to_string_lossy().to_string())
                             .unwrap_or_else(|| path.clone())
                     };
-                    let shown_path = crate::gui::widgets::ellipsize(
-                        ui,
-                        &display_path,
-                        115.0,
-                        small_mono.clone(),
-                    );
+                    let shown_path =
+                        crate::gui::widgets::ellipsize(ui, &display_path, 84.0, small_mono.clone());
                     let path_resp = ui.add(egui::Label::new(
                         RichText::new(shown_path)
                             .small()
@@ -773,10 +779,11 @@ impl VpnApp {
                                 .on_hover_text(&p.message);
                             }
                         } else {
-                            // 运行中也允许更新：Windows 运行中的 exe 可改名（vpcore.exe →
-                            // .backup 后新文件落回原路径），更新完成后自动重启代理换新内核。
+                            // 运行中也允许更新与切换历史版本：Windows 运行中的 exe 可改名（vpcore.exe →
+                            // .backup 后新文件落回原路径），完成后自动重启代理换新内核。
                             ui.spacing_mut().interact_size.y = 27.0;
-                            ui.spacing_mut().button_padding = Vec2::new(10.0, 6.0);
+                            ui.spacing_mut().button_padding = Vec2::new(7.0, 5.0);
+                            ui.spacing_mut().item_spacing.x = 5.0;
                             let btn_label = if !kernel.available {
                                 "📥 下载内核"
                             } else if can_update {
@@ -809,6 +816,19 @@ impl VpnApp {
                             }
                             if resp.clicked() {
                                 *update_kind = Some(kernel.kind);
+                            }
+
+                            let history_btn = egui::Button::new(RichText::new("历史版本").small())
+                                .min_size(Vec2::new(0.0, 27.0))
+                                .fill(theme::sidebar())
+                                .stroke(Stroke::new(1.0_f32, theme::border_subtle()))
+                                .corner_radius(CornerRadius::same(6));
+                            if ui
+                                .add_enabled(!self.kernel_busy, history_btn)
+                                .on_hover_text("查看官方历史发布版本并下载替换当前内核")
+                                .clicked()
+                            {
+                                *history_kind = Some(kernel.kind);
                             }
                         }
                     });

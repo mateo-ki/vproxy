@@ -205,9 +205,26 @@ impl KernelUpdateProgress {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KernelHistoryEntry {
+    pub tag_name: String,
+    pub published_at: Option<String>,
+    pub prerelease: bool,
+    pub asset_name: String,
+    pub asset_size: u64,
+    pub has_sha256: bool,
+    pub is_current: bool,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 struct GithubRelease {
     tag_name: String,
     assets: Vec<GithubAsset>,
+    #[serde(default)]
+    prerelease: bool,
+    #[serde(default)]
+    draft: bool,
+    #[serde(default)]
+    published_at: Option<String>,
     /// 内置兜底 Release 用的标记：不是"最新"，是"已知能下下来、SHA-256 核对过"的那一版。
     #[serde(default)]
     fallback: bool,
@@ -587,6 +604,43 @@ impl KernelUpdater {
         }
     }
 
+    /// 拉取指定内核的历史发布版本列表（过滤草稿和不含当前平台资产的版本）。
+    pub async fn list_history(
+        &self,
+        kind: KernelKind,
+        current_version: Option<&str>,
+        per_page: usize,
+    ) -> Result<Vec<KernelHistoryEntry>> {
+        let releases = self.fetch_history_releases(kind, per_page).await?;
+        Ok(build_history_entries(kind, releases, current_version))
+    }
+
+    /// 按指定 tag 下载并安装历史/指定版本内核，完整复用 SHA-256 校验、暂存验证与原子替换回滚链路。
+    pub async fn install_tag<F>(
+        &self,
+        kind: KernelKind,
+        tag: &str,
+        source: KernelSource,
+        cancelled: &AtomicBool,
+        progress: &F,
+    ) -> Result<KernelUpdateResult>
+    where
+        F: Fn(KernelUpdateProgress) + Send + Sync,
+    {
+        ensure_not_cancelled(cancelled)?;
+        progress(KernelUpdateProgress {
+            kind,
+            stage: KernelUpdateStage::Checking,
+            downloaded: 0,
+            total: 0,
+            bytes_per_second: 0.0,
+            message: format!("正在获取 {} {tag} 发布信息", kind.display_name()),
+        });
+        let (release, transport_index) = self.fetch_tag_with_transport(kind, tag).await?;
+        self.install_from_release(kind, &release, transport_index, source, cancelled, progress)
+            .await
+    }
+
     async fn install_local<F>(
         &self,
         kind: KernelKind,
@@ -686,6 +740,22 @@ impl KernelUpdater {
             ),
         });
         let (release, transport_index) = self.fetch_release_with_transport(kind).await?;
+        self.install_from_release(kind, &release, transport_index, source, cancelled, progress)
+            .await
+    }
+
+    async fn install_from_release<F>(
+        &self,
+        kind: KernelKind,
+        release: &GithubRelease,
+        transport_index: usize,
+        source: KernelSource,
+        cancelled: &AtomicBool,
+        progress: &F,
+    ) -> Result<KernelUpdateResult>
+    where
+        F: Fn(KernelUpdateProgress) + Send + Sync,
+    {
         if release.fallback {
             progress(KernelUpdateProgress {
                 kind,
@@ -1241,6 +1311,88 @@ impl KernelUpdater {
             .join(".release-cache")
             .join(format!("{}.json", kind.directory_name()))
     }
+
+    fn history_cache_path(&self, kind: KernelKind) -> PathBuf {
+        self.root
+            .join(".release-cache")
+            .join(format!("{}-history.json", kind.directory_name()))
+    }
+
+    async fn fetch_history_releases(
+        &self,
+        kind: KernelKind,
+        per_page: usize,
+    ) -> Result<Vec<GithubRelease>> {
+        let per_page = per_page.clamp(1, 50);
+        let url = format!(
+            "https://api.github.com/repos/{}/releases?per_page={per_page}",
+            kind.github_repository()
+        );
+        let mut failures = Vec::new();
+        for transport in &self.transports {
+            match fetch_json::<Vec<GithubRelease>>(&transport.client, &url).await {
+                Ok(mut list) => {
+                    for r in &mut list {
+                        r.from_cache = false;
+                    }
+                    let cache_path = self.history_cache_path(kind);
+                    if let Some(parent) = cache_path.parent() {
+                        let _ = tokio::fs::create_dir_all(parent).await;
+                    }
+                    if let Ok(bytes) = serde_json::to_vec(&list) {
+                        let _ = tokio::fs::write(cache_path, bytes).await;
+                    }
+                    return Ok(list);
+                }
+                Err(error) => failures.push(format!("{}: {error}", transport.label)),
+            }
+        }
+        let remote_error = anyhow::anyhow!("{}", failures.join("；"));
+        if let Ok(bytes) = tokio::fs::read(self.history_cache_path(kind)).await {
+            if let Ok(mut list) = serde_json::from_slice::<Vec<GithubRelease>>(&bytes) {
+                for r in &mut list {
+                    r.from_cache = true;
+                }
+                return Ok(list);
+            }
+        }
+        bail!(
+            "获取 {} 历史版本列表失败: {remote_error}",
+            kind.display_name()
+        )
+    }
+
+    async fn fetch_tag_with_transport(
+        &self,
+        kind: KernelKind,
+        tag: &str,
+    ) -> Result<(GithubRelease, usize)> {
+        if let Ok(bytes) = tokio::fs::read(self.history_cache_path(kind)).await {
+            if let Ok(list) = serde_json::from_slice::<Vec<GithubRelease>>(&bytes) {
+                if let Some(found) = list.into_iter().find(|r| r.tag_name == tag) {
+                    return Ok((found, 0));
+                }
+            }
+        }
+        let encoded_tag =
+            percent_encoding::utf8_percent_encode(tag, percent_encoding::NON_ALPHANUMERIC);
+        let url = format!(
+            "https://api.github.com/repos/{}/releases/tags/{encoded_tag}",
+            kind.github_repository()
+        );
+        let mut failures = Vec::new();
+        for (index, transport) in self.transports.iter().enumerate() {
+            match fetch_json::<GithubRelease>(&transport.client, &url).await {
+                Ok(release) => return Ok((release, index)),
+                Err(error) => failures.push(format!("{}: {error}", transport.label)),
+            }
+        }
+        bail!(
+            "获取 {} 版本 {tag} 信息失败: {}",
+            kind.display_name(),
+            failures.join("；")
+        )
+    }
 }
 
 /// 内置兜底 Release：只在"查不到最新 Release + 本地也没有缓存"时用。
@@ -1291,6 +1443,7 @@ fn fallback_release(kind: KernelKind) -> Option<GithubRelease> {
             }],
             fallback: true,
             from_cache: false,
+            ..Default::default()
         });
     }
 
@@ -1327,6 +1480,7 @@ fn fallback_release(kind: KernelKind) -> Option<GithubRelease> {
             }],
             fallback: true,
             from_cache: false,
+            ..Default::default()
         });
     }
 
@@ -1398,6 +1552,7 @@ fn mihomo_fallback_release(platform: KernelPlatform, arch: &str) -> GithubReleas
             .collect(),
         fallback: true,
         from_cache: false,
+        ..Default::default()
     }
 }
 
@@ -1441,6 +1596,42 @@ fn ensure_not_cancelled(cancelled: &AtomicBool) -> Result<()> {
         bail!("内核下载已取消");
     }
     Ok(())
+}
+
+fn build_history_entries(
+    kind: KernelKind,
+    releases: Vec<GithubRelease>,
+    current_version: Option<&str>,
+) -> Vec<KernelHistoryEntry> {
+    let mut entries = Vec::new();
+    for release in releases {
+        if release.draft {
+            continue;
+        }
+        let candidates = kind.asset_candidates(&release.tag_name);
+        let Some(asset) = candidates
+            .iter()
+            .find_map(|name| release.assets.iter().find(|a| &a.name == name))
+        else {
+            continue;
+        };
+        let published_at = release
+            .published_at
+            .as_deref()
+            .and_then(|d| d.split('T').next())
+            .map(str::to_string);
+        let is_current = current_version.is_some_and(|cur| version_matches(cur, &release.tag_name));
+        entries.push(KernelHistoryEntry {
+            tag_name: release.tag_name.clone(),
+            published_at,
+            prerelease: release.prerelease,
+            asset_name: asset.name.clone(),
+            asset_size: asset.size,
+            has_sha256: require_sha256(asset).is_ok(),
+            is_current,
+        });
+    }
+    entries
 }
 
 fn require_sha256(asset: &GithubAsset) -> Result<&str> {
@@ -2252,5 +2443,85 @@ mod source_tests {
             updater.transports[transport].label,
         );
         assert_eq!(bytes.len() as u64, asset.size);
+    }
+
+    #[test]
+    fn build_history_entries_filters_drafts_and_non_matching_assets() {
+        let kind = KernelKind::Mihomo;
+        let matching_asset = kind.asset_name("v1.19.2");
+        let older_asset = kind.asset_name("v1.19.1");
+        let releases = vec![
+            GithubRelease {
+                tag_name: "v1.19.3".to_string(),
+                prerelease: false,
+                draft: true,
+                published_at: Some("2026-04-01T10:00:00Z".to_string()),
+                assets: vec![GithubAsset {
+                    name: kind.asset_name("v1.19.3"),
+                    size: 1024,
+                    digest: Some(format!("sha256:{}", "a".repeat(64))),
+                    browser_download_url: "https://example.invalid/draft".to_string(),
+                }],
+                ..Default::default()
+            },
+            GithubRelease {
+                tag_name: "Prerelease-Alpha".to_string(),
+                prerelease: true,
+                draft: false,
+                published_at: Some("2026-03-31T08:00:00Z".to_string()),
+                assets: vec![GithubAsset {
+                    name: "mihomo-other-os-alpha.gz".to_string(),
+                    size: 512,
+                    digest: None,
+                    browser_download_url: "https://example.invalid/alpha".to_string(),
+                }],
+                ..Default::default()
+            },
+            GithubRelease {
+                tag_name: "v1.19.2".to_string(),
+                prerelease: false,
+                draft: false,
+                published_at: Some("2026-03-30T12:34:56Z".to_string()),
+                assets: vec![GithubAsset {
+                    name: matching_asset.clone(),
+                    size: 2048,
+                    digest: Some(format!("sha256:{}", "b".repeat(64))),
+                    browser_download_url: "https://example.invalid/v1.19.2".to_string(),
+                }],
+                ..Default::default()
+            },
+            GithubRelease {
+                tag_name: "v1.19.1".to_string(),
+                prerelease: true,
+                draft: false,
+                published_at: Some("2026-03-20".to_string()),
+                assets: vec![GithubAsset {
+                    name: older_asset.clone(),
+                    size: 1999,
+                    digest: None,
+                    browser_download_url: "https://example.invalid/v1.19.1".to_string(),
+                }],
+                ..Default::default()
+            },
+        ];
+
+        let entries = build_history_entries(kind, releases, Some("1.19.2"));
+        assert_eq!(entries.len(), 2);
+
+        assert_eq!(entries[0].tag_name, "v1.19.2");
+        assert_eq!(entries[0].published_at.as_deref(), Some("2026-03-30"));
+        assert!(!entries[0].prerelease);
+        assert_eq!(entries[0].asset_name, matching_asset);
+        assert_eq!(entries[0].asset_size, 2048);
+        assert!(entries[0].has_sha256);
+        assert!(entries[0].is_current);
+
+        assert_eq!(entries[1].tag_name, "v1.19.1");
+        assert_eq!(entries[1].published_at.as_deref(), Some("2026-03-20"));
+        assert!(entries[1].prerelease);
+        assert_eq!(entries[1].asset_name, older_asset);
+        assert_eq!(entries[1].asset_size, 1999);
+        assert!(!entries[1].has_sha256);
+        assert!(!entries[1].is_current);
     }
 }

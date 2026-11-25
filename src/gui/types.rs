@@ -557,6 +557,10 @@ pub enum BgMsg {
     FailoverTarget(Result<(String, String), String>),
     Kernels(Vec<KernelInfo>),
     KernelReleases(Result<Vec<KernelReleaseInfo>, String>),
+    KernelHistoryLoaded {
+        kind: crate::kernel::KernelKind,
+        result: Result<Vec<crate::kernel::KernelHistoryEntry>, String>,
+    },
     KernelProgress(KernelUpdateProgress),
     KernelUpdated(Result<String, String>),
     /// 应用自身更新（「关于」页）：查版本、下载进度、下载结果（安装包本地路径）。
