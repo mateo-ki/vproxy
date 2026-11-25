@@ -859,7 +859,6 @@ impl VpnApp {
                             self.status = format!("内核更新检查失败: {error}");
                         }
                         BgMsg::KernelProgress(progress) => {
-                            self.status = progress.message.clone();
                             self.kernel_progress = Some(progress);
                         }
                         BgMsg::KernelUpdated(result) => {

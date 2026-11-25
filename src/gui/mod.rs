@@ -6495,39 +6495,14 @@ impl eframe::App for VpnApp {
                 // 纵向内边距 7 → 3，文字仍是 normal 字号，读得清但不再撑高度。
                 ui.spacing_mut().button_padding = egui::vec2(11.0, 3.0);
                 ui.horizontal(|ui| {
-                    if self.busy || self.kernel_busy {
+                    if self.busy {
                         ui.spinner();
-                        let busy_text = if let Some(kp) = &self.kernel_progress {
-                            if kp.stage == crate::kernel::KernelUpdateStage::Downloading
-                                && kp.total > 0
-                            {
-                                let pct = ((kp.downloaded as f64 / kp.total as f64) * 100.0)
-                                    .clamp(0.0, 100.0)
-                                    as u32;
-                                format!("下载内核 {pct}%")
-                            } else {
-                                format!("内核{}", kp.stage.label())
-                            }
-                        } else {
-                            "处理中".to_string()
-                        };
                         ui.label(
-                            RichText::new(busy_text)
+                            RichText::new("处理中")
                                 .color(theme::accent())
                                 .strong()
                                 .small(),
                         );
-                        if let Some(kp) = &self.kernel_progress {
-                            if kp.stage == crate::kernel::KernelUpdateStage::Downloading
-                                && kp.total > 0
-                            {
-                                ui.add(
-                                    egui::ProgressBar::new(kp.fraction())
-                                        .animate(true)
-                                        .desired_width(70.0),
-                                );
-                            }
-                        }
                         ui.separator();
                     }
                     // 系统代理被外部改掉时**不再往这条上写提示**（2026-10-15 他一句"不用显示这个"）。

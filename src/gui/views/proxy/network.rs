@@ -117,7 +117,7 @@ impl VpnApp {
                         ui.separator();
                         ui.add_space(8.0);
 
-                        ui.horizontal(|ui| {
+                        ui.horizontal_wrapped(|ui| {
                             ui.label("运行内核");
                             let prev_pref = self.proxy_config.kernel_preference;
                             egui::ComboBox::from_id_salt("proxy_kernel_preference")
@@ -172,15 +172,14 @@ impl VpnApp {
                                 }
                                 self.save_proxy_config_quiet();
                             }
-                        });
-                        ui.add_space(6.0);
-                        ui.horizontal(|ui| {
+
+                            ui.add_space(10.0);
                             ui.label("测速内核");
                             let prev_sp_pref = self.proxy_config.speedtest_kernel_preference;
                             egui::ComboBox::from_id_salt("proxy_speedtest_kernel_preference")
                                 .selected_text(match self.proxy_config.speedtest_kernel_preference {
                                     KernelPreference::Auto => "自动分配",
-                                    KernelPreference::VpCore => "VP-Core（极速纯 Rust）",
+                                    KernelPreference::VpCore => "VP-Core",
                                     KernelPreference::Mihomo => "Mihomo",
                                     KernelPreference::SingBox => "Sing-box",
                                     KernelPreference::Xray => "Xray",
@@ -708,12 +707,70 @@ impl VpnApp {
                                     } else {
                                         p.stage.label().to_string()
                                     };
-                                ui.add(
-                                    egui::ProgressBar::new(p.fraction())
-                                        .animate(true)
-                                        .desired_width(110.0)
-                                        .text(RichText::new(text).small().strong()),
-                                );
+                                let frac = p.fraction().clamp(0.0, 1.0);
+                                let line_w = 116.0_f32;
+                                ui.vertical(|ui| {
+                                    ui.set_width(line_w);
+                                    ui.spacing_mut().item_spacing.y = 4.0;
+                                    ui.with_layout(
+                                        egui::Layout::right_to_left(egui::Align::Min),
+                                        |ui| {
+                                            ui.label(
+                                                RichText::new(&text).small().color(brand_color),
+                                            );
+                                        },
+                                    );
+                                    let (track_rect, _) = ui.allocate_exact_size(
+                                        Vec2::new(line_w, 3.0),
+                                        Sense::hover(),
+                                    );
+                                    if ui.is_rect_visible(track_rect) {
+                                        let radius = CornerRadius::same(2);
+                                        ui.painter().rect_filled(
+                                            track_rect,
+                                            radius,
+                                            theme::border_subtle(),
+                                        );
+                                        if p.total > 0 {
+                                            let fill_w = (track_rect.width() * frac)
+                                                .max(if frac > 0.0 { 3.0 } else { 0.0 });
+                                            if fill_w > 0.0 {
+                                                let fill_rect = egui::Rect::from_min_size(
+                                                    track_rect.min,
+                                                    Vec2::new(fill_w, track_rect.height()),
+                                                );
+                                                ui.painter().rect_filled(
+                                                    fill_rect,
+                                                    radius,
+                                                    brand_color,
+                                                );
+                                            }
+                                        } else {
+                                            // 未知总字节或准备/校验阶段：平滑滑块表示细线进行中
+                                            let t = (ui.input(|i| i.time) * 1.15) % 1.0;
+                                            let seg_w = track_rect.width() * 0.35;
+                                            let travel = track_rect.width() + seg_w;
+                                            let raw_x =
+                                                track_rect.min.x - seg_w + travel * t as f32;
+                                            let x0 = raw_x.max(track_rect.min.x);
+                                            let x1 = (raw_x + seg_w).min(track_rect.max.x);
+                                            if x1 > x0 {
+                                                let fill_rect = egui::Rect::from_min_max(
+                                                    egui::pos2(x0, track_rect.min.y),
+                                                    egui::pos2(x1, track_rect.max.y),
+                                                );
+                                                ui.painter().rect_filled(
+                                                    fill_rect,
+                                                    radius,
+                                                    brand_color,
+                                                );
+                                            }
+                                            ui.ctx().request_repaint();
+                                        }
+                                    }
+                                })
+                                .response
+                                .on_hover_text(&p.message);
                             }
                         } else {
                             // 运行中也允许更新：Windows 运行中的 exe 可改名（vpcore.exe →
