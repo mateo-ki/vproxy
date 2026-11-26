@@ -712,7 +712,7 @@ fn main() -> Result<()> {
         let speedtester = SpeedTester::new(db.clone(), tasks.clone());
         Ok::<_, anyhow::Error>((db, collector, speedtester, tasks))
     })?;
-    let proxy_options = if let Some(options) = handoff_proxy_options {
+    let mut proxy_options = if let Some(options) = handoff_proxy_options {
         rt.block_on(db.update_proxy_config(&options))?;
         options
     } else {
@@ -735,11 +735,55 @@ fn main() -> Result<()> {
         startup_log("登录自动启动已关闭，本次登录入口正常退出");
         return Ok(());
     }
+    let has_override_groups = proxy_options
+        .override_yaml
+        .as_deref()
+        .map(|t| t.contains("proxy-groups:") || t.contains("proxy-groups :"))
+        .unwrap_or(false);
+    let (startup_url_test, startup_url_test_size) =
+        (proxy_options.url_test, proxy_options.url_test_size);
+    #[allow(unused_variables)]
+    let initial_proxy_node = if cli.start_proxy_node.is_some() {
+        None
+    } else if proxy_options.selected_node_id.is_some()
+        || proxy_options.selected_node_snapshot.is_some()
+    {
+        // 从持久化代理配置（ID -> 指纹 -> 节点快照）恢复上次使用的节点记忆，防订阅刷新/测速丢失。
+        rt.block_on(async {
+            match db
+                .resolve_selected_node(
+                    proxy_options.selected_node_id.as_deref(),
+                    proxy_options.selected_node_snapshot.as_ref(),
+                )
+                .await
+            {
+                Ok(Some(node)) => {
+                    tracing::info!(id = %node.id, name = %node.name, "已恢复上次选中的代理节点记忆");
+                    if proxy_options.selected_node_id.as_deref() != Some(node.id.as_str())
+                        || proxy_options.selected_node_snapshot.is_none()
+                    {
+                        proxy_options.selected_node_id = Some(node.id.clone());
+                        proxy_options.selected_node_name = Some(node.name.clone());
+                        proxy_options.selected_node_snapshot = Some(node.clone());
+                        let _ = db.update_proxy_config(&proxy_options).await;
+                    }
+                    Some((node.id, node.name))
+                }
+                Ok(None) => {
+                    tracing::warn!("上次记忆的代理节点不可用，回退到未选");
+                    None
+                }
+                Err(error) => {
+                    tracing::warn!(%error, "查询上次记忆的代理节点失败");
+                    None
+                }
+            }
+        })
+    } else {
+        None
+    };
     // 上次会话被杀/崩溃退出会留下"系统代理仍指向本应用端口、端口却没人监听"
-    // 的残留（实测表现为重启软件后彻底断网，还得手动点一次启动）。检测到这个
-    // 指纹时，即使非登录启动也自动恢复连接，等价于把用户的上次意图接回来。
-    // 检测本身已在 self_heal 之前完成（见上方 proxy_killed_last_session），
-    // 这里只把结果接进登录/自动恢复门控。
+    // 的残留（实测表现为重启软件后彻底断网，还得手动点一次启动）。
     #[cfg(feature = "gui")]
     let login_proxy_node = auto_connect_node_id(
         cli.login_startup,
@@ -750,18 +794,14 @@ fn main() -> Result<()> {
     .map(str::to_owned);
     #[cfg(not(feature = "gui"))]
     let _login_proxy_node = Option::<String>::None;
-    let has_override_groups = proxy_options
-        .override_yaml
-        .as_deref()
-        .map(|t| t.contains("proxy-groups:") || t.contains("proxy-groups :"))
-        .unwrap_or(false);
-    let (startup_url_test, startup_url_test_size) =
-        (proxy_options.url_test, proxy_options.url_test_size);
     let proxy_manager = ProxyManager::new(proxy_options.clone());
     #[allow(unused_variables)]
     let initial_proxy_node = if let Some(node_id) = cli.start_proxy_node.as_deref() {
         rt.block_on(async {
-            match db.get_node(node_id).await? {
+            match db
+                .resolve_selected_node(Some(node_id), proxy_options.selected_node_snapshot.as_ref())
+                .await?
+            {
                 Some(node) => {
                     // 命令行直启也要注入 url-test 候选：候选不填，配置会静默退化成
                     // 单节点 PROXY 组，看起来"自动选路没生效"。
@@ -787,36 +827,19 @@ fn main() -> Result<()> {
                     }
                     let selected = Some((node.id.clone(), node.name.clone()));
                     proxy_manager.start(&node).await?;
-                    // 持久化当前启动节点至代理配置，保证后续重启记忆
+                    // 持久化当前启动节点与完整快照至代理配置，保证后续重启/订阅刷新记忆
                     let mut options_to_save = proxy_options.clone();
                     options_to_save.selected_node_id = Some(node.id.clone());
                     options_to_save.selected_node_name = Some(node.name.clone());
+                    options_to_save.selected_node_snapshot = Some(node);
                     let _ = db.update_proxy_config(&options_to_save).await;
                     Ok::<_, anyhow::Error>(selected)
                 }
                 None => anyhow::bail!("提权启动节点不存在: {node_id}"),
             }
         })?
-    } else if let Some(ref node_id) = proxy_options.selected_node_id {
-        // 从持久化代理配置中恢复上次选中的节点记忆
-        rt.block_on(async {
-            match db.get_node(node_id).await {
-                Ok(Some(node)) => {
-                    tracing::info!(id = %node.id, name = %node.name, "已恢复上次选中的代理节点记忆");
-                    Some((node.id, node.name))
-                }
-                Ok(None) => {
-                    tracing::warn!(node_id, "上次记忆的代理节点在库中已不存在，回退到未选");
-                    None
-                }
-                Err(error) => {
-                    tracing::warn!(%error, "查询上次记忆的代理节点失败");
-                    None
-                }
-            }
-        })
     } else {
-        None
+        initial_proxy_node
     };
 
     // Background scheduler: auto-fetch / auto-speedtest
@@ -1152,7 +1175,7 @@ async fn connect_saved_proxy_at_login(
         return Ok(());
     }
     let node = db
-        .get_node(node_id)
+        .resolve_selected_node(Some(node_id), saved.selected_node_snapshot.as_ref())
         .await?
         .ok_or_else(|| anyhow::anyhow!("上次节点已不存在，请在界面选择节点"))?;
     let mut options = manager.config().await;

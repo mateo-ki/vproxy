@@ -21,6 +21,7 @@ impl VpnApp {
             .show(ui, |ui| {
             // 顶部总览卡片
             panel_frame().show(ui, |ui| {
+                ui.set_width(ui.available_width());
                 ui.horizontal(|ui| {
                     icon_label(ui, Icon::Shield, 18.0, theme::accent());
                     ui.label(RichText::new("抗追踪与身份安全防护中心").strong().size(15.0));
@@ -50,7 +51,7 @@ impl VpnApp {
                 });
                 ui.add_space(4.0);
                 ui.label(
-                    RichText::new("集成协议指纹混淆、防 WebRTC 真实公网 IP 嗅探、第三方分析追踪器屏蔽与 UDP 端口跳跃优化，全方位保护网络身份。")
+                    RichText::new("TLS 指纹伪装、防 IP/DNS 泄露与追踪拦截。")
                         .small()
                         .color(theme::text_secondary()),
                 );
@@ -59,20 +60,21 @@ impl VpnApp {
             ui.add_space(8.0);
 
             // -------------------------------------------------------------
-            // 卡片 1：全局 uTLS 浏览器指纹自动伪装 (Client Fingerprint)
+            // 卡片 1：全局 uTLS 浏览器指纹伪装
             // -------------------------------------------------------------
             panel_frame().show(ui, |ui| {
+                ui.set_width(ui.available_width());
                 ui.horizontal(|ui| {
                     icon_label(ui, Icon::Globe, 16.0, theme::accent());
                     ui.label(
-                        RichText::new("全局 uTLS 浏览器指纹自动伪装 (Client Fingerprint)")
+                        RichText::new("全局 uTLS 浏览器指纹伪装")
                             .strong()
                             .size(14.0),
                     );
                 });
                 ui.add_space(4.0);
                 ui.label(
-                    RichText::new("模拟主流商业浏览器的 TLS ClientHello 密码套件与扩展顺序，消灭 Go / Rust 等代理客户端原生 TLS 特征指纹（JA3/JA4），彻底防御运营商 DPI 深度包检测与阻断。即使导入的订阅节点未携带 fp 参数，也会自动全局注入。")
+                    RichText::new("模拟主流浏览器的 TLS 指纹特征，未配置 fp 的节点也会自动注入。")
                         .small()
                         .color(theme::text_secondary()),
                 );
@@ -82,14 +84,14 @@ impl VpnApp {
                     ui.label(RichText::new("模拟浏览器预设:").strong());
 
                     let current_fp_label = match self.proxy_config.client_fingerprint.as_deref() {
-                        Some("chrome") => "Chrome 浏览器 (推荐)",
-                        Some("safari") => "Safari 浏览器 (Apple)",
-                        Some("firefox") => "Firefox 浏览器",
+                        Some("chrome") => "Chrome",
+                        Some("safari") => "Safari",
+                        Some("firefox") => "Firefox",
                         Some("edge") => "Microsoft Edge",
-                        Some("ios") => "iOS WebKit (iPhone/iPad)",
-                        Some("randomized") => "Randomized (每次连接动态随机)",
+                        Some("ios") => "iOS WebKit",
+                        Some("randomized") => "Randomized（每次随机）",
                         Some(other) => other,
-                        None => "⚪ 关闭指纹伪装",
+                        None => "关闭指纹伪装",
                     };
 
                     egui::ComboBox::from_id_salt("security_utls_fingerprint")
@@ -97,13 +99,13 @@ impl VpnApp {
                         .width(220.0)
                         .show_ui(ui, |ui| {
                             let options = [
-                                (Some("chrome".to_string()), "Chrome 浏览器 (推荐)"),
-                                (Some("safari".to_string()), "Safari 浏览器 (Apple)"),
-                                (Some("firefox".to_string()), "Firefox 浏览器"),
+                                (Some("chrome".to_string()), "Chrome"),
+                                (Some("safari".to_string()), "Safari"),
+                                (Some("firefox".to_string()), "Firefox"),
                                 (Some("edge".to_string()), "Microsoft Edge"),
-                                (Some("ios".to_string()), "iOS WebKit (iPhone/iPad)"),
-                                (Some("randomized".to_string()), "Randomized (每次连接动态随机)"),
-                                (None, "⚪ 关闭指纹伪装"),
+                                (Some("ios".to_string()), "iOS WebKit"),
+                                (Some("randomized".to_string()), "Randomized（每次随机）"),
+                                (None, "关闭指纹伪装"),
                             ];
                             for (val, label) in options {
                                 let is_selected = self.proxy_config.client_fingerprint == val;
@@ -122,16 +124,17 @@ impl VpnApp {
             // 卡片 2：WebRTC 真实 IP 泄漏防御 (Anti-WebRTC Leak)
             // -------------------------------------------------------------
             panel_frame().show(ui, |ui| {
+                ui.set_width(ui.available_width());
                 ui.horizontal(|ui| {
                     icon_label(ui, Icon::Shield, 16.0, theme::warning());
                     ui.label(
-                        RichText::new("WebRTC 真实 IP 泄漏防御 (Anti-WebRTC Leak)")
+                        RichText::new("WebRTC 真实 IP 防泄露")
                             .strong()
                             .size(14.0),
                     );
                     help_tooltip(
                         ui,
-                        "【功能说明】\n在内核层全面拦截 WebRTC 专用的 STUN / TURN 穿透端口（标准端口 3478-3479、TLS 端口 5349-5350、Google 专有段 19302-19309）以及所有 STUN/TURN/WebRTC 探测域名，阻断恶意网站通过 JavaScript 探针探测并获取访客本地真实物理公网 IP。\n\n【防护建议】\n系统代理仅拦截标准 TCP HTTP 流量。浏览器的 WebRTC 探针为探测 P2P 直连，默认会直接通过物理网卡发送原始 UDP 握手包，绕过系统代理造成真实公网 IP 泄露。\n建议一键切换至「TUN 虚拟网卡模式」以获得 100% 彻底防护；或在 Chrome/Edge 打开 chrome://flags/#webrtc-ip-handling-policy 设为 Disable non-proxied UDP。",
+                        "在内核层拦截 STUN/TURN 探测流量与端口；搭配 TUN 模式可实现彻底防护。",
                     );
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         let (btn_text, btn_fill, btn_color) = if self.proxy_config.block_webrtc {
@@ -159,19 +162,20 @@ impl VpnApp {
             ui.add_space(8.0);
 
             // -------------------------------------------------------------
-            // 卡片 3：DNS 泄露物理阻断与分流防护 (Anti-DNS Leak)
+            // 卡片 3：DNS 防泄露
             // -------------------------------------------------------------
             panel_frame().show(ui, |ui| {
+                ui.set_width(ui.available_width());
                 ui.horizontal(|ui| {
                     icon_label(ui, Icon::Globe, 16.0, theme::accent());
                     ui.label(
-                        RichText::new("DNS 真实泄露防御 (Anti-DNS Leak)")
+                        RichText::new("DNS 真实泄露防御")
                             .strong()
                             .size(14.0),
                     );
                     help_tooltip(
                         ui,
-                        "【功能说明】\n智能分流国内/海外 DNS 解析策略（国内直连域名走阿里/腾讯高保真解析，海外代理域名走 Cloudflare/Google DoH 并由出海节点远程加密发出），开启 respect-rules 防泄漏引擎，彻底消除因境内 DNS 代查海外域名导致的广州/境内归属地暴露。\n\n【防护建议】\n系统代理模式下，Windows 系统底层 DNS 解析与浏览器预取仍可能经本地物理网卡发送至运营商 DNS。推荐使用「TUN 虚拟网卡模式」全局劫持并加密所有 DNS 请求。",
+                        "国内与海外 DNS 分流解析；推荐配合 TUN 模式劫持全系统 DNS。",
                     );
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         let (mode_badge, mode_color) = if self.proxy_config.mode == ProxyMode::Tun {
@@ -187,19 +191,20 @@ impl VpnApp {
             ui.add_space(8.0);
 
             // -------------------------------------------------------------
-            // 卡片 4：隐私与行为追踪广告过滤 (Tracker & Telemetry Blocking)
+            // 卡片 4：隐私与行为追踪广告过滤
             // -------------------------------------------------------------
             panel_frame().show(ui, |ui| {
+                ui.set_width(ui.available_width());
                 ui.horizontal(|ui| {
                     icon_label(ui, Icon::Alert, 16.0, theme::accent());
                     ui.label(
-                        RichText::new("隐私与行为追踪广告过滤 (Tracker & Telemetry Blocking)")
+                        RichText::new("隐私与追踪广告过滤")
                             .strong()
                             .size(14.0),
                     );
                     help_tooltip(
                         ui,
-                        "【功能说明】\n在代理内核中自动加载专业过滤规则库（category-ads-all、privacy、reject），拦截第三方用户行为数据采集、埋点统计 SDK（Google Analytics、友盟等）及网页弹窗横幅广告，大幅提升隐私安全并加速页面加载。",
+                        "加载广告与隐私追踪过滤规则库（ads / privacy / reject）。",
                     );
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         let (btn_text, btn_fill, btn_color) = if self.proxy_config.block_trackers {
@@ -227,13 +232,14 @@ impl VpnApp {
             ui.add_space(8.0);
 
             // -------------------------------------------------------------
-            // 卡片 5：UDP 端口跳跃与防 QoS 丢包混淆 (UDP Port Hopping & Anti-QoS)
+            // 卡片 5：UDP 端口跳跃
             // -------------------------------------------------------------
             panel_frame().show(ui, |ui| {
+                ui.set_width(ui.available_width());
                 ui.horizontal(|ui| {
                     icon_label(ui, Icon::Lightning, 16.0, theme::accent());
                     ui.label(
-                        RichText::new("UDP 端口跳跃与防 QoS 丢包混淆 (Port Hopping & Anti-QoS)")
+                        RichText::new("UDP 端口跳跃")
                             .strong()
                             .size(14.0),
                     );
@@ -260,7 +266,7 @@ impl VpnApp {
                 });
                 ui.add_space(4.0);
                 ui.label(
-                    RichText::new("针对 Hysteria2 / TUIC 等高性能 UDP 协议，启用端口跳跃伪装（如多端口随机跳跃）与 FullCone NAT 穿透，打破运营商单端口大流量特征识别与激进 QoS 限速，改善晚高峰丢包与连接卡顿。")
+                    RichText::new("用于 Hysteria2 / TUIC 协议的多端口跳跃传输，改善晚高峰单端口限速与丢包。")
                         .small()
                         .color(theme::text_secondary()),
                 );

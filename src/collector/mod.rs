@@ -161,6 +161,9 @@ fn build_client(proxy_url: Option<&str>) -> Result<Client> {
         .redirect(reqwest::redirect::Policy::limited(5));
     if let Some(proxy_url) = proxy_url {
         builder = builder.proxy(reqwest::Proxy::all(proxy_url)?);
+    } else {
+        // 直连拉取订阅源时不读取系统代理，避免其他代理软件抢占系统代理后劫持或阻断直连请求。
+        builder = builder.no_proxy();
     }
     Ok(builder.build()?)
 }

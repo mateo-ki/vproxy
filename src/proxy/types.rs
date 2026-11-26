@@ -181,6 +181,9 @@ pub struct MihomoConfigOptions {
     /// 上次选中的活动代理节点名称
     #[serde(default)]
     pub selected_node_name: Option<String>,
+    /// 上次使用/选中的完整节点实体快照（订阅刷新或维护清理时兜底恢复，防丢失）
+    #[serde(default)]
+    pub selected_node_snapshot: Option<crate::models::Node>,
     /// 链式代理开关（前置代理 + 后置代理级联传输）
     #[serde(default)]
     pub chain_proxy_enabled: bool,
@@ -239,6 +242,7 @@ impl Default for MihomoConfigOptions {
             hop_ports: default_hop_ports(),
             selected_node_id: None,
             selected_node_name: None,
+            selected_node_snapshot: None,
             chain_proxy_enabled: false,
             chain_entry_node_id: None,
             chain_entry_node_name: None,

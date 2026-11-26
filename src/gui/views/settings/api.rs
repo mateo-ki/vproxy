@@ -1,113 +1,167 @@
-use crate::gui::icons::{self, Icon};
+use super::{pill_toggle, settings_divider, settings_group, settings_row};
 use crate::gui::theme;
 use crate::gui::types::BgMsg;
-use crate::gui::widgets::{card_frame, normalize_api_base, status_badge};
+use crate::gui::widgets::{fold_title, normalize_api_base};
 use crate::gui::VpnApp;
 use eframe::egui::{self, CornerRadius, Frame, Margin, RichText, Sense, Stroke, Ui};
 
 impl VpnApp {
     pub(crate) fn ui_api(&mut self, ui: &mut Ui) {
+        let mut auto_save = false;
         let is_running = self.api_controller.is_running();
-        ui.horizontal(|ui| {
-            if is_running {
-                status_badge(ui, self.tr("服务运行中"), theme::accent_strong());
-                ui.label(format!("本地监听地址: http://{}", self.api_addr));
-                let token_opt = self.api_controller.token().map(|t| t.to_string());
-                if let Some(token) = token_opt {
-                    ui.horizontal(|ui| {
-                        ui.label(
-                            RichText::new(self.tr("访问令牌:"))
-                                .small()
-                                .color(theme::muted()),
-                        );
+
+        settings_group(ui, "本地 HTTP API", None, |ui| {
+            let mut service_on = is_running;
+            settings_row(
+                ui,
+                "api_service_status",
+                "本地 HTTP 服务",
+                Some(if is_running {
+                    "运行中，正在响应本地接口与导出请求"
+                } else {
+                    "已停止，端口未占用"
+                }),
+                |ui| {
+                    if pill_toggle(ui, &mut service_on).changed() {
+                        if service_on {
+                            self.start_api_server();
+                        } else {
+                            self.stop_api_server();
+                        }
+                    }
+                },
+            );
+
+            settings_divider(ui);
+
+            settings_row(
+                ui,
+                "api_listen_addr",
+                "监听地址",
+                Some("点击可复制本地 API 根地址"),
+                |ui| {
+                    let base = format!("http://{}", self.api_addr);
+                    if ui
+                        .add(
+                            egui::Label::new(
+                                RichText::new(&base).monospace().color(theme::accent()),
+                            )
+                            .sense(Sense::click()),
+                        )
+                        .on_hover_text("点击复制地址")
+                        .clicked()
+                    {
+                        ui.ctx().copy_text(base.clone());
+                        self.status = format!("已复制: {base}");
+                    }
+                },
+            );
+
+            if let Some(token) = self.api_controller.token().map(|t| t.to_string()) {
+                settings_divider(ui);
+                settings_row(
+                    ui,
+                    "api_access_token",
+                    "访问令牌",
+                    Some("点击复制 Bearer / Query Token"),
+                    |ui| {
+                        if ui.button("复制 Token").clicked() {
+                            ui.ctx().copy_text(token.clone());
+                            self.status = "已复制访问令牌".into();
+                        }
+                        let preview = if token.len() > 10 {
+                            format!("{}…{}", &token[..4], &token[token.len() - 4..])
+                        } else {
+                            token.clone()
+                        };
                         if ui
                             .add(
-                                egui::Label::new(RichText::new(&token).small().strong())
-                                    .selectable(true),
+                                egui::Label::new(
+                                    RichText::new(preview).monospace().color(theme::muted()),
+                                )
+                                .sense(Sense::click()),
                             )
-                            .on_hover_text("所有接口都需要它；只读 GET 可用 ?token= 传")
+                            .on_hover_text("点击复制完整 Token")
                             .clicked()
                         {
                             ui.ctx().copy_text(token);
                             self.status = "已复制访问令牌".into();
                         }
-                    });
-                }
-                if ui
-                    .add(icons::danger_icon_btn(
-                        Icon::Stop,
-                        self.tr("关闭 HTTP 服务"),
-                    ))
-                    .on_hover_text("停止后台 HTTP API 监听")
-                    .clicked()
-                {
-                    self.stop_api_server();
-                }
-            } else {
-                status_badge(ui, self.tr("已停止运行"), theme::muted());
-                ui.label(
-                    RichText::new("本地 HTTP API 服务当前已停止（端口已释放）")
-                        .color(theme::muted()),
+                    },
                 );
-                if ui
-                    .add(icons::primary_icon_btn(
-                        Icon::Play,
-                        self.tr("启动 HTTP 服务"),
-                    ))
-                    .on_hover_text("启动后台 HTTP API 监听")
-                    .clicked()
-                {
-                    self.start_api_server();
-                }
             }
+
+            settings_divider(ui);
+
+            settings_row(
+                ui,
+                "api_auto_start",
+                "启动时自动开启",
+                Some("应用启动后自动拉起本地 HTTP 服务"),
+                |ui| {
+                    if pill_toggle(ui, &mut self.edit_http_server_enabled).changed() {
+                        auto_save = true;
+                    }
+                },
+            );
         });
-        ui.add_space(6.0);
-        card_frame().show(ui, |ui| {
-            ui.strong("发布服务器");
-            ui.label("用于把本地真实测速成功的节点发布到 Linux Web 后台，不会切换本地数据源。");
-            ui.horizontal(|ui| {
-                ui.label("服务器地址:");
+
+        let remote_status = self.remote_api_status.clone();
+        settings_group(ui, "节点发布服务器", None, |ui| {
+            settings_row(ui, "api_pub_addr", "服务器地址", None, |ui| {
                 let addr_field = ui.add(
                     egui::TextEdit::singleline(&mut self.remote_api_edit)
-                        .hint_text("https://你的服务器（默认留空）")
-                        .desired_width(320.0),
+                        .hint_text("https://example.com（默认留空）")
+                        .desired_width(240.0),
                 );
                 crate::gui::widgets::note_text_field(ui, &addr_field);
-                ui.label("推送 Token:");
+            });
+
+            settings_divider(ui);
+
+            settings_row(ui, "api_pub_token", "推送 Token", None, |ui| {
                 let token_field = ui.add(
                     egui::TextEdit::singleline(&mut self.remote_api_token)
                         .password(true)
                         .hint_text("Bearer Token")
-                        .desired_width(200.0),
+                        .desired_width(240.0),
                 );
                 crate::gui::widgets::note_text_field(ui, &token_field);
-                if ui.button("保存配置").clicked() {
-                    let addr = if self.remote_api_edit.trim().is_empty() {
-                        self.remote_api_addr = None;
-                        String::new()
-                    } else {
-                        let normalized = normalize_api_base(self.remote_api_edit.trim());
-                        self.remote_api_edit = normalized.clone();
-                        self.remote_api_addr = Some(normalized.clone());
-                        normalized
-                    };
-                    self.remote_api_token = self.remote_api_token.trim().to_string();
-                    self.save_publisher(addr, self.remote_api_token.clone());
-                }
-                if ui.button("清空配置").clicked() {
-                    self.remote_api_addr = None;
-                    self.remote_api_edit.clear();
-                    self.remote_api_token.clear();
-                    self.save_publisher(String::new(), String::new());
-                }
-                if ui.button("检查连接").clicked() {
-                    self.check_remote_api();
-                }
             });
-            ui.label(RichText::new(&self.remote_api_status).color(theme::muted()));
+
+            settings_divider(ui);
+
+            settings_row(
+                ui,
+                "api_pub_actions",
+                "配置操作",
+                Some(remote_status.as_str()).filter(|s| !s.is_empty()),
+                |ui| {
+                    if ui.button("检查连接").clicked() {
+                        self.check_remote_api();
+                    }
+                    if ui.button("清空").clicked() {
+                        self.remote_api_addr = None;
+                        self.remote_api_edit.clear();
+                        self.remote_api_token.clear();
+                        self.save_publisher(String::new(), String::new());
+                    }
+                    if ui.button("保存").clicked() {
+                        let addr = if self.remote_api_edit.trim().is_empty() {
+                            self.remote_api_addr = None;
+                            String::new()
+                        } else {
+                            let normalized = normalize_api_base(self.remote_api_edit.trim());
+                            self.remote_api_edit = normalized.clone();
+                            self.remote_api_addr = Some(normalized.clone());
+                            normalized
+                        };
+                        self.remote_api_token = self.remote_api_token.trim().to_string();
+                        self.save_publisher(addr, self.remote_api_token.clone());
+                    }
+                },
+            );
         });
-        ui.add_space(8.0);
-        ui.add_space(6.0);
 
         struct ApiItem {
             method: &'static str,
@@ -140,70 +194,87 @@ impl VpnApp {
             ApiItem { method: "GET", path: "/api/export/json?quality_only=true&max_latency_ms=500&min_download_kbps=0&limit=50", desc: "导出 TopN TCP 可用节点 JSON", openable: true },
             ApiItem { method: "GET", path: "/api/export/clash?quality_only=true&max_latency_ms=500&min_download_kbps=0&limit=50", desc: "导出 TopN Clash 配置", openable: true },
             ApiItem { method: "GET", path: "/api/export/vp?quality_only=true&max_latency_ms=500&min_download_kbps=0&limit=50", desc: "导出 TopN 原生 VP-Core (.vp DSL) 声明式配置", openable: true },
-            ApiItem { method: "GET", path: "/api/export/uri?quality_only=true&max_latency_ms=500&min_download_kbps=0&limit=50&base64=true", desc: "导出 TopN 订阅（Base64，v2rayN 用）", openable: true },
-            ApiItem { method: "GET", path: "/api/export/uri?quality_only=true&max_latency_ms=300&limit=30&base64=true", desc: "更严格：Top30 + 延迟≤300ms（v2rayN）", openable: true },
+            ApiItem { method: "GET", path: "/api/export/uri?quality_only=true&max_latency_ms=500&min_download_kbps=0&limit=50&base64=true", desc: "导出 TopN 订阅（Base64）", openable: true },
+            ApiItem { method: "GET", path: "/api/export/uri?quality_only=true&max_latency_ms=300&limit=30&base64=true", desc: "导出 Top30 订阅（延迟≤300ms，Base64）", openable: true },
             ApiItem { method: "GET", path: "/api/export/clash?quality_only=false", desc: "导出全部节点 Clash（关闭过滤）", openable: true },
         ];
 
-        egui::ScrollArea::vertical()
-            .id_salt("settings_api_scroll")
-            .auto_shrink([false, false])
+        egui::CollapsingHeader::new(fold_title(&format!("接口列表 ({} 个)", items.len())))
+            .id_salt("api_endpoints_fold")
+            .default_open(false)
             .show(ui, |ui| {
-                for item in items {
-                    let full_url = self.api_url(item.path, item.openable);
-                    card_frame().show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            let (m_bg, m_fg) = match item.method {
-                                "GET" => (theme::accent_bg(), theme::accent_strong()),
-                                "POST" => (theme::success_bg(), theme::success()),
-                                "PUT" => (theme::warning_bg(), theme::warning()),
-                                "DELETE" => (theme::danger_bg(), theme::danger()),
-                                _ => (theme::panel(), theme::muted()),
-                            };
-                            Frame::NONE
-                                .fill(m_bg)
-                                .stroke(Stroke::new(1.0_f32, m_fg.gamma_multiply(0.4)))
-                                .corner_radius(CornerRadius::same(4))
-                                .inner_margin(Margin::symmetric(7, 2))
-                                .show(ui, |ui| {
-                                    ui.label(
-                                        RichText::new(item.method).strong().color(m_fg).small(),
-                                    );
-                                });
-                            let resp = ui
-                                .add(
-                                    egui::Label::new(
-                                        RichText::new(item.path).monospace().color(theme::accent()),
-                                    )
-                                    .sense(Sense::click()),
-                                )
-                                .on_hover_text(format!("点击复制 {full_url}"));
-                            if resp.clicked() {
-                                ui.ctx().copy_text(full_url.clone());
-                                self.status = format!("已复制: {full_url}");
+                Frame::NONE
+                    .fill(theme::panel())
+                    .stroke(theme::card_stroke())
+                    .corner_radius(CornerRadius::same(theme::RADIUS_CARD))
+                    .inner_margin(Margin::symmetric(12, 8))
+                    .show(ui, |ui| {
+                        for (idx, item) in items.iter().enumerate() {
+                            if idx > 0 {
+                                super::settings_divider(ui);
                             }
-                            ui.with_layout(
-                                egui::Layout::right_to_left(egui::Align::Center),
-                                |ui| {
-                                    if item.openable
-                                        && !item.path.contains('{')
-                                        && ui.small_button("打开").clicked()
-                                    {
-                                        let _ = crate::platform::open_url_in_browser(&full_url);
-                                        ui.ctx().open_url(egui::OpenUrl::new_tab(&full_url));
-                                    }
-                                    if ui.small_button("复制").clicked() {
-                                        ui.ctx().copy_text(full_url.clone());
-                                        self.status = format!("已复制: {full_url}");
-                                    }
-                                },
-                            );
-                        });
-                        ui.label(RichText::new(item.desc).small().color(theme::muted()));
+                            let full_url = self.api_url(item.path, item.openable);
+                            ui.add_space(4.0);
+                            ui.horizontal(|ui| {
+                                let (m_bg, m_fg) = match item.method {
+                                    "GET" => (theme::accent_bg(), theme::accent_strong()),
+                                    "POST" => (theme::success_bg(), theme::success()),
+                                    "PUT" => (theme::warning_bg(), theme::warning()),
+                                    "DELETE" => (theme::danger_bg(), theme::danger()),
+                                    _ => (theme::panel(), theme::muted()),
+                                };
+                                Frame::NONE
+                                    .fill(m_bg)
+                                    .stroke(Stroke::new(1.0_f32, m_fg.gamma_multiply(0.4)))
+                                    .corner_radius(CornerRadius::same(4))
+                                    .inner_margin(Margin::symmetric(6, 2))
+                                    .show(ui, |ui| {
+                                        ui.label(
+                                            RichText::new(item.method).strong().color(m_fg).small(),
+                                        );
+                                    });
+                                let resp = ui
+                                    .add(
+                                        egui::Label::new(
+                                            RichText::new(item.path)
+                                                .monospace()
+                                                .size(12.0)
+                                                .color(theme::accent()),
+                                        )
+                                        .truncate()
+                                        .sense(Sense::click()),
+                                    )
+                                    .on_hover_text(format!("{}\n点击复制 {full_url}", item.desc));
+                                if resp.clicked() {
+                                    ui.ctx().copy_text(full_url.clone());
+                                    self.status = format!("已复制: {full_url}");
+                                }
+                                ui.with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| {
+                                        if item.openable
+                                            && !item.path.contains('{')
+                                            && ui.small_button("打开").clicked()
+                                        {
+                                            let _ = crate::platform::open_url_in_browser(&full_url);
+                                            ui.ctx().open_url(egui::OpenUrl::new_tab(&full_url));
+                                        }
+                                        if ui.small_button("复制").clicked() {
+                                            ui.ctx().copy_text(full_url.clone());
+                                            self.status = format!("已复制: {full_url}");
+                                        }
+                                    },
+                                );
+                            });
+                            ui.label(RichText::new(item.desc).small().color(theme::muted()));
+                            ui.add_space(4.0);
+                        }
                     });
-                    ui.add_space(4.0);
-                }
             });
+
+        if auto_save && self.settings_dirty() {
+            self.save_settings();
+        }
     }
 
     pub(crate) fn publish_available_nodes(&mut self) {
@@ -249,7 +320,10 @@ impl VpnApp {
                 })));
                 return;
             }
-            let client = reqwest::Client::new();
+            let client = reqwest::Client::builder()
+                .no_proxy()
+                .build()
+                .unwrap_or_else(|_| reqwest::Client::new());
             let result = client
                 .post(format!("{base}/api/push/nodes"))
                 .bearer_auth(token)
@@ -319,7 +393,11 @@ impl VpnApp {
         let tx = self.tx.clone();
         self.remote_api_status = "检查中...".into();
         self.rt.spawn(async move {
-            let result = reqwest::Client::new()
+            let client = reqwest::Client::builder()
+                .no_proxy()
+                .build()
+                .unwrap_or_else(|_| reqwest::Client::new());
+            let result = client
                 .get(format!("{base}/api/push/health"))
                 .bearer_auth(token)
                 .timeout(std::time::Duration::from_secs(10))

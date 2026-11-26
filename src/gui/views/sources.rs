@@ -85,7 +85,7 @@ impl VpnApp {
             if ui
                 .add_enabled(
                     !self.busy,
-                    icons::button_with_icon(Icon::Plus, self.tr("新建"), theme::accent_strong()),
+                    icons::primary_icon_btn(Icon::Plus, self.tr("新建")),
                 )
                 .on_hover_text("新增订阅源配置")
                 .clicked()
@@ -105,9 +105,13 @@ impl VpnApp {
             if ui
                 .add_enabled(
                     !self.busy,
-                    icons::button_with_icon(Icon::Shield, self.tr("代理拉取全部"), theme::accent()),
+                    icons::button_with_icon(
+                        Icon::Shield,
+                        self.tr("代理拉取全部"),
+                        theme::text_primary(),
+                    ),
                 )
-                .on_hover_text("通过当前运行中的本地代理拉取全部启用源（防止 GitHub / Raw 阻断）")
+                .on_hover_text("通过当前运行中的本地代理拉取全部启用源")
                 .clicked()
             {
                 self.fetch_all_via_proxy();
@@ -140,9 +144,9 @@ impl VpnApp {
             if ui
                 .add_enabled(
                     !self.busy && !self.sources.is_empty(),
-                    icons::button_with_icon(Icon::Trash, self.tr("清空全部"), theme::danger()),
+                    icons::danger_icon_btn(Icon::Trash, self.tr("清空全部")),
                 )
-                .on_hover_text("清空全部订阅源及关联节点数据库分片")
+                .on_hover_text("清空全部订阅源及关联节点")
                 .clicked()
             {
                 self.show_clear_sources_confirm = true;
@@ -157,9 +161,13 @@ impl VpnApp {
             if ui
                 .add_enabled(
                     !self.busy,
-                    icons::button_with_icon(Icon::Globe, self.tr("接入 OpenRung 节点"), theme::accent()),
+                    icons::button_with_icon(
+                        Icon::Globe,
+                        self.tr("接入 OpenRung 节点"),
+                        theme::text_primary(),
+                    ),
                 )
-                .on_hover_text("一键接入 https://github.com/openrung/openrung 官方中继服务，实时获取健康 VLESS-REALITY 节点")
+                .on_hover_text("接入 OpenRung 公开 VLESS-REALITY 节点服务")
                 .clicked()
             {
                 self.add_openrung_source();
@@ -167,9 +175,13 @@ impl VpnApp {
             if ui
                 .add_enabled(
                     !self.busy,
-                    icons::button_with_icon(Icon::Lightning, self.tr("原生注册 WARP 节点"), theme::warning()),
+                    icons::button_with_icon(
+                        Icon::Lightning,
+                        self.tr("原生注册 WARP 节点"),
+                        theme::text_primary(),
+                    ),
                 )
-                .on_hover_text("原生向 Cloudflare 注册并获取 57 个 WARP MASQUE 节点（免任何 GitHub 账号与仓库）")
+                .on_hover_text("向 Cloudflare 注册并获取 WARP MASQUE 节点")
                 .clicked()
             {
                 self.fetch_warp_masque_native();
@@ -179,18 +191,24 @@ impl VpnApp {
                 if ui
                     .add_enabled(
                         !self.busy,
-                        icons::button_with_icon(Icon::Search, self.tr("Gist 发现"), theme::accent_strong()),
+                        icons::button_with_icon(
+                            Icon::Search,
+                            self.tr("Gist 发现"),
+                            theme::text_primary(),
+                        ),
                     )
-                    .on_hover_text("扫描 GitHub Gist 搜索结果，自动发现公开节点与订阅")
+                    .on_hover_text("扫描 GitHub Gist 发现公开节点与订阅")
                     .clicked()
                 {
                     self.discover_gists();
                 }
                 if ui
-                    .add(
-                        icons::button_with_icon(Icon::Gear, self.tr("Gist 配置"), theme::text_secondary()),
-                    )
-                    .on_hover_text("配置 Gist 发现协议类型与翻页深度")
+                    .add(icons::button_with_icon(
+                        Icon::Gear,
+                        self.tr("Gist 配置"),
+                        theme::text_primary(),
+                    ))
+                    .on_hover_text("配置 Gist 发现协议与翻页深度")
                     .clicked()
                 {
                     self.show_gist_config_modal = true;
@@ -199,13 +217,21 @@ impl VpnApp {
 
             let prune_enabled = !self.busy && !self.homogeneity_busy;
             let prune_clicked = if self.homogeneity_busy {
-                ui.add_enabled(false, icons::button_with_icon(Icon::Search, "分析中...", theme::muted())).clicked()
+                ui.add_enabled(
+                    false,
+                    icons::button_with_icon(Icon::Search, "分析中...", theme::muted()),
+                )
+                .clicked()
             } else {
                 ui.add_enabled(
                     prune_enabled,
-                    icons::button_with_icon(Icon::Lightning, "反向剔除同质化源", theme::warning()),
+                    icons::button_with_icon(
+                        Icon::Lightning,
+                        "反向剔除同质化源",
+                        theme::text_primary(),
+                    ),
                 )
-                .on_hover_text("分析所有源的重合率，识别出无独有可用节点的同质化冗余源；在弹窗里勾选要处理的源，再批量禁用或彻底删除")
+                .on_hover_text("分析重合率并批量禁用或删除无独有可用节点的同质化源")
                 .clicked()
             };
             if prune_clicked {
@@ -1037,192 +1063,182 @@ impl VpnApp {
             "新增订阅源"
         };
         egui::Window::new(window_title)
-        .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-        .collapsible(false)
-        .resizable(true)
-        .default_width(520.0)
-        .open(&mut open)
-        .show(ctx, |ui| {
-            ui.horizontal(|ui| {
-                ui.label("名称（必填）");
-                let name_field =
-                    ui.add(egui::TextEdit::singleline(&mut self.form_name).desired_width(f32::INFINITY));
-                crate::gui::widgets::note_text_field(ui, &name_field);
-            });
-            if is_ungrouped {
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .collapsible(false)
+            .resizable(true)
+            .default_width(520.0)
+            .open(&mut open)
+            .show(ctx, |ui| {
                 ui.horizontal(|ui| {
-                    ui.label("类型");
-                    ui.label(RichText::new("本地导入 / 剪贴板自建节点池（无需远程拉取）").color(theme::accent_strong()));
+                    ui.label("名称（必填）");
+                    let name_field = ui.add(
+                        egui::TextEdit::singleline(&mut self.form_name)
+                            .desired_width(f32::INFINITY),
+                    );
+                    crate::gui::widgets::note_text_field(ui, &name_field);
                 });
-                ui.label(
-                    RichText::new(
-                        "此源承载从剪贴板粘贴（Ctrl+V）或手动导入的本地独立节点，数据保存在本地数据库中，无需网络拉取。",
-                    )
-                    .small()
-                    .color(theme::muted()),
-                );
-            } else {
-                ui.horizontal(|ui| {
-                    ui.label("订阅链接或本地文件路径");
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui
-                            .add(icons::button_with_icon(
-                                Icon::Folder,
-                                "选择本地文件",
-                                theme::accent(),
-                            ))
-                            .on_hover_text("浏览并选择本地配置文件（.yaml, .yml, .txt, .json, .conf 等）")
-                            .clicked()
-                        {
-                            self.pick_local_file_for_source();
-                        }
+                if is_ungrouped {
+                    ui.horizontal(|ui| {
+                        ui.label("类型");
+                        ui.label(RichText::new("本地自建节点池").color(theme::accent_strong()));
                     });
-                });
-                let url_field = ui.add(
-                    egui::TextEdit::multiline(&mut self.form_url)
-                        .desired_width(f32::INFINITY)
-                        .desired_rows(3),
-                );
-                crate::gui::widgets::note_text_field(ui, &url_field);
-                // 两种来源形态一眼可知；认出来再当场说明那一类的具体规矩。
-                ui.label(
-                    RichText::new(
-                        "支持两种来源：远程订阅链接（https://…，也可用 {Ymd} 等日期占位符）\
-                         或本地文件路径（如 C:\\subs\\clash.yaml，改完文件等下一轮拉取即生效）。",
-                    )
-                    .small()
-                    .color(theme::muted()),
-                );
-                // 认出来就当场说明这一类源的规矩，别等拉取失败才发现要挂代理。
-                if let Some(channel) = crate::collector::telegram::channel_name(&self.form_url) {
-                        ui.label(
-                            RichText::new(format!(
-                                "Telegram 频道 · @{channel} —— 读公开网页预览；节点只增不删，\
-                                 旧节点交给测速淘汰。t.me 直连不通，拉取时得挂着代理。"
-                            ))
+                    ui.label(
+                        RichText::new("保存剪贴板或手动导入的本地节点。")
                             .small()
-                            .color(theme::accent_strong()),
-                        );
-                } else if crate::collector::local_file_path(self.form_url.trim()).is_some() {
-                        ui.label(
-                            RichText::new(
-                                "本地文件源 —— 直接读取该文件，格式自动识别 \
-                                 （Clash YAML / 节点链接 / base64）。改完文件等下一轮拉取即可，\
-                                 内容没变不会重复解析，不联网也能用。",
-                            )
-                            .small()
-                            .color(theme::accent_strong()),
-                        );
-                }
-            }
-            ui.checkbox(&mut self.form_enabled, "启用");
-            ui.horizontal(|ui| {
-                ui.label("备注");
-                let remark_field = ui.add(
-                    egui::TextEdit::singleline(&mut self.form_remark).desired_width(f32::INFINITY),
-                );
-                crate::gui::widgets::note_text_field(ui, &remark_field);
-            });
-            if !is_ungrouped {
-                ui.add_space(4.0);
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new("User-Agent").strong());
-                    let current_ua = self.form_user_agent.trim();
-                    let display_title = match current_ua {
-                        "" | "clash.meta" => "clash.meta (推荐 · 协议最全)",
-                        "clash-verge/v1.7.7" => "clash-verge (Clash Verge)",
-                        "ClashforWindows/0.20.39" => "ClashforWindows (CFW)",
-                        "sing-box/1.9.0" => "sing-box (Sing-box)",
-                        "v2rayN/6.42" => "v2rayN (v2rayN)",
-                        "vproxy/1.0" => "vproxy/1.0 (原生默认)",
-                        _ => "自定义 UA",
-                    };
-                    egui::ComboBox::from_id_salt("source_ua_presets")
-                        .selected_text(display_title)
-                        .show_ui(ui, |ui| {
+                            .color(theme::muted()),
+                    );
+                } else {
+                    ui.horizontal(|ui| {
+                        ui.label("订阅链接或本地文件路径");
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             if ui
-                                .selectable_label(
-                                    self.form_user_agent == "clash.meta" || self.form_user_agent.is_empty(),
-                                    "clash.meta (推荐 · 协议最全)",
-                                )
+                                .add(icons::button_with_icon(
+                                    Icon::Folder,
+                                    "选择本地文件",
+                                    theme::accent(),
+                                ))
+                                .on_hover_text("选择本地 YAML / 节点文件")
                                 .clicked()
                             {
-                                self.form_user_agent = "clash.meta".to_string();
-                            }
-                            if ui
-                                .selectable_label(
-                                    self.form_user_agent == "clash-verge/v1.7.7",
-                                    "clash-verge/v1.7.7 (Clash Verge)",
-                                )
-                                .clicked()
-                            {
-                                self.form_user_agent = "clash-verge/v1.7.7".to_string();
-                            }
-                            if ui
-                                .selectable_label(
-                                    self.form_user_agent == "ClashforWindows/0.20.39",
-                                    "ClashforWindows/0.20.39 (CFW)",
-                                )
-                                .clicked()
-                            {
-                                self.form_user_agent = "ClashforWindows/0.20.39".to_string();
-                            }
-                            if ui
-                                .selectable_label(
-                                    self.form_user_agent == "sing-box/1.9.0",
-                                    "sing-box/1.9.0 (Sing-box)",
-                                )
-                                .clicked()
-                            {
-                                self.form_user_agent = "sing-box/1.9.0".to_string();
-                            }
-                            if ui
-                                .selectable_label(
-                                    self.form_user_agent == "v2rayN/6.42",
-                                    "v2rayN/6.42 (v2rayN)",
-                                )
-                                .clicked()
-                            {
-                                self.form_user_agent = "v2rayN/6.42".to_string();
-                            }
-                            if ui
-                                .selectable_label(
-                                    self.form_user_agent == "vproxy/1.0",
-                                    "vproxy/1.0 (原生默认)",
-                                )
-                                .clicked()
-                            {
-                                self.form_user_agent = "vproxy/1.0".to_string();
+                                self.pick_local_file_for_source();
                             }
                         });
-                });
-                let ua_field = ui.add(
-                    egui::TextEdit::singleline(&mut self.form_user_agent)
-                        .hint_text("默认 clash.meta，留空或手动输入自定义 UA")
-                        .desired_width(f32::INFINITY),
-                );
-                crate::gui::widgets::note_text_field(ui, &ua_field);
-                ui.label(
-                    RichText::new("许多机场与转换面板根据 User-Agent 决定返回哪些格式与协议的节点，默认 clash.meta 兼容性最佳。")
+                    });
+                    let url_field = ui.add(
+                        egui::TextEdit::multiline(&mut self.form_url)
+                            .desired_width(f32::INFINITY)
+                            .desired_rows(3),
+                    );
+                    crate::gui::widgets::note_text_field(ui, &url_field);
+                    ui.label(
+                        RichText::new(
+                            "支持 https:// 订阅链接（可用 {Ymd} 等日期占位符）或本地文件路径。",
+                        )
                         .small()
                         .color(theme::muted()),
-                );
-            }
-            ui.add_space(4.0);
-            // 校验错误就摆在按钮上方：以前只写主窗口底栏，弹窗开着时看不见。
-            if let Some(error) = &self.source_form_error {
-                ui.label(RichText::new(error.as_str()).small().color(theme::danger()));
-            }
-            ui.horizontal(|ui| {
-                if ui.add(primary_btn("保存")).clicked() {
-                    self.save_source_form();
+                    );
+                    if let Some(channel) = crate::collector::telegram::channel_name(&self.form_url)
+                    {
+                        ui.label(
+                            RichText::new(format!(
+                                "Telegram 频道 · @{channel}（需经代理拉取公开预览）"
+                            ))
+                            .small()
+                            .color(theme::accent_strong()),
+                        );
+                    } else if crate::collector::local_file_path(self.form_url.trim()).is_some() {
+                        ui.label(
+                            RichText::new("本地文件源（自动识别格式，离线可用）")
+                                .small()
+                                .color(theme::accent_strong()),
+                        );
+                    }
                 }
-                if ui.button("取消").clicked() {
-                    self.show_source_form = false;
-                    self.source_form_error = None;
+                ui.checkbox(&mut self.form_enabled, "启用");
+                ui.horizontal(|ui| {
+                    ui.label("备注");
+                    let remark_field = ui.add(
+                        egui::TextEdit::singleline(&mut self.form_remark)
+                            .desired_width(f32::INFINITY),
+                    );
+                    crate::gui::widgets::note_text_field(ui, &remark_field);
+                });
+                if !is_ungrouped {
+                    ui.add_space(4.0);
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new("User-Agent").strong());
+                        let current_ua = self.form_user_agent.trim();
+                        let display_title = match current_ua {
+                            "" | "clash.meta" => "clash.meta（默认）",
+                            "clash-verge/v1.7.7" => "clash-verge/v1.7.7",
+                            "ClashforWindows/0.20.39" => "ClashforWindows/0.20.39",
+                            "sing-box/1.9.0" => "sing-box/1.9.0",
+                            "v2rayN/6.42" => "v2rayN/6.42",
+                            "vproxy/1.0" => "vproxy/1.0",
+                            _ => "自定义 UA",
+                        };
+                        egui::ComboBox::from_id_salt("source_ua_presets")
+                            .selected_text(display_title)
+                            .show_ui(ui, |ui| {
+                                if ui
+                                    .selectable_label(
+                                        self.form_user_agent == "clash.meta"
+                                            || self.form_user_agent.is_empty(),
+                                        "clash.meta（默认）",
+                                    )
+                                    .clicked()
+                                {
+                                    self.form_user_agent = "clash.meta".to_string();
+                                }
+                                if ui
+                                    .selectable_label(
+                                        self.form_user_agent == "clash-verge/v1.7.7",
+                                        "clash-verge/v1.7.7",
+                                    )
+                                    .clicked()
+                                {
+                                    self.form_user_agent = "clash-verge/v1.7.7".to_string();
+                                }
+                                if ui
+                                    .selectable_label(
+                                        self.form_user_agent == "ClashforWindows/0.20.39",
+                                        "ClashforWindows/0.20.39",
+                                    )
+                                    .clicked()
+                                {
+                                    self.form_user_agent = "ClashforWindows/0.20.39".to_string();
+                                }
+                                if ui
+                                    .selectable_label(
+                                        self.form_user_agent == "sing-box/1.9.0",
+                                        "sing-box/1.9.0",
+                                    )
+                                    .clicked()
+                                {
+                                    self.form_user_agent = "sing-box/1.9.0".to_string();
+                                }
+                                if ui
+                                    .selectable_label(
+                                        self.form_user_agent == "v2rayN/6.42",
+                                        "v2rayN/6.42",
+                                    )
+                                    .clicked()
+                                {
+                                    self.form_user_agent = "v2rayN/6.42".to_string();
+                                }
+                                if ui
+                                    .selectable_label(
+                                        self.form_user_agent == "vproxy/1.0",
+                                        "vproxy/1.0",
+                                    )
+                                    .clicked()
+                                {
+                                    self.form_user_agent = "vproxy/1.0".to_string();
+                                }
+                            });
+                    });
+                    let ua_field = ui.add(
+                        egui::TextEdit::singleline(&mut self.form_user_agent)
+                            .hint_text("默认 clash.meta，留空或输入自定义 UA")
+                            .desired_width(f32::INFINITY),
+                    );
+                    crate::gui::widgets::note_text_field(ui, &ua_field);
                 }
+                ui.add_space(4.0);
+                // 校验错误就摆在按钮上方：以前只写主窗口底栏，弹窗开着时看不见。
+                if let Some(error) = &self.source_form_error {
+                    ui.label(RichText::new(error.as_str()).small().color(theme::danger()));
+                }
+                ui.horizontal(|ui| {
+                    if ui.add(primary_btn("保存")).clicked() {
+                        self.save_source_form();
+                    }
+                    if ui.button("取消").clicked() {
+                        self.show_source_form = false;
+                        self.source_form_error = None;
+                    }
+                });
             });
-        });
         if !open {
             self.show_source_form = false;
             self.source_form_error = None;
@@ -1277,7 +1293,7 @@ impl VpnApp {
                                 );
                                 ui.label(
                                     RichText::new(
-                                        "说明：同质化源指“独有可用节点数为 0 且重合率高于 85%”或全失效源。此类源的所有可用节点均已存在于其它优质源中，剔除后不会丢失任何可用节点，并大幅节省网络与测速资源。勾选后要剔除的源，再点底部按钮执行。"
+                                        "独有可用节点为 0（重合率 > 85%）或全失效源，勾选后可批量禁用或删除。"
                                     )
                                     .small()
                                     .color(theme::muted()),
@@ -1390,7 +1406,7 @@ impl VpnApp {
                                 &format!("批量禁用勾选的源 ({})", selected_ids.len()),
                             ),
                         )
-                        .on_hover_text("推荐：把勾选的源设为禁用状态，停止自动拉取以节省网络资源，保留源地址")
+                        .on_hover_text("禁用所选订阅源，保留源地址但停止拉取")
                         .clicked()
                     {
                         action = Some((selected_ids.clone(), false));
@@ -2069,22 +2085,22 @@ mod source_filter_tests {
                     let r_benchmark = ui.add(icons::button_with_icon(
                         Icon::Lightning,
                         "反向剔除同质化源",
-                        theme::warning(),
+                        theme::text_primary(),
                     ));
 
                     // 2. 第 1 行按钮
-                    let r_new = ui.add(icons::button_with_icon(Icon::Plus, "新建", theme::accent_strong()));
+                    let r_new = ui.add(icons::primary_icon_btn(Icon::Plus, "新建"));
                     let r_fetch = ui.add(icons::button_with_icon(Icon::Sync, "拉取全部", theme::text_primary()));
-                    let r_proxy_fetch = ui.add(icons::button_with_icon(Icon::Shield, "代理拉取全部", theme::accent()));
+                    let r_proxy_fetch = ui.add(icons::button_with_icon(Icon::Shield, "代理拉取全部", theme::text_primary()));
                     let r_import = ui.add(icons::button_with_icon(Icon::Clipboard, "导入订阅", theme::text_primary()));
                     let r_export = ui.add(icons::button_with_icon(Icon::Export, "导出订阅", theme::text_primary()));
-                    let r_clear = ui.add(icons::button_with_icon(Icon::Trash, "清空全部", theme::danger()));
+                    let r_clear = ui.add(icons::danger_icon_btn(Icon::Trash, "清空全部"));
 
                     // 3. 第 2 行按钮
-                    let r_openrung = ui.add(icons::button_with_icon(Icon::Globe, "接入 OpenRung 节点", theme::accent()));
-                    let r_warp = ui.add(icons::button_with_icon(Icon::Lightning, "原生注册 WARP 节点", theme::warning()));
-                    let r_gist = ui.add(icons::button_with_icon(Icon::Search, "Gist 发现", theme::accent_strong()));
-                    let r_gist_cfg = ui.add(icons::button_with_icon(Icon::Gear, "Gist 配置", theme::text_secondary()));
+                    let r_openrung = ui.add(icons::button_with_icon(Icon::Globe, "接入 OpenRung 节点", theme::text_primary()));
+                    let r_warp = ui.add(icons::button_with_icon(Icon::Lightning, "原生注册 WARP 节点", theme::text_primary()));
+                    let r_gist = ui.add(icons::button_with_icon(Icon::Search, "Gist 发现", theme::text_primary()));
+                    let r_gist_cfg = ui.add(icons::button_with_icon(Icon::Gear, "Gist 配置", theme::text_primary()));
 
                     // 4. 第 3 行控件与状态筛选胶囊
                     let r_search = ui.add(

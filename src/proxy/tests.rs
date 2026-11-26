@@ -1076,6 +1076,19 @@ async fn occupied_controller_port_is_rejected() {
 }
 
 #[tokio::test]
+async fn fallback_controller_port_avoids_reserved_ports_and_binds() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let occupied = listener.local_addr().unwrap().port();
+
+    let fallback = super::manager::allocate_fallback_controller_port(&[occupied, 19980])
+        .await
+        .unwrap();
+    assert_ne!(fallback, occupied);
+    assert_ne!(fallback, 19980);
+    ensure_port_available(fallback).await.unwrap();
+}
+
+#[tokio::test]
 async fn startup_probe_rejects_proxy_that_cannot_reach_test_url() {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 

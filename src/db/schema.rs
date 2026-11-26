@@ -245,11 +245,11 @@ impl Database {
             "INTEGER NOT NULL DEFAULT 0",
         )
         .await?;
-        // 系统代理被外部改掉时自动写回：默认关，因为它动的是用户 HKCU。
+        // 系统代理被外部软件覆盖或清空时默认自动恢复守护。
         self.ensure_column(
             "settings",
             "auto_rearm_system_proxy",
-            "INTEGER NOT NULL DEFAULT 0",
+            "INTEGER NOT NULL DEFAULT 1",
         )
         .await?;
         // 这两条是"软件自己动"的开关，默认开（新装机器要能自己把内核下下来、

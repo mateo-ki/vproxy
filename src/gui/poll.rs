@@ -182,6 +182,8 @@ impl VpnApp {
                                             {
                                                 self.selected_proxy_node_name =
                                                     Some(matching.name.clone());
+                                                self.selected_proxy_node_snapshot =
+                                                    Some(matching.clone());
                                             }
                                         }
                                         self.nodes = items;
@@ -230,6 +232,7 @@ impl VpnApp {
                             if let Some(ref sel_id) = self.selected_proxy_node_id {
                                 if let Some(matching) = nodes.iter().find(|n| &n.id == sel_id) {
                                     self.selected_proxy_node_name = Some(matching.name.clone());
+                                    self.selected_proxy_node_snapshot = Some(matching.clone());
                                 }
                             }
                             self.proxy_nodes = nodes;
@@ -650,6 +653,18 @@ impl VpnApp {
                             self.status = format_speedtest_progress(&progress);
                         }
                         BgMsg::FailoverTarget(outcome) => self.on_failover_target(outcome),
+                        BgMsg::SelectedNodeSnapshot(node) => {
+                            let same_selection = self.selected_proxy_node_id.is_none()
+                                || self.selected_proxy_node_id.as_deref() == Some(node.id.as_str());
+                            if same_selection {
+                                self.selected_proxy_node_id = Some(node.id.clone());
+                                self.selected_proxy_node_name = Some(node.name.clone());
+                                self.selected_proxy_node_snapshot = Some(node.summary());
+                                self.proxy_config.selected_node_id = Some(node.id.clone());
+                                self.proxy_config.selected_node_name = Some(node.name.clone());
+                                self.proxy_config.selected_node_snapshot = Some(node);
+                            }
+                        }
                         BgMsg::SpeedtestPingResult { ping_ms, jitter_ms } => {
                             self.speedtest_last_ping_ms = ping_ms;
                             self.speedtest_last_jitter_ms = jitter_ms;
@@ -952,14 +967,6 @@ impl VpnApp {
                             self.app_update_progress = None;
                             self.app_update_checked_at =
                                 Some(chrono::Local::now().format("%H:%M").to_string());
-                            // 查到的不是刚才那一版，之前下好的安装包就不能再当"已校验"用。
-                            if self
-                                .app_release
-                                .as_ref()
-                                .is_none_or(|old| old.tag != info.tag)
-                            {
-                                self.app_installer_path = None;
-                            }
                             if quiet {
                                 // 自动那次不吭声，但要在日志里留痕：侧栏↑亮不亮，看的就是这条。
                                 crate::startup_log(&format!(
@@ -993,12 +1000,14 @@ impl VpnApp {
                             self.status = progress.message.clone();
                             self.app_update_progress = Some(progress);
                         }
-                        BgMsg::AppUpdateDownloaded(result) => {
+                        BgMsg::AppUpdateDownloaded { tag, result } => {
                             self.app_update_busy = false;
                             self.app_update_progress = None;
                             match result {
                                 Ok(path) => {
-                                    self.status = format!("安装包已下载并校验：{}", path.display());
+                                    self.status =
+                                        format!("安装包 {tag} 已下载并校验：{}", path.display());
+                                    self.app_installer_tag = Some(tag);
                                     self.app_installer_path = Some(path);
                                 }
                                 Err(error) => self.status = format!("下载更新失败: {error}"),

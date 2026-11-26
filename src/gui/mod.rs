@@ -199,11 +199,13 @@ pub struct VpnApp {
     /// 自己发起的那次检查不许动状态栏 —— 用户没点任何东西，"正在检查更新..."是噪音。
     pub(crate) app_update_quiet: bool,
     pub(crate) app_installer_path: Option<std::path::PathBuf>,
+    pub(crate) app_installer_tag: Option<String>,
     pub(crate) app_update_cancel: Arc<AtomicBool>,
     /// 「关于」页多版本切换：历史 Release 列表、当前选中的 tag、加载状态
     pub(crate) available_releases: Vec<crate::app_update::ReleaseItem>,
     pub(crate) selected_release_tag: Option<String>,
     pub(crate) fetching_releases: bool,
+    pub(crate) releases_requested_once: bool,
     pub(crate) show_release_notes_modal: bool,
     pub(crate) release_notes_content: Option<(String, String)>,
     pub(crate) proxy_status: ProxyRuntimeStatus,
@@ -211,6 +213,7 @@ pub struct VpnApp {
     pub(crate) proxy_log: String,
     pub(crate) selected_proxy_node_id: Option<String>,
     pub(crate) selected_proxy_node_name: Option<String>,
+    pub(crate) selected_proxy_node_snapshot: Option<NodeSummary>,
     pub(crate) focused_node_id: Option<String>,
     pub(crate) switching_node_id: Option<String>,
     pub(crate) proxy_switch_seq: u64,
@@ -655,6 +658,10 @@ impl VpnApp {
         let (tx, rx) = mpsc::channel();
         let api_addr = api_controller.listen_addr().to_string();
         let initial_proxy_config = rt.block_on(proxy_manager.config());
+        let initial_selected_snapshot = initial_proxy_config
+            .selected_node_snapshot
+            .as_ref()
+            .map(Node::summary);
         let initial_custom_rules = rules_editor_text_from_config(&initial_proxy_config);
         let mut app = Self {
             rt,
@@ -774,15 +781,18 @@ impl VpnApp {
             app_update_due: Some(std::time::Instant::now() + std::time::Duration::from_secs(1)),
             app_update_quiet: false,
             app_installer_path: None,
+            app_installer_tag: None,
             app_update_cancel: Arc::new(AtomicBool::new(false)),
             available_releases: Vec::new(),
             selected_release_tag: None,
             fetching_releases: false,
+            releases_requested_once: false,
             show_release_notes_modal: false,
             release_notes_content: None,
             proxy_log: String::new(),
             selected_proxy_node_id: initial_proxy_node.as_ref().map(|node| node.0.clone()),
             selected_proxy_node_name: initial_proxy_node.map(|node| node.1),
+            selected_proxy_node_snapshot: initial_selected_snapshot,
             focused_node_id: None,
             switching_node_id: None,
             proxy_switch_seq: 0,
@@ -848,7 +858,7 @@ impl VpnApp {
             edit_interval_min: 60,
             edit_auto_speed: false,
             edit_speedtest_auto_refill: true,
-            edit_auto_rearm_system_proxy: false,
+            edit_auto_rearm_system_proxy: true,
             edit_auto_prepare_kernel: true,
             edit_speedtest_added_source: true,
             prepare_attempts: 0,
@@ -1838,8 +1848,28 @@ impl VpnApp {
     }
 
     pub(crate) fn delete_source(&mut self, id: String) {
+        let selected_from_this_source = self
+            .selected_proxy_node_snapshot
+            .as_ref()
+            .and_then(|s| s.source_id.as_deref())
+            == Some(id.as_str())
+            || self
+                .proxy_config
+                .selected_node_snapshot
+                .as_ref()
+                .and_then(|s| s.source_id.as_deref())
+                == Some(id.as_str());
+        if selected_from_this_source {
+            self.selected_proxy_node_id = None;
+            self.selected_proxy_node_name = None;
+            self.selected_proxy_node_snapshot = None;
+            self.proxy_config.selected_node_id = None;
+            self.proxy_config.selected_node_name = None;
+            self.proxy_config.selected_node_snapshot = None;
+        }
         let db = self.db.clone();
         let tx = self.tx.clone();
+        let manager = self.proxy_manager.clone();
         self.status = "正在删除订阅源...".into();
         self.rt.spawn(async move {
             let res = db
@@ -1853,6 +1883,10 @@ impl VpnApp {
                     }
                 })
                 .map_err(|e| e.to_string());
+            if res.is_ok() {
+                let _save = manager.lock_configuration_save().await;
+                let _ = db.clear_selected_node_if(Some(&id), None).await;
+            }
             let _ = tx.send(BgMsg::OpDone {
                 result: res,
                 unlock: false,
@@ -3467,16 +3501,24 @@ impl VpnApp {
     pub(crate) fn set_and_persist_selected_node(&mut self, id: String, name: String) {
         self.selected_proxy_node_id = Some(id.clone());
         self.selected_proxy_node_name = Some(name.clone());
+        if let Some(summary) = self
+            .proxy_nodes
+            .iter()
+            .chain(self.nodes.iter())
+            .find(|n| n.id == id)
+            .cloned()
+        {
+            self.selected_proxy_node_snapshot = Some(summary);
+        }
         self.proxy_config.selected_node_id = Some(id.clone());
         self.proxy_config.selected_node_name = Some(name.clone());
         let db = self.db.clone();
+        let tx = self.tx.clone();
         let manager = self.proxy_manager.clone();
         self.rt.spawn(async move {
             let _save = manager.lock_configuration_save().await;
-            if let Ok(mut cfg) = db.get_proxy_config().await {
-                cfg.selected_node_id = Some(id);
-                cfg.selected_node_name = Some(name);
-                let _ = db.update_proxy_config(&cfg).await;
+            if let Ok(Some(node)) = db.persist_selected_node(&id, &name, None).await {
+                let _ = tx.send(BgMsg::SelectedNodeSnapshot(node));
             }
         });
     }
@@ -3578,17 +3620,29 @@ impl VpnApp {
         let chain_options = self.proxy_config.clone();
         let candidate_blacklist = self.router.blacklisted(std::time::Instant::now());
         let node_id = id.clone();
+        let fallback_snapshot = self
+            .proxy_config
+            .selected_node_snapshot
+            .clone()
+            .filter(|snap| snap.id == node_id);
         self.status = format!("⚡ 正在极速异步切换至「{name}」...");
         self.proxy_switch_request = Some(request);
         self.rt.spawn(async move {
             if !manager.request_is_current(request) {
                 return;
             }
-            let result = match db.get_node(&node_id).await {
+            let result = match db
+                .resolve_selected_node(Some(&node_id), fallback_snapshot.as_ref())
+                .await
+            {
                 Ok(Some(node)) => {
                     if !manager.request_is_current(request) {
                         return;
                     }
+                    let _ = db
+                        .persist_selected_node(&node.id, &node.name, Some(node.clone()))
+                        .await;
+                    let _ = tx.send(BgMsg::SelectedNodeSnapshot(node.clone()));
                     Self::prime_url_test_candidates(
                         &db,
                         &manager,
@@ -4027,9 +4081,15 @@ impl VpnApp {
             if let Some(ref name) = config.selected_node_name {
                 self.selected_proxy_node_name = Some(name.clone());
             }
+            if let Some(ref snap) = config.selected_node_snapshot {
+                self.selected_proxy_node_snapshot = Some(snap.summary());
+            }
         } else {
             config.selected_node_id = self.selected_proxy_node_id.clone();
             config.selected_node_name = self.selected_proxy_node_name.clone();
+            if config.selected_node_snapshot.is_none() {
+                config.selected_node_snapshot = self.proxy_config.selected_node_snapshot.clone();
+            }
         }
         self.proxy_config = config;
     }
@@ -4063,6 +4123,9 @@ impl VpnApp {
         }
         if let Some(ref name) = self.selected_proxy_node_name {
             options.selected_node_name = Some(name.clone());
+        }
+        if options.selected_node_snapshot.is_none() {
+            options.selected_node_snapshot = self.proxy_config.selected_node_snapshot.clone();
         }
         options
     }
@@ -4539,7 +4602,9 @@ impl VpnApp {
             return;
         }
         if self.selected_proxy_node_id.is_none() {
-            if let Some(ref focused) = self.focused_node_id {
+            if let Some(snap) = self.proxy_config.selected_node_snapshot.clone() {
+                self.set_and_persist_selected_node(snap.id, snap.name);
+            } else if let Some(ref focused) = self.focused_node_id {
                 let name = self
                     .proxy_nodes
                     .iter()
@@ -4645,16 +4710,28 @@ impl VpnApp {
         self.proxy_status.state = ProxyState::Starting;
         self.proxy_status.message = starting_msg.clone();
         self.status = starting_msg;
+        let fallback_snapshot = self
+            .proxy_config
+            .selected_node_snapshot
+            .clone()
+            .filter(|snap| snap.id == node_id);
         self.rt.spawn(async move {
             let _save = manager.lock_configuration_save().await;
             if !manager.request_is_current(operation.request) {
                 return;
             }
-            let result = match db.get_node(&node_id).await {
+            let result = match db
+                .resolve_selected_node(Some(&node_id), fallback_snapshot.as_ref())
+                .await
+            {
                 Ok(Some(node)) => {
                     if !manager.request_is_current(operation.request) {
                         return;
                     }
+                    options.selected_node_id = Some(node.id.clone());
+                    options.selected_node_name = Some(node.name.clone());
+                    options.selected_node_snapshot = Some(node.clone());
+                    let _ = tx.send(BgMsg::SelectedNodeSnapshot(node.clone()));
                     let has_override_groups = options
                         .override_yaml
                         .as_deref()
@@ -4979,6 +5056,9 @@ impl VpnApp {
                 reqwest::Proxy::all(format!("http://127.0.0.1:{proxy_port}"))
                     .expect("本地混合端口代理地址有效"),
             );
+        } else {
+            // 直连探测与服务状态检查绝不读取外部（如 v2rayN）系统代理。
+            builder = builder.no_proxy();
         }
         let client = builder.build().ok()?;
         self.service_check_client = Some((use_proxy, proxy_port, client.clone()));
@@ -5213,8 +5293,16 @@ impl VpnApp {
         let db = self.db.clone();
         let manager = self.proxy_manager.clone();
         let sync_id = id.clone();
+        let fallback_snapshot = self
+            .proxy_config
+            .selected_node_snapshot
+            .clone()
+            .filter(|snap| snap.id == sync_id);
         self.rt.spawn(async move {
-            if let Ok(Some(node)) = db.get_node(&sync_id).await {
+            if let Ok(Some(node)) = db
+                .resolve_selected_node(Some(&sync_id), fallback_snapshot.as_ref())
+                .await
+            {
                 manager.sync_active_node(node).await;
             }
         });
@@ -5235,8 +5323,10 @@ impl VpnApp {
         let port = self.proxy_status.controller_port;
         let secret = self.proxy_status.controller_secret.clone();
         let tx = self.tx.clone();
+        let Some(client) = self.controller_client(port) else {
+            return;
+        };
         self.rt.spawn(async move {
-            let client = reqwest::Client::new();
             let _ = crate::proxy::with_controller_auth(
                 client.delete(format!("http://127.0.0.1:{port}/connections/{id}")),
                 &secret,
@@ -5251,8 +5341,10 @@ impl VpnApp {
         let port = self.proxy_status.controller_port;
         let secret = self.proxy_status.controller_secret.clone();
         let tx = self.tx.clone();
+        let Some(client) = self.controller_client(port) else {
+            return;
+        };
         self.rt.spawn(async move {
-            let client = reqwest::Client::new();
             let _ = crate::proxy::with_controller_auth(
                 client.delete(format!("http://127.0.0.1:{port}/connections")),
                 &secret,
@@ -5630,17 +5722,16 @@ impl VpnApp {
         if self.selected_proxy_node_id.as_deref() == Some(&id) {
             self.selected_proxy_node_id = None;
             self.selected_proxy_node_name = None;
+            self.selected_proxy_node_snapshot = None;
             self.proxy_config.selected_node_id = None;
             self.proxy_config.selected_node_name = None;
+            self.proxy_config.selected_node_snapshot = None;
             let db_cfg = self.db.clone();
             let manager = self.proxy_manager.clone();
+            let clear_id = id.clone();
             self.rt.spawn(async move {
                 let _save = manager.lock_configuration_save().await;
-                if let Ok(mut cfg) = db_cfg.get_proxy_config().await {
-                    cfg.selected_node_id = None;
-                    cfg.selected_node_name = None;
-                    let _ = db_cfg.update_proxy_config(&cfg).await;
-                }
+                let _ = db_cfg.clear_selected_node_if(None, Some(&clear_id)).await;
             });
         }
         let db = self.db.clone();
@@ -5926,8 +6017,15 @@ impl VpnApp {
     }
 
     pub(crate) fn clear_nodes(&mut self) {
+        self.selected_proxy_node_id = None;
+        self.selected_proxy_node_name = None;
+        self.selected_proxy_node_snapshot = None;
+        self.proxy_config.selected_node_id = None;
+        self.proxy_config.selected_node_name = None;
+        self.proxy_config.selected_node_snapshot = None;
         let db = self.db.clone();
         let tx = self.tx.clone();
+        let manager = self.proxy_manager.clone();
         self.busy = true;
         self.rt.spawn(async move {
             let res = db
@@ -5935,6 +6033,10 @@ impl VpnApp {
                 .await
                 .map(|n| format!("已清空 {n} 个节点"))
                 .map_err(|e| e.to_string());
+            if res.is_ok() {
+                let _save = manager.lock_configuration_save().await;
+                let _ = db.clear_selected_node_if(None, None).await;
+            }
             let _ = tx.send(BgMsg::OpDone {
                 result: res,
                 unlock: true,

@@ -669,6 +669,11 @@ impl VpnApp {
                     .iter()
                     .chain(self.nodes.iter())
                     .find(|node| &node.id == id)
+                    .or_else(|| {
+                        self.selected_proxy_node_snapshot
+                            .as_ref()
+                            .filter(|snap| &snap.id == id)
+                    })
             })
             .cloned();
         let is_starting = matches!(self.proxy_status.state, ProxyState::Starting);
