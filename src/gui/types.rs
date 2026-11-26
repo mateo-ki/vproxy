@@ -554,6 +554,8 @@ pub enum BgMsg {
     },
     /// 自动切换的替补 TCP 复检结果。
     FailoverTarget(Result<(String, String), String>),
+    /// 已持久化的当前选中节点实体快照回传给界面缓存。
+    SelectedNodeSnapshot(crate::models::Node),
     Kernels(Vec<KernelInfo>),
     KernelReleases(Result<Vec<KernelReleaseInfo>, String>),
     KernelHistoryLoaded {
@@ -565,7 +567,10 @@ pub enum BgMsg {
     /// 应用自身更新（「关于」页）：查版本、下载进度、下载结果（安装包本地路径）。
     AppUpdateCheck(Result<crate::app_update::AppReleaseInfo, String>),
     AppUpdateProgress(crate::app_update::AppUpdateProgress),
-    AppUpdateDownloaded(Result<std::path::PathBuf, String>),
+    AppUpdateDownloaded {
+        tag: String,
+        result: Result<std::path::PathBuf, String>,
+    },
     AppReleasesListed(Result<Vec<crate::app_update::ReleaseItem>, String>),
     ProxyStatus {
         request: u64,

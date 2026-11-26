@@ -1,8 +1,7 @@
-use crate::gui::icons::{icon_label, Icon};
+use super::{segmented_pills, settings_divider, settings_group, settings_row};
 use crate::gui::theme;
-use crate::gui::widgets::{card_frame, status_badge};
 use crate::gui::VpnApp;
-use eframe::egui::{self, RichText, Ui};
+use eframe::egui::{self, Ui};
 
 /// 字号滑杆的刻度带留多高（刻度线 + 数字）。
 pub(crate) const FONT_TICK_BAND_HEIGHT: f32 = 20.0;
@@ -10,193 +9,195 @@ pub(crate) const FONT_SCALE_MIN: i32 = 85;
 pub(crate) const FONT_SCALE_MAX: i32 = 140;
 
 impl VpnApp {
-    /// 外观分区：配色 + 字体大小。两条都是"改了立刻生效并自动落库"，所以不挂底部那排
-    /// 保存按钮 —— 和主题一贯的行为一致。
+    /// 外观分区：语言、明暗、主题配色与整体缩放（改动即时生效并自动落库）。
     pub(crate) fn ui_settings_appearance(&mut self, ui: &mut Ui) {
         let mut auto_save = false;
-        card_frame().show(ui, |ui| {
-            ui.horizontal(|ui| {
-                icon_label(ui, Icon::Appearance, 16.0, theme::accent());
-                ui.label(RichText::new(self.tr("界面外观")).strong().size(15.0));
-                status_badge(
-                    ui,
-                    &format!("字体 {}%", (self.edit_ui_scale * 100.0).round() as i32),
-                    theme::muted(),
-                );
-            });
-            ui.add_space(2.0);
-            ui.label(
-                RichText::new(self.tr("改动即时生效并自动保存，下次启动沿用。"))
-                    .small()
-                    .color(theme::muted()),
-            );
-            ui.add_space(10.0);
 
-            ui.label(RichText::new(self.tr("界面语言 (Interface Language)")).strong());
-            ui.add_space(4.0);
-            ui.horizontal_wrapped(|ui| {
-                for lang in crate::i18n::Language::ALL {
-                    if ui
-                        .selectable_value(
-                            &mut self.edit_ui_language,
-                            lang.code().to_string(),
-                            lang.display_name(),
-                        )
-                        .clicked()
-                    {
+        let tr_lang = self.tr("界面语言");
+        let tr_light = self.tr("浅色");
+        let tr_dark = self.tr("深色");
+        let tr_theme = self.tr("界面配色主题");
+        let tr_scale = self.tr("字体大小");
+        let tr_reset_scale = self.tr("恢复 100%");
+
+        settings_group(ui, "界面风格", None, |ui| {
+            settings_row(
+                ui,
+                "appearance_lang",
+                tr_lang,
+                Some("即时切换界面语言"),
+                |ui| {
+                    let mut current_lang = crate::i18n::Language::from_code(&self.edit_ui_language);
+                    let options: Vec<_> = crate::i18n::Language::ALL
+                        .iter()
+                        .map(|&l| (l, l.display_name()))
+                        .collect();
+                    if segmented_pills(ui, &mut current_lang, &options) {
+                        self.edit_ui_language = current_lang.code().to_string();
                         auto_save = true;
                     }
-                }
-            });
+                },
+            );
 
-            ui.add_space(10.0);
-            ui.separator();
-            ui.add_space(8.0);
+            settings_divider(ui);
 
-            ui.label(RichText::new(self.tr("界面配色主题")).strong());
-            ui.add_space(4.0);
-            ui.horizontal_wrapped(|ui| {
-                for theme_spec in theme::THEMES {
-                    let selected = self.edit_ui_theme == theme_spec.id;
-                    let accent_col = theme::rgb(theme_spec.accent);
-                    let padding = egui::vec2(10.0, 5.0);
-                    let font = egui::FontId::proportional(12.5);
-                    let galley = ui.painter().layout_no_wrap(
-                        theme_spec.name.to_string(),
-                        font,
-                        if selected {
-                            theme::accent_strong()
-                        } else {
-                            theme::text_primary()
+            settings_row(
+                ui,
+                "appearance_dark",
+                "明暗模式",
+                Some("切换浅色或深色界面底色"),
+                |ui| {
+                    let mut dark = self.edit_ui_dark;
+                    if segmented_pills(ui, &mut dark, &[(false, tr_light), (true, tr_dark)]) {
+                        self.edit_ui_dark = dark;
+                        auto_save = true;
+                    }
+                },
+            );
+
+            settings_divider(ui);
+
+            settings_row(
+                ui,
+                "appearance_theme",
+                tr_theme,
+                Some("全局强调色"),
+                |ui| {
+                    ui.with_layout(
+                        egui::Layout::left_to_right(egui::Align::Center).with_main_wrap(true),
+                        |ui| {
+                            for theme_spec in theme::THEMES.iter() {
+                                let selected = self.edit_ui_theme == theme_spec.id;
+                                let accent_col = theme::rgb(theme_spec.accent);
+                                let short_name = theme_spec
+                                    .name
+                                    .split(['（', '('])
+                                    .next()
+                                    .unwrap_or(theme_spec.name)
+                                    .trim();
+                                let padding = egui::vec2(9.0, 4.0);
+                                let font = egui::FontId::proportional(12.0);
+                                let galley = ui.painter().layout_no_wrap(
+                                    short_name.to_string(),
+                                    font,
+                                    if selected {
+                                        theme::accent_strong()
+                                    } else {
+                                        theme::text_primary()
+                                    },
+                                );
+                                let dot_size = 8.0;
+                                let gap = 5.0;
+                                let desired_size = egui::vec2(
+                                    galley.size().x + dot_size + gap + padding.x * 2.0,
+                                    galley.size().y.max(dot_size) + padding.y * 2.0,
+                                );
+                                let (rect, response) =
+                                    ui.allocate_exact_size(desired_size, egui::Sense::click());
+                                let response = response
+                                    .on_hover_cursor(egui::CursorIcon::PointingHand)
+                                    .on_hover_text(theme_spec.name);
+                                if ui.is_rect_visible(rect) {
+                                    let painter = ui.painter();
+                                    let bg = if selected {
+                                        theme::accent_bg()
+                                    } else if response.hovered() {
+                                        theme::panel_hover()
+                                    } else {
+                                        theme::panel()
+                                    };
+                                    let stroke = if selected {
+                                        egui::Stroke::new(1.2_f32, accent_col)
+                                    } else {
+                                        egui::Stroke::new(1.0_f32, theme::border_subtle())
+                                    };
+                                    painter.rect(
+                                        rect,
+                                        egui::CornerRadius::same(7),
+                                        bg,
+                                        stroke,
+                                        egui::StrokeKind::Inside,
+                                    );
+
+                                    let dot_center = egui::pos2(
+                                        rect.min.x + padding.x + dot_size / 2.0,
+                                        rect.center().y,
+                                    );
+                                    painter.circle_filled(dot_center, dot_size / 2.0, accent_col);
+                                    if selected {
+                                        painter.circle_stroke(
+                                            dot_center,
+                                            dot_size / 2.0 + 1.5,
+                                            egui::Stroke::new(1.0_f32, accent_col),
+                                        );
+                                    }
+
+                                    let text_pos = egui::pos2(
+                                        dot_center.x + dot_size / 2.0 + gap,
+                                        rect.center().y - galley.size().y / 2.0,
+                                    );
+                                    painter.galley(
+                                        text_pos,
+                                        galley,
+                                        if selected {
+                                            theme::accent_strong()
+                                        } else {
+                                            theme::text_primary()
+                                        },
+                                    );
+                                }
+                                if response.clicked() {
+                                    self.edit_ui_theme = theme_spec.id.to_string();
+                                    auto_save = true;
+                                }
+                            }
                         },
                     );
-                    let dot_size = 9.0;
-                    let gap = 6.0;
-                    let desired_size = egui::vec2(
-                        galley.size().x + dot_size + gap + padding.x * 2.0,
-                        galley.size().y.max(dot_size) + padding.y * 2.0,
-                    );
-                    let (rect, response) = ui.allocate_exact_size(desired_size, egui::Sense::click());
-                    if ui.is_rect_visible(rect) {
-                        let painter = ui.painter();
-                        let bg = if selected {
-                            theme::accent_bg()
-                        } else if response.hovered() {
-                            theme::panel_hover()
-                        } else {
-                            theme::panel()
-                        };
-                        let stroke = if selected {
-                            egui::Stroke::new(1.2_f32, accent_col)
-                        } else {
-                            egui::Stroke::new(1.0_f32, theme::border_subtle())
-                        };
-                        painter.rect(
-                            rect,
-                            egui::CornerRadius::same(7),
-                            bg,
-                            stroke,
-                            egui::StrokeKind::Inside,
-                        );
+                },
+            );
 
-                        let dot_center =
-                            egui::pos2(rect.min.x + padding.x + dot_size / 2.0, rect.center().y);
-                        painter.circle_filled(dot_center, dot_size / 2.0, accent_col);
-                        if selected {
-                            painter.circle_stroke(
-                                dot_center,
-                                dot_size / 2.0 + 2.0,
-                                egui::Stroke::new(1.0_f32, accent_col),
-                            );
-                        }
+            settings_divider(ui);
 
-                        let text_pos = egui::pos2(
-                            dot_center.x + dot_size / 2.0 + gap,
-                            rect.center().y - galley.size().y / 2.0,
-                        );
-                        painter.galley(
-                            text_pos,
-                            galley,
-                            if selected {
-                                theme::accent_strong()
-                            } else {
-                                theme::text_primary()
-                            },
-                        );
-                    }
-                    if response.clicked() {
-                        self.edit_ui_theme = theme_spec.id.to_string();
+            let mut slider_geometry = None;
+            settings_row(
+                ui,
+                "appearance_scale",
+                tr_scale,
+                Some("整体缩放界面比例 (85% - 140%)"),
+                |ui| {
+                    if (self.edit_ui_scale - 1.0).abs() > 0.001
+                        && ui
+                            .button(tr_reset_scale)
+                            .on_hover_text("回到跟随系统缩放")
+                            .clicked()
+                    {
+                        self.edit_ui_scale = 1.0;
                         auto_save = true;
                     }
-                }
-            });
-
-            ui.add_space(10.0);
-            // 夜间：只换中性色，强调色仍然是上面那 5 支里选的一支（两条轴正交）。
-            let mut dark = self.edit_ui_dark;
-            if ui
-                .checkbox(&mut dark, RichText::new(self.tr("夜间模式（深色底）")))
-                .on_hover_text(
-                    "只换中性色（页面、卡片、文字），强调色还是上面选的那一支 —— 5 支强调色 × 明/暗。\n\
-                     改动即时生效并自动保存，关掉就回到浅白。",
-                )
-                .changed()
-            {
-                self.edit_ui_dark = dark;
-                auto_save = true;
-            }
-
-            ui.add_space(12.0);
-            ui.separator();
-            ui.add_space(8.0);
-
-            ui.label(RichText::new("字体大小").strong());
-            ui.add_space(4.0);
-            ui.label(
-                RichText::new("整屏一起缩放（文字、图标、表格都跟着走），100% = 跟随系统缩放。")
-                    .small()
-                    .color(theme::muted()),
+                    let mut percent = (self.edit_ui_scale * 100.0).round() as i32;
+                    let slider_width = ui.spacing().slider_width;
+                    const FONT_SLIDER_RAIL: f32 = 240.0;
+                    ui.spacing_mut().slider_width = FONT_SLIDER_RAIL;
+                    let response = ui
+                        .add(
+                            egui::Slider::new(&mut percent, FONT_SCALE_MIN..=FONT_SCALE_MAX)
+                                .step_by(5.0)
+                                .suffix("%"),
+                        )
+                        .on_hover_text("85% 到 140%，步长 5%；松手后保存");
+                    ui.spacing_mut().slider_width = slider_width;
+                    slider_geometry = Some((
+                        response.rect,
+                        handle_travel_range(ui, &response, FONT_SLIDER_RAIL),
+                    ));
+                    if response.changed() {
+                        self.edit_ui_scale = percent as f32 / 100.0;
+                    }
+                    if response.drag_stopped() && self.settings_dirty() {
+                        self.save_settings();
+                    }
+                },
             );
-            ui.add_space(6.0);
-            let mut percent = (self.edit_ui_scale * 100.0).round() as i32;
-            let mut slider_geometry = None;
-            ui.horizontal(|ui| {
-                // egui 0.31 的 Slider 没有 desired_width，宽度只认 spacing.slider_width。
-                let slider_width = ui.spacing().slider_width;
-                const FONT_SLIDER_RAIL: f32 = 300.0;
-                ui.spacing_mut().slider_width = FONT_SLIDER_RAIL;
-                let response = ui
-                    .add(
-                        egui::Slider::new(&mut percent, 85..=140)
-                            .step_by(5.0)
-                            .suffix("%"),
-                    )
-                    .on_hover_text("85% 到 140%，步长 5%；松手才生效");
-                ui.spacing_mut().slider_width = slider_width;
-                slider_geometry = Some((
-                    response.rect,
-                    handle_travel_range(ui, &response, FONT_SLIDER_RAIL),
-                ));
-                if response.changed() {
-                    self.edit_ui_scale = percent as f32 / 100.0;
-                }
-                // 只在松手那一下落库。拖动中每帧保存的话：`BgMsg::SettingsSaved` 回来会
-                // `sync_edit_settings()` 把值按库里那份灌回去，手指还按在柄上，值被改 →
-                // 缩放变 → 整页重排 → 滑杆几何跟着挪 → 看起来就是"页面在鬼畜"。
-                if response.drag_stopped() && self.settings_dirty() {
-                    self.save_settings();
-                }
-                if (self.edit_ui_scale - 1.0).abs() > 0.001
-                    && ui
-                        .button(self.tr("恢复 100%"))
-                        .on_hover_text("回到跟随系统缩放")
-                        .clicked()
-                {
-                    self.edit_ui_scale = 1.0;
-                    auto_save = true;
-                }
-            });
-            // 刻度条：先留出一条带，再照滑杆自己的几何画在下面。
             if let Some((rect, travel)) = slider_geometry {
                 ui.add_space(FONT_TICK_BAND_HEIGHT);
                 paint_font_scale_ticks(ui, rect, travel);

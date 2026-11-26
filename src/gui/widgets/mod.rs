@@ -4,6 +4,7 @@ pub mod charts;
 pub mod formatters;
 pub mod markdown;
 pub mod node_card;
+pub mod settings_list;
 
 #[cfg(test)]
 mod tests;
@@ -14,3 +15,4 @@ pub use charts::*;
 pub use formatters::*;
 pub use markdown::*;
 pub use node_card::*;
+pub use settings_list::*;

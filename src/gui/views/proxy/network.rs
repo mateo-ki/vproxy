@@ -76,10 +76,10 @@ impl VpnApp {
                         ui.add_space(6.0);
                         ui.label(
                             RichText::new(match self.proxy_config.mode {
-                                ProxyMode::System => "系统代理：自动配置系统 HTTP / SOCKS5 代理，适用于浏览器与支持系统代理的桌面应用，零系统侵入",
-                                ProxyMode::Tun => "TUN 模式：创建底层虚拟网卡接管全系统 IP 层流量，拦截 UDP/ICMP、游戏加速、终端命令全自动透明分流",
-                                ProxyMode::Both => "系统代理 + TUN 同时接管（底部控制条可分别开关）",
-                                ProxyMode::None => "未选用接管方式：仅 Mixed 端口在监听，供手动配置代理的应用使用",
+                                ProxyMode::System => "系统代理：接管系统 HTTP / SOCKS5 流量，适合浏览器与常用桌面应用",
+                                ProxyMode::Tun => "TUN 模式：创建虚拟网卡接管全系统 IP 流量（含 UDP / ICMP）",
+                                ProxyMode::Both => "同时启用系统代理与 TUN 模式",
+                                ProxyMode::None => "纯端口模式：仅监听本地 Mixed 端口",
                             })
                             .small()
                             .color(theme::text_secondary()),

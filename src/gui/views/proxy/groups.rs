@@ -333,21 +333,9 @@ impl VpnApp {
                 // 顶部：模式分段切换器 (YAML 声明式覆写 / Rhai 脚本动态覆写)
                 ui.horizontal(|ui| {
                     let tabs = [
-                        (
-                            OverrideEditorTab::Yaml,
-                            Icon::Terminal,
-                            "YAML 声明式覆写 (Clash Party)",
-                        ),
-                        (
-                            OverrideEditorTab::Rhai,
-                            Icon::Lightning,
-                            "Rhai 脚本动态覆写 (图灵完备)",
-                        ),
-                        (
-                            OverrideEditorTab::VpDsl,
-                            Icon::Rocket,
-                            "VP-Core 原生 DSL (.vp 声明式)",
-                        ),
+                        (OverrideEditorTab::Yaml, Icon::Terminal, "YAML 声明式覆写"),
+                        (OverrideEditorTab::Rhai, Icon::Lightning, "Rhai 脚本覆写"),
+                        (OverrideEditorTab::VpDsl, Icon::Rocket, "VP-Core DSL (.vp)"),
                     ];
                     macos_segmented_tabs(ui, &mut self.override_editor_tab, &tabs);
                 });
@@ -370,7 +358,7 @@ impl VpnApp {
                                 ui.horizontal(|ui| {
                                     icon_label(ui, Icon::Terminal, 14.0, theme::text_secondary());
                                     ui.label(
-                                        RichText::new("自定义配置覆写 (Clash Party / Verge 规范 YAML 深度合并)")
+                                        RichText::new("自定义配置覆写")
                                             .strong()
                                             .color(theme::text_primary()),
                                     );
@@ -380,7 +368,7 @@ impl VpnApp {
                                                 !self.proxy_busy,
                                                 icons::button_with_icon(Icon::Check, "保存配置", theme::accent_strong()),
                                             )
-                                            .on_hover_text("保存 YAML 覆写配置；支持热重载时立即应用")
+                                            .on_hover_text("保存 YAML 覆写配置")
                                             .clicked()
                                         {
                                             save_clicked = true;
@@ -388,9 +376,9 @@ impl VpnApp {
                                         if ui
                                             .add_enabled(
                                                 !self.proxy_busy,
-                                                icons::button_with_icon(Icon::Lightning, "一键载入推荐规则", theme::warning()),
+                                                icons::button_with_icon(Icon::Lightning, "载入常用模板", theme::warning()),
                                             )
-                                            .on_hover_text("填入经典的 AI、Google、多线下载与国内直连分流配置")
+                                            .on_hover_text("填入常用分流与直连规则模板")
                                             .clicked()
                                         {
                                             load_recommended = true;
@@ -409,7 +397,7 @@ impl VpnApp {
                                 ui.add_space(4.0);
                                 ui.label(
                                     RichText::new(
-                                        "遵循 Clash Party 规范对内核配置进行深度覆写。支持 +key 前插、key+ 追加、key 全量替换、! 强制覆盖与 <> 转义（如 +rules / +proxy-groups / dns / tun），保存后由内核应用结果确认是否生效："
+                                        "支持 YAML 深度合并与修饰符：+key 前插、key+ 追加、key! 覆盖。"
                                     )
                                     .small()
                                     .color(theme::muted()),
@@ -431,7 +419,7 @@ impl VpnApp {
                                             ui,
                                             &mut text,
                                             !self.proxy_busy,
-                                            "# 支持 Clash Party 规范 YAML 深度合并与修饰符\n# 示例 1: 前置插入高优先级规则\n+rules:\n  - DOMAIN-SUFFIX,openai.com,AI分组\n# 示例 2: 递归合并修改 DNS 配置\ndns:\n  +nameserver:\n    - 1.1.1.1\n# 示例 3: 强制覆盖整个配置块\ntun!:\n  enable: false",
+                                            "# 支持 +key 前插、key+ 追加与 key! 覆盖\n+rules:\n  - DOMAIN-SUFFIX,openai.com,AI分组\ndns:\n  +nameserver:\n    - 1.1.1.1\ntun!:\n  enable: false",
                                         );
                                         if editor.changed() {
                                             self.proxy_config.override_yaml = if text.trim().is_empty() {

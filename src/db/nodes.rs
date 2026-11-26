@@ -13,6 +13,7 @@ use std::str::FromStr;
 use uuid::Uuid;
 
 pub(crate) struct PreservedLatency {
+    pub(crate) id: String,
     pub(crate) latency_ms: Option<i64>,
     pub(crate) latency_ok: Option<i64>,
     pub(crate) download_kbps: Option<f64>,
@@ -694,6 +695,112 @@ impl Database {
         Ok(None)
     }
 
+    /// 读取主库当前锁定的活动节点 ID 与完整节点快照。
+    pub(crate) async fn pinned_selection(&self) -> (Option<String>, Option<Node>) {
+        match self.get_proxy_config().await {
+            Ok(cfg) => (cfg.selected_node_id, cfg.selected_node_snapshot),
+            Err(_) => (None, None),
+        }
+    }
+
+    /// 持久化当前正在使用或选中的节点 ID、名称与完整节点快照，防止订阅刷新或清理后丢失。
+    pub async fn persist_selected_node(
+        &self,
+        id: &str,
+        name: &str,
+        snapshot: Option<Node>,
+    ) -> Result<Option<Node>> {
+        let resolved = match snapshot {
+            Some(node) if node.id == id => Some(node),
+            _ => self.get_node(id).await?,
+        };
+        let mut cfg = self.get_proxy_config().await?;
+        cfg.selected_node_id = Some(id.to_owned());
+        cfg.selected_node_name = Some(
+            resolved
+                .as_ref()
+                .map(|n| n.name.clone())
+                .unwrap_or_else(|| name.to_owned()),
+        );
+        if let Some(ref node) = resolved {
+            cfg.selected_node_snapshot = Some(node.clone());
+        }
+        self.update_proxy_config(&cfg).await?;
+        Ok(resolved)
+    }
+
+    /// 仅在显式删除节点、清空库或删除对应订阅源时清理已记忆的活动节点。
+    pub async fn clear_selected_node_if(
+        &self,
+        only_if_source_id: Option<&str>,
+        only_if_node_id: Option<&str>,
+    ) -> Result<bool> {
+        let mut cfg = self.get_proxy_config().await?;
+        let matches_node = only_if_node_id
+            .is_none_or(|target_id| cfg.selected_node_id.as_deref() == Some(target_id));
+        let matches_source = only_if_source_id.is_none_or(|source_id| {
+            cfg.selected_node_snapshot
+                .as_ref()
+                .and_then(|snap| snap.source_id.as_deref())
+                == Some(source_id)
+        });
+        if !matches_node || !matches_source {
+            return Ok(false);
+        }
+        if cfg.selected_node_id.is_none() && cfg.selected_node_snapshot.is_none() {
+            return Ok(false);
+        }
+        cfg.selected_node_id = None;
+        cfg.selected_node_name = None;
+        cfg.selected_node_snapshot = None;
+        self.update_proxy_config(&cfg).await?;
+        Ok(true)
+    }
+
+    /// 按 ID、指纹、持久化快照三层依次解析活动节点，确保订阅重建或测速标红后仍可正常恢复。
+    pub async fn resolve_selected_node(
+        &self,
+        id: Option<&str>,
+        snapshot: Option<&Node>,
+    ) -> Result<Option<Node>> {
+        if let Some(node_id) = id.filter(|s| !s.trim().is_empty()) {
+            if let Some(node) = self.get_node(node_id).await? {
+                return Ok(Some(node));
+            }
+        }
+        let stored_fallback;
+        let effective_snapshot = match snapshot {
+            Some(snap) => Some(snap),
+            None => {
+                stored_fallback = self.pinned_selection().await.1;
+                stored_fallback.as_ref()
+            }
+        };
+        if let Some(snap) = effective_snapshot {
+            let fp = node_fingerprint(snap);
+            if let Some(ref src) = snap.source_id {
+                if let Some(found) = self
+                    .load_nodes(Some(src))
+                    .await?
+                    .into_iter()
+                    .find(|n| node_fingerprint(n) == fp)
+                {
+                    return Ok(Some(found));
+                }
+            }
+            if let Some(found) = self
+                .load_nodes(None)
+                .await?
+                .into_iter()
+                .find(|n| node_fingerprint(n) == fp)
+            {
+                return Ok(Some(found));
+            }
+            return Ok(Some(snap.clone()));
+        }
+        Ok(None)
+    }
+
     /// 批量按 id 取节点。调用方以前写 `for id in ids { get_node(id) }`，而 `get_node`
     /// 每次都要把 35 个分库扇出找归属 —— 5000 个 id 就是 17.5 万条查询。这里改成
     /// "每个分库一次 `id IN (...)`"，分库之间并发。
@@ -1103,11 +1210,16 @@ impl Database {
             let mut best: std::collections::HashMap<String, (String, i64)> =
                 std::collections::HashMap::new();
             let mut delete_ids: Vec<String> = Vec::new();
+            let (pinned_id, _) = self.pinned_selection().await;
 
             for r in rows {
                 let node = super::row_to_node(r);
                 let key = node_fingerprint(&node);
-                let score = super::dedupe_keep_score(&node);
+                let score = if pinned_id.as_deref() == Some(node.id.as_str()) {
+                    i64::MAX
+                } else {
+                    super::dedupe_keep_score(&node)
+                };
                 match best.get(&key) {
                     Some((keep_id, keep_score)) => {
                         if score > *keep_score {
@@ -1154,12 +1266,17 @@ impl Database {
     /// 淘汰长期失效节点（例如：连续测试失败且更新时间超过 days_old 天）
     pub async fn prune_stale_dead_nodes(&self, days_old: i64) -> Result<usize> {
         let cutoff = (Utc::now() - chrono::Duration::days(days_old)).to_rfc3339();
+        let (pinned_id, _) = self.pinned_selection().await;
+        let pinned_guard = pinned_id.unwrap_or_default();
         let mut deleted_total = 0;
         for (_scope, pool) in self.active_node_pools(None).await? {
-            let res = sqlx::query("DELETE FROM nodes WHERE latency_ok = 0 AND updated_at < ?1")
-                .bind(&cutoff)
-                .execute(&pool)
-                .await?;
+            let res = sqlx::query(
+                "DELETE FROM nodes WHERE latency_ok = 0 AND updated_at < ?1 AND id != ?2",
+            )
+            .bind(&cutoff)
+            .bind(&pinned_guard)
+            .execute(&pool)
+            .await?;
             deleted_total += res.rows_affected() as usize;
         }
         if deleted_total > 0 {
@@ -1169,6 +1286,8 @@ impl Database {
     }
 
     pub async fn delete_dead_nodes(&self) -> Result<u64> {
+        let (pinned_id, _) = self.pinned_selection().await;
+        let pinned_guard = pinned_id.unwrap_or_default();
         let mut deleted = 0;
         for scope in self.node_scopes(None).await? {
             let path = self.node_db_path(scope.as_deref());
@@ -1176,11 +1295,13 @@ impl Database {
                 let pool = self.open_node_pool(scope.as_deref()).await?;
                 let mut tx = pool.begin().await?;
                 let dead_ids: Vec<String> =
-                    sqlx::query_scalar("SELECT id FROM nodes WHERE latency_ok = 0")
+                    sqlx::query_scalar("SELECT id FROM nodes WHERE latency_ok = 0 AND id != ?")
+                        .bind(&pinned_guard)
                         .fetch_all(&mut *tx)
                         .await?;
                 if !dead_ids.is_empty() {
-                    let res = sqlx::query("DELETE FROM nodes WHERE latency_ok = 0")
+                    let res = sqlx::query("DELETE FROM nodes WHERE latency_ok = 0 AND id != ?")
+                        .bind(&pinned_guard)
                         .execute(&mut *tx)
                         .await?;
                     deleted += res.rows_affected();
@@ -1212,13 +1333,18 @@ impl Database {
             return Ok(0);
         }
 
+        let (pinned_id, _) = self.pinned_selection().await;
         let mut best: std::collections::HashMap<(String, u16), (String, i64)> =
             std::collections::HashMap::new();
         let mut delete_ids: Vec<String> = Vec::new();
 
         for node in all_nodes {
             let key = (node.server.trim().to_lowercase(), node.port);
-            let score = super::dedupe_keep_score(&node);
+            let score = if pinned_id.as_deref() == Some(node.id.as_str()) {
+                i64::MAX
+            } else {
+                super::dedupe_keep_score(&node)
+            };
             match best.get(&key) {
                 Some((keep_id, keep_score)) => {
                     if score > *keep_score {
@@ -1418,6 +1544,7 @@ impl Database {
     pub async fn delete_invalid_hosts(&self) -> Result<u64> {
         // 按分库分组批量删：以前是每个节点都 find_node_pool 扫一遍全部分库，
         // 19000 个节点 × 34 个库 ≈ 65 万次查询。
+        let (pinned_id, _) = self.pinned_selection().await;
         let mut by_scope: std::collections::HashMap<Option<String>, Vec<String>> =
             std::collections::HashMap::new();
         for (scope, pool) in self.active_node_pools(None).await? {
@@ -1425,12 +1552,13 @@ impl Database {
                 .fetch_all(&pool)
                 .await?;
             for row in rows {
+                let id: String = row.get("id");
+                if pinned_id.as_deref() == Some(id.as_str()) {
+                    continue;
+                }
                 let server: String = row.get("server");
                 if !crate::hostutil::is_public_proxy_host(&server) {
-                    by_scope
-                        .entry(scope.clone())
-                        .or_default()
-                        .push(row.get("id"));
+                    by_scope.entry(scope.clone()).or_default().push(id);
                 }
             }
         }
@@ -1520,7 +1648,7 @@ impl Database {
         };
 
         let existing = sqlx::query(
-            r#"SELECT n.protocol, n.server, n.port, n.name,
+            r#"SELECT n.id, n.protocol, n.server, n.port, n.name,
                       COALESCE(NULLIF(p.config, ''), n.config, '{}') AS config,
                       COALESCE(NULLIF(p.raw, ''), n.raw, '') AS raw,
                       n.country, n.created_at, n.updated_at,
@@ -1533,18 +1661,21 @@ impl Database {
         .bind(source_id)
         .fetch_all(&old_pool)
         .await?;
+        let (pinned_id, pinned_snapshot) = self.pinned_selection().await;
         let mut preserved: std::collections::HashMap<String, PreservedLatency> =
             std::collections::HashMap::with_capacity(existing.len());
         let mut leftovers: std::collections::HashMap<String, Node> =
             std::collections::HashMap::new();
+        let mut pinned_carry: Option<Node> = None;
         for row in existing {
+            let existing_id: String = row.get("id");
             let config_str: String = row.get("config");
             let config = serde_json::from_str(&config_str).unwrap_or(serde_json::json!({}));
             let tested_at: Option<String> = row.try_get("latency_tested_at").ok().flatten();
             let created_at: Option<String> = row.try_get("created_at").ok().flatten();
             let updated_at: Option<String> = row.try_get("updated_at").ok().flatten();
             let carried = Node {
-                id: String::new(),
+                id: existing_id.clone(),
                 source_id: Some(source_id.to_owned()),
                 protocol: row.get("protocol"),
                 name: row.get("name"),
@@ -1571,12 +1702,16 @@ impl Database {
                     .unwrap_or_else(Utc::now),
             };
             let key = node_fingerprint(&carried);
+            if pinned_id.as_deref() == Some(existing_id.as_str()) && !batch.contains_key(&key) {
+                pinned_carry = Some(carried.clone());
+            }
             if keep_missing && !batch.contains_key(&key) {
                 leftovers.insert(key.clone(), carried.clone());
             }
             preserved.insert(
                 key,
                 PreservedLatency {
+                    id: existing_id,
                     latency_ms: carried.latency_ms,
                     latency_ok: carried.latency_ok.map(|value| value as i64),
                     download_kbps: carried.download_kbps,
@@ -1586,6 +1721,15 @@ impl Database {
                 },
             );
         }
+        if pinned_carry.is_none() {
+            if let Some(snap) = pinned_snapshot.filter(|snap| {
+                pinned_id.as_deref() == Some(snap.id.as_str())
+                    && snap.source_id.as_deref() == Some(source_id)
+                    && !batch.contains_key(&node_fingerprint(snap))
+            }) {
+                pinned_carry = Some(snap);
+            }
+        }
 
         let mut inserted = 0usize;
         let mut tx = temp_pool.begin().await?;
@@ -1594,6 +1738,9 @@ impl Database {
             let mut fresh = (*n).clone();
             fresh.source_id = Some(source_id.to_owned());
             if let Some(p) = p {
+                if !p.id.is_empty() {
+                    fresh.id = p.id.clone();
+                }
                 fresh.latency_ms = p.latency_ms;
                 fresh.latency_ok = p.latency_ok.map(|value| value != 0);
                 fresh.download_kbps = p.download_kbps;
@@ -1605,12 +1752,29 @@ impl Database {
             inserted += 1;
         }
 
-        // 累积模式：这一次页面上看不见的旧节点原样搬回去（延迟记录也一起搬）。
+        // 累积模式：这一次页面上看不见的旧节点原样搬回去（ID 与延迟记录一并保留）。
         let mut carried_over = 0usize;
-        for (_, old) in leftovers {
+        for (key, old) in leftovers {
             let mut carry = old;
-            carry.id = Uuid::new_v4().to_string();
+            if carry.id.is_empty() {
+                carry.id = Uuid::new_v4().to_string();
+            }
+            if pinned_carry
+                .as_ref()
+                .is_some_and(|p| node_fingerprint(p) == key)
+            {
+                pinned_carry = None;
+            }
             Self::insert_node(&mut tx, &carry).await?;
+            carried_over += 1;
+        }
+        // 非累积刷新时：如果上游临时漏了正在使用中的节点，直接保留它，避免使用中途丢失。
+        if let Some(mut protected) = pinned_carry {
+            if protected.id.is_empty() {
+                protected.id = Uuid::new_v4().to_string();
+            }
+            protected.source_id = Some(source_id.to_owned());
+            Self::insert_node(&mut tx, &protected).await?;
             carried_over += 1;
         }
 

@@ -487,3 +487,125 @@ mod local_time_tests {
         assert_eq!(clock_of("昨天下午"), "--:--");
     }
 }
+
+#[cfg(test)]
+mod settings_redesign_tests {
+    use super::super::{
+        pill_toggle, segmented_pills, settings_divider, settings_group, settings_row, stepper_u32,
+    };
+    use eframe::egui::{self, Frame, Margin, RawInput, Rect, Vec2};
+
+    #[test]
+    fn grouped_row_controls_stay_inside_panel_bounds() {
+        let ctx = egui::Context::default();
+        crate::gui::theme::apply(&ctx, crate::gui::theme::DEFAULT_THEME, true);
+        let mut enabled = true;
+        let mut mode = 0_u8;
+        let mut timeout = 2000_u32;
+
+        for width in [1200.0_f32, 620.0] {
+            let input = RawInput {
+                screen_rect: Some(Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    Vec2::new(width, 800.0),
+                )),
+                ..Default::default()
+            };
+            let mut row_right = 0.0_f32;
+            let _ = crate::gui::run_test_ui(&ctx, input, |ui| {
+                egui::CentralPanel::default()
+                    .frame(Frame::NONE.inner_margin(Margin::symmetric(18, 14)))
+                    .show(ui, |ui| {
+                        settings_group(ui, "启动与窗口", None, |ui| {
+                            settings_row(
+                                ui,
+                                "r1",
+                                "开机自启",
+                                Some("登录后自动运行"),
+                                |ui| {
+                                    pill_toggle(ui, &mut enabled);
+                                },
+                            );
+                            settings_divider(ui);
+                            settings_row(
+                                ui,
+                                "r2",
+                                "关闭行为",
+                                Some("点击关闭按钮时"),
+                                |ui| {
+                                    segmented_pills(
+                                        ui,
+                                        &mut mode,
+                                        &[(0, "托盘运行"), (1, "直接退出")],
+                                    );
+                                },
+                            );
+                            settings_divider(ui);
+                            settings_row(
+                                ui,
+                                "r3",
+                                "连接超时",
+                                Some("单节点探测上限"),
+                                |ui| {
+                                    stepper_u32(ui, &mut timeout, 300..=15_000, 200, " ms");
+                                },
+                            );
+                            row_right = row_right.max(ui.min_rect().max.x);
+                        });
+                    });
+            });
+            assert!(
+                row_right <= width - 18.0 + 1.0,
+                "width={width}: row_right={row_right:.1} 超出面板右边界"
+            );
+        }
+    }
+
+    #[test]
+    fn default_settings_protect_system_proxy_and_drop_requested_copy() {
+        assert!(crate::models::AppSettings::default().auto_rearm_system_proxy);
+        let general_src = include_str!("general.rs");
+        let automation_src = include_str!("automation.rs");
+        assert!(!general_src.contains("当前已以管理员权限运行"));
+        assert!(!automation_src.contains("FlClash"));
+    }
+
+    #[test]
+    fn segmented_pills_keep_left_to_right_order_inside_right_aligned_row() {
+        let ctx = egui::Context::default();
+        crate::gui::theme::apply(&ctx, crate::gui::theme::DEFAULT_THEME, false);
+        let mut choice = 0_u8;
+        let input = RawInput {
+            screen_rect: Some(Rect::from_min_size(
+                egui::Pos2::ZERO,
+                Vec2::new(900.0, 400.0),
+            )),
+            ..Default::default()
+        };
+        let out = crate::gui::run_test_ui(&ctx, input, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
+                settings_group(ui, "外观", None, |ui| {
+                    settings_row(ui, "mode", "明暗模式", None, |ui| {
+                        segmented_pills(ui, &mut choice, &[(0, "浅色"), (1, "深色")]);
+                    });
+                });
+            });
+        });
+        let mut light_x = None;
+        let mut dark_x = None;
+        for s in &out.shapes {
+            if let egui::Shape::Text(t) = &s.shape {
+                let text = t.galley.text();
+                if text == "浅色" {
+                    light_x = Some(t.pos.x);
+                } else if text == "深色" {
+                    dark_x = Some(t.pos.x);
+                }
+            }
+        }
+        assert!(
+            light_x.zip(dark_x).is_some_and(|(l, d)| l < d && l > 650.0),
+            "分段选项应紧贴右侧且保持左到右顺序: light_x={light_x:?} dark_x={dark_x:?}"
+        );
+    }
+}

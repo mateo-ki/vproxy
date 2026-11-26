@@ -313,6 +313,8 @@ pub async fn ensure_meow_home_geo(home: &Path, proxy_url: Option<&str>) -> Resul
                 .timeout(Duration::from_secs(20));
             if let Some(proxy_url) = proxy_url {
                 builder = builder.proxy(reqwest::Proxy::all(proxy_url)?);
+            } else {
+                builder = builder.no_proxy();
             }
             let client = builder.build()?;
             let mut failures = Vec::new();
@@ -499,6 +501,8 @@ pub async fn provision_files(
         .timeout(Duration::from_secs(180));
     if let Some(proxy_url) = proxy_url {
         builder = builder.proxy(reqwest::Proxy::all(proxy_url)?);
+    } else {
+        builder = builder.no_proxy();
     }
     let client = builder.build()?;
 

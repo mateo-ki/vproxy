@@ -1,6 +1,6 @@
 use crate::gui::icons::{icon_label, Icon};
 use crate::gui::theme;
-use crate::gui::widgets::{card_frame, format_bytes, primary_btn, status_badge};
+use crate::gui::widgets::{format_bytes, primary_btn, status_badge};
 use crate::gui::VpnApp;
 use eframe::egui::{self, RichText, Ui};
 use std::path::{Path, PathBuf};
@@ -433,156 +433,100 @@ impl VpnApp {
         let total_size = self.cleanup_state.total_size();
         let total_count = self.cleanup_state.total_count();
 
-        // 1. 顶部总览卡片
-        card_frame().show(ui, |ui| {
-            ui.horizontal(|ui| {
-                icon_label(ui, Icon::Trash, 20.0, theme::accent());
-                ui.add_space(4.0);
-                ui.vertical(|ui| {
-                    ui.horizontal(|ui| {
-                        ui.label(RichText::new("系统存储与历史版本清理").strong().size(16.5));
-                        ui.add_space(6.0);
-                        let badge_text = if total_count > 0 {
-                            format!("{total_count} 项可清理 · 共 {}", format_bytes(total_size))
-                        } else {
-                            "系统环境非常整洁".to_string()
-                        };
-                        let badge_color = if total_count > 0 {
-                            theme::warning()
-                        } else {
-                            theme::success()
-                        };
-                        status_badge(ui, &badge_text, badge_color);
-                    });
-                    ui.label(
-                        RichText::new("一键扫描并清理覆盖安装产生的历史可执行文件备份、在线更新安装包暂存、滚动日志与备份快照。")
-                            .size(11.5)
-                            .color(theme::muted()),
-                    );
-                });
+        let summary_hint = if let Some((cnt, bytes, at)) = self.cleanup_state.last_cleaned_summary {
+            if at.elapsed().as_secs() < 30 {
+                format!("本次已清理 {cnt} 项，释放 {}", format_bytes(bytes))
+            } else if total_count > 0 {
+                format!("{total_count} 项可清理，共 {}", format_bytes(total_size))
+            } else {
+                "工作目录整洁，暂无可清理残留".into()
+            }
+        } else if total_count > 0 {
+            format!("{total_count} 项可清理，共 {}", format_bytes(total_size))
+        } else {
+            "工作目录整洁，暂无可清理残留".into()
+        };
 
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+        super::settings_group(ui, "存储清理", None, |ui| {
+            super::settings_row(
+                ui,
+                "cleanup_overview",
+                "历史备份与临时缓存",
+                Some(&summary_hint),
+                |ui| {
                     if ui
-                        .add_enabled(total_count > 0, primary_btn("一键清理全部 🧹"))
-                        .on_hover_text("安全清理下方发现的所有历史版本镜像与临时缓存文件")
+                        .add_enabled(total_count > 0, primary_btn("一键清理全部"))
+                        .on_hover_text("安全清理旧程序镜像、更新包与临时缓存")
                         .clicked()
                     {
                         let (cnt, bytes) = self.cleanup_state.clean_all();
-                        self.status = format!("清理完成：成功删除 {cnt} 个历史文件，释放了 {}", format_bytes(bytes));
+                        self.status = format!(
+                            "清理完成：成功删除 {cnt} 个历史文件，释放了 {}",
+                            format_bytes(bytes)
+                        );
                     }
-
-                    if ui
-                        .button("重新扫描 🔄")
-                        .on_hover_text("重新核对本机程序目录与数据目录的存储占用")
-                        .clicked()
-                    {
+                    if ui.button("重新扫描").clicked() {
                         self.cleanup_state.scan();
                     }
-                });
-            });
-
-            // 清理成果即时提示条
-            if let Some((cnt, bytes, at)) = self.cleanup_state.last_cleaned_summary {
-                if at.elapsed().as_secs() < 30 {
-                    ui.add_space(8.0);
-                    egui::Frame::NONE
-                        .fill(theme::panel_hover())
-                        .corner_radius(egui::CornerRadius::same(6))
-                        .inner_margin(egui::Margin::symmetric(10, 6))
-                        .show(ui, |ui| {
-                            ui.horizontal(|ui| {
-                                icon_label(ui, Icon::Check, 14.0, theme::success());
-                                ui.label(
-                                    RichText::new(format!(
-                                        "本次已成功清理 {cnt} 项历史残留，共为您释放了 {} 宝贵磁盘空间！",
-                                        format_bytes(bytes)
-                                    ))
-                                    .size(12.0)
-                                    .color(theme::text_primary()),
-                                );
-                            });
-                        });
-                }
-            }
-
-            if total_count == 0 && self.cleanup_state.scanned {
-                ui.add_space(8.0);
-                egui::Frame::NONE
-                    .fill(theme::panel_hover())
-                    .corner_radius(egui::CornerRadius::same(6))
-                    .inner_margin(egui::Margin::symmetric(10, 6))
-                    .show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            icon_label(ui, Icon::Check, 14.0, theme::success());
-                            ui.label(
-                                RichText::new("未检测到任何多余的历史版本副本或多余缓存，无需进行额外清理。")
-                                    .size(12.0)
-                                    .color(theme::text_secondary()),
-                            );
-                        });
-                    });
-            }
+                },
+            );
         });
 
-        ui.add_space(8.0);
+        super::settings_group(
+            ui,
+            "分类明细",
+            Some("悬停分类名可查看清理范围"),
+            |ui| {
+                for (idx, category) in CleanupCategory::ALL.into_iter().enumerate() {
+                    if idx > 0 {
+                        super::settings_divider(ui);
+                    }
+                    let cat_count = self.cleanup_state.category_count(category);
+                    let cat_size = self.cleanup_state.category_size(category);
+                    let items: Vec<CleanupItem> = self
+                        .cleanup_state
+                        .items
+                        .iter()
+                        .filter(|i| i.category == category)
+                        .cloned()
+                        .collect();
 
-        // 2. 分类详情列表
-        for category in CleanupCategory::ALL {
-            let cat_count = self.cleanup_state.category_count(category);
-            let cat_size = self.cleanup_state.category_size(category);
-            let items: Vec<CleanupItem> = self
-                .cleanup_state
-                .items
-                .iter()
-                .filter(|i| i.category == category)
-                .cloned()
-                .collect();
+                    let mut clean_category_clicked = false;
+                    let mut delete_target = None;
 
-            let mut clean_category_clicked = false;
-            let mut delete_target = None;
-
-            card_frame().show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    icon_label(ui, category.icon(), 16.0, theme::accent());
-                    ui.vertical(|ui| {
-                        ui.horizontal(|ui| {
-                            ui.label(RichText::new(category.title()).strong().size(14.5));
-                            ui.add_space(4.0);
-                            if cat_count > 0 {
-                                status_badge(
-                                    ui,
-                                    &format!("{cat_count} 项 · {}", format_bytes(cat_size)),
-                                    theme::warning(),
-                                );
-                            } else {
-                                status_badge(ui, "暂无残留", theme::muted());
+                    ui.add_space(6.0);
+                    ui.horizontal(|ui| {
+                        icon_label(ui, category.icon(), 15.0, theme::accent());
+                        let title_resp = ui.label(RichText::new(category.title()).size(13.0));
+                        title_resp.on_hover_text(category.description());
+                        if cat_count > 0 {
+                            status_badge(
+                                ui,
+                                &format!("{cat_count} 项 · {}", format_bytes(cat_size)),
+                                theme::warning(),
+                            );
+                        } else {
+                            status_badge(ui, "暂无残留", theme::muted());
+                        }
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui
+                                .add_enabled(cat_count > 0, egui::Button::new("清理此类"))
+                                .clicked()
+                            {
+                                clean_category_clicked = true;
                             }
                         });
-                        ui.label(
-                            RichText::new(category.description())
-                                .size(11.0)
+                    });
+
+                    if !items.is_empty() {
+                        ui.add_space(4.0);
+                        egui::CollapsingHeader::new(
+                            RichText::new(format!("查看 {cat_count} 个文件明细"))
+                                .small()
                                 .color(theme::muted()),
-                        );
-                    });
-
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui
-                            .add_enabled(cat_count > 0, eframe::egui::Button::new("清理此类"))
-                            .on_hover_text(format!("一键清理所有「{}」", category.title()))
-                            .clicked()
-                        {
-                            clean_category_clicked = true;
-                        }
-                    });
-                });
-
-                // 若有待清理文件，呈现具体文件条目
-                if !items.is_empty() {
-                    ui.add_space(6.0);
-                    egui::Frame::NONE
-                        .fill(theme::panel_hover())
-                        .corner_radius(egui::CornerRadius::same(6))
-                        .inner_margin(egui::Margin::symmetric(8, 6))
+                        )
+                        .id_salt(("cleanup_cat_items", idx))
+                        .default_open(false)
                         .show(ui, |ui| {
                             for item in &items {
                                 ui.horizontal(|ui| {
@@ -592,33 +536,23 @@ impl VpnApp {
                                             .size(11.5)
                                             .color(theme::text_primary()),
                                     );
-                                    ui.add_space(6.0);
                                     ui.label(
                                         RichText::new(format_bytes(item.size))
                                             .size(11.0)
                                             .color(theme::muted()),
                                     );
-
                                     ui.with_layout(
                                         egui::Layout::right_to_left(egui::Align::Center),
                                         |ui| {
                                             if ui
                                                 .small_button("删除")
-                                                .on_hover_text(format!(
-                                                    "永久删除该文件：{}",
-                                                    item.path.display()
-                                                ))
+                                                .on_hover_text(item.path.display().to_string())
                                                 .clicked()
                                             {
                                                 delete_target = Some(item.path.clone());
                                             }
-
                                             if let Some(parent) = item.path.parent() {
-                                                if ui
-                                                    .small_button("定位")
-                                                    .on_hover_text("在资源管理器中定位所在文件夹")
-                                                    .clicked()
-                                                {
+                                                if ui.small_button("定位").clicked() {
                                                     let _ = crate::platform::shell_open(parent);
                                                 }
                                             }
@@ -627,43 +561,26 @@ impl VpnApp {
                                 });
                             }
                         });
+                    }
+                    ui.add_space(6.0);
+
+                    if clean_category_clicked {
+                        let (cnt, bytes) = self.cleanup_state.clean_category(category);
+                        self.status = format!(
+                            "已清理 {} 项「{}」，释放了 {}",
+                            cnt,
+                            category.title(),
+                            format_bytes(bytes)
+                        );
+                    }
+                    if let Some(target) = delete_target {
+                        if self.cleanup_state.clean_single(&target) {
+                            self.status = format!("已删除：{}", target.display());
+                        }
+                    }
                 }
-            });
-
-            if clean_category_clicked {
-                let (cnt, bytes) = self.cleanup_state.clean_category(category);
-                self.status = format!(
-                    "已清理 {} 项「{}」，释放了 {}",
-                    cnt,
-                    category.title(),
-                    format_bytes(bytes)
-                );
-            }
-            if let Some(target) = delete_target {
-                if self.cleanup_state.clean_single(&target) {
-                    self.status = format!("已删除：{}", target.display());
-                }
-            }
-
-            ui.add_space(6.0);
-        }
-
-        // 3. 底部安全提示卡片
-        card_frame().show(ui, |ui| {
-            ui.horizontal(|ui| {
-                icon_label(ui, Icon::Check, 15.0, theme::accent());
-                ui.vertical(|ui| {
-                    ui.label(RichText::new("系统防护与清理保障").strong().size(13.0));
-                    ui.label(
-                        RichText::new(
-                            "• 当前运行的程序实体 (vproxy.exe)、活动状态日志与核心数据资产数据库 (vproxy.db) 受到底层受控锁定，绝不会被误清理。\n• 历史程序备份镜像 (.old) 是 Windows 自动更新替换或覆盖安装时生成的副本，在当前版本使用稳定后即可放心一键清除以释放空间。",
-                        )
-                        .size(11.0)
-                        .color(theme::muted()),
-                    );
-                });
-            });
-        });
+            },
+        );
     }
 }
 

@@ -136,9 +136,9 @@ impl VpnApp {
             let btn_resp = ui
                 .add_enabled(!busy, Self::button_small("一键更新 Geo 规则"))
                 .on_hover_text(if proxy_running {
-                    "向当前运行的内核发送指令在线拉取并热重载最新的 Geo 数据库"
+                    "更新并热重载 Geo 数据库"
                 } else {
-                    "直连极速 CDN 高速拉取并保存最新的 GeoIP 与 GeoSite 数据库（无需开启代理）"
+                    "直连下载最新 GeoIP 与 GeoSite 数据库"
                 });
             if btn_resp.clicked() {
                 *action = RulesHeaderAction::UpdateGeo;
@@ -597,9 +597,9 @@ impl VpnApp {
                         });
                         ui.add_space(4.0);
                         let hint = if is_sub {
-                            "当前选用订阅模板的分流规则（支持在此直接调整或添加自定义例外，保存后由内核应用结果确认是否生效）："
+                            "订阅分流规则（可在此追加自定义例外）："
                         } else {
-                            "内置全自动分流引擎已接管国内直连与海外代理，开箱即用。在此处添加高优先级自定义例外规则（每行一条，支持 - 前缀与 # 注释）："
+                            "高优先级自定义例外规则（每行一条，支持 - 前缀与 # 注释）："
                         };
                         ui.label(
                             RichText::new(hint)

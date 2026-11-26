@@ -51,6 +51,105 @@ async fn persists_selected_node_on_restart() {
 }
 
 #[tokio::test]
+async fn pinned_active_node_survives_source_refresh_speedtest_failure_and_cleanup() {
+    let dir = std::env::temp_dir().join(format!("vproxy-pinned-node-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let db_path = dir.join("test.db");
+    let db = Database::connect(db_path.to_str().unwrap()).await.unwrap();
+
+    let src = db
+        .create_source(CreateSource {
+            name: "Pinned Test Source".into(),
+            url_template: "https://example.com/sub".into(),
+            enabled: true,
+            remark: None,
+            user_agent: None,
+        })
+        .await
+        .unwrap();
+
+    let now = chrono::Utc::now();
+    let make_node = |id: &str, name: &str, server: &str, port: u16| Node {
+        id: id.to_string(),
+        source_id: Some(src.id.clone()),
+        protocol: "vless".into(),
+        name: name.to_string(),
+        server: server.to_string(),
+        port,
+        raw: format!("vless://uuid@{server}:{port}#{name}"),
+        config: serde_json::json!({"name": name, "type": "vless", "server": server, "port": port}),
+        country: Some("HK".into()),
+        latency_ms: Some(45),
+        latency_ok: Some(true),
+        download_kbps: None,
+        latency_kernel: Some("mihomo".into()),
+        latency_test_kind: Some(crate::models::GOOGLE_PROXY_TEST_KIND.into()),
+        latency_tested_at: Some(now),
+        created_at: now,
+        updated_at: now,
+    };
+
+    let active = make_node("pinned-hk-01", "香港-正在用", "198.51.100.10", 443);
+    let other = make_node("other-sg-01", "新加坡-备用", "198.51.100.20", 443);
+    db.replace_source_nodes(&src.id, &[active.clone(), other.clone()])
+        .await
+        .unwrap();
+
+    // 1. 使用节点后立即持久化 ID + 完整快照。
+    db.persist_selected_node(&active.id, &active.name, Some(active.clone()))
+        .await
+        .unwrap();
+
+    // 2. 订阅更新返回同名同指纹节点（新生成随机 ID）+ 漏传正在用节点时，均不丢失。
+    let refreshed_other = make_node("brand-new-random-uuid", "新加坡-备用", "198.51.100.20", 443);
+    db.replace_source_nodes(&src.id, &[refreshed_other])
+        .await
+        .unwrap();
+
+    // 其他节点保留原有 ID，正在用节点也被保护保留并可直接按 ID 取回。
+    assert!(
+        db.get_node(&other.id).await.unwrap().is_some(),
+        "订阅刷新同指纹节点应保留既有 ID"
+    );
+    let kept = db
+        .get_node(&active.id)
+        .await
+        .unwrap()
+        .expect("上游本次未返回时，正使用的节点仍应被保留");
+    assert_eq!(kept.name, active.name);
+
+    // 3. 测速失败标为不可用 + 执行清理（delete_dead_nodes / dedupe_nodes）不得误删当前使用节点。
+    db.update_node_speed(
+        &active.id,
+        false,
+        None,
+        None,
+        Some("mihomo"),
+        Some(crate::models::GOOGLE_PROXY_TEST_KIND),
+    )
+    .await
+    .unwrap();
+    db.delete_dead_nodes().await.unwrap();
+    db.prune_stale_dead_nodes(0).await.unwrap();
+    db.dedupe_nodes().await.unwrap();
+
+    let cfg = db.get_proxy_config().await.unwrap();
+    let resolved = db
+        .resolve_selected_node(
+            cfg.selected_node_id.as_deref(),
+            cfg.selected_node_snapshot.as_ref(),
+        )
+        .await
+        .unwrap()
+        .expect("测速失败与清理后依然必须找回原使用节点");
+    assert_eq!(resolved.id, active.id);
+    assert_eq!(resolved.server, active.server);
+
+    drop(db);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test]
 async fn persists_custom_mixed_port_including_7890() {
     let path = std::env::temp_dir().join(format!("vproxy-proxy-port-{}.db", Uuid::new_v4()));
     let db = Database::connect(path.to_str().unwrap()).await.unwrap();

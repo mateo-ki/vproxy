@@ -152,6 +152,28 @@ pub struct Node {
     pub updated_at: DateTime<Utc>,
 }
 
+impl Node {
+    /// 生成精简摘要供列表渲染与内存状态缓存复用。
+    pub fn summary(&self) -> NodeSummary {
+        NodeSummary {
+            id: self.id.clone(),
+            source_id: self.source_id.clone(),
+            protocol: self.protocol.clone(),
+            name: self.name.clone(),
+            server: self.server.clone(),
+            port: self.port,
+            country: self.country.clone(),
+            latency_ms: self.latency_ms,
+            latency_ok: self.latency_ok,
+            download_kbps: self.download_kbps,
+            latency_kernel: self.latency_kernel.clone(),
+            latency_test_kind: self.latency_test_kind.clone(),
+            latency_tested_at: self.latency_tested_at,
+            updated_at: self.updated_at,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NodeSummary {
     pub id: String,
@@ -523,7 +545,7 @@ impl Default for AppSettings {
             auto_failover: false,
             insider_channel: false,
             speedtest_auto_refill: false,
-            auto_rearm_system_proxy: false,
+            auto_rearm_system_proxy: true,
             auto_prepare_kernel: true,
             // 新装默认管理员启动（TUN 模式需要）；main.rs 启动时才请求提权，headless/诊断壳不受影响。
             launch_as_admin: true,

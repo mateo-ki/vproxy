@@ -2169,6 +2169,26 @@ impl ProxyManager {
             crate::platform::is_elevated(),
             runtime.options.mode,
         );
+        // 外部工具（如 v2rayN）常占用 9090 控制端口；控制端口属于本地 IPC，被占用时自动改绑空闲端口。
+        let ctrl_port = runtime.options.controller_port;
+        if ctrl_port > 0
+            && required_startup_ports(kernel, &runtime.options).contains(&ctrl_port)
+            && ensure_startup_port_available(ctrl_port, port_preflight)
+                .await
+                .is_err()
+        {
+            let mut avoid = vec![runtime.options.mixed_port];
+            avoid.extend(runtime.options.mapping_ports_with_listener());
+            if let Ok(fallback) = allocate_fallback_controller_port(&avoid).await {
+                tracing::info!(
+                    old_port = ctrl_port,
+                    new_port = fallback,
+                    "控制器端口被外部进程占用，自动切换至空闲端口"
+                );
+                runtime.options.controller_port = fallback;
+                runtime.status.controller_port = fallback;
+            }
+        }
         for port in required_startup_ports(kernel, &runtime.options) {
             if let Err(error) = ensure_startup_port_available(port, port_preflight).await {
                 mark_failed(&mut runtime, error.to_string());
@@ -4056,6 +4076,19 @@ pub async fn ensure_port_available(port: u16) -> Result<()> {
     } else {
         Err(anyhow!("代理端口 {port} 已被占用: {error}"))
     }
+}
+
+/// 当默认或配置的控制器端口（例如 9090）被外部软件占用时，分配一个空闲回环端口。
+pub(crate) async fn allocate_fallback_controller_port(avoid: &[u16]) -> Result<u16> {
+    for _ in 0..16 {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).await?;
+        let port = listener.local_addr()?.port();
+        drop(listener);
+        if port > 0 && !avoid.contains(&port) {
+            return Ok(port);
+        }
+    }
+    Err(anyhow!("无法分配空闲控制器端口"))
 }
 
 pub fn required_startup_ports(kernel: KernelKind, options: &MihomoConfigOptions) -> Vec<u16> {

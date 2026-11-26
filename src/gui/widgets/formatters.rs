@@ -222,19 +222,15 @@ pub fn routing_mode_description(mode: RoutingMode) -> &'static str {
 
 pub fn routing_mode_detail(mode: RoutingMode) -> &'static str {
     match mode {
-        RoutingMode::Rule => "Clash Verge 同款全自动智能分流：自动识别大陆网站直连、国外网站代理、广告拦截与局域网放行。支持在下方自定义例外规则。",
-        RoutingMode::ChinaDirect => {
-            "自动使用广告、GeoSite CN 与 GeoIP CN 规则；在线数据由对应内核更新。"
+        RoutingMode::Rule => {
+            "智能分流：自动识别国内直连、海外代理、局域网与广告拦截，支持自定义例外规则。"
         }
-        RoutingMode::GfwList => "仅 GFW 规则集命中的站点使用代理，其他流量直接连接。",
-        RoutingMode::Global => "忽略分流规则，所有可代理流量都使用当前节点。",
-        RoutingMode::Direct => "忽略分流规则，代理内核保持运行但流量全部直连。",
-        RoutingMode::Subscription => {
-            "直接复用所选订阅的原生分流规则与策略组架构，节点动态接入当前聚合节点池。支持在下方自定义例外规则。"
-        }
-        RoutingMode::Chain => {
-            "链式代理模式：流量经由前置中继节点二次转发至落地节点，增强隐蔽性与连通性。"
-        }
+        RoutingMode::ChinaDirect => "自动启用广告、GeoSite CN 与 GeoIP CN 规则。",
+        RoutingMode::GfwList => "仅 GFW 规则集命中的站点走代理，其余直连。",
+        RoutingMode::Global => "忽略分流规则，所有可代理流量走当前节点。",
+        RoutingMode::Direct => "忽略分流规则，内核保持运行但流量全部直连。",
+        RoutingMode::Subscription => "复用所选订阅的分流规则与策略组，支持自定义例外规则。",
+        RoutingMode::Chain => "流量经前置中继节点转发至落地节点。",
     }
 }
 
