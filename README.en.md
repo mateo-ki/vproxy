@@ -31,7 +31,9 @@ A high-performance, modern cross-platform proxy workstation built with Rust and 
 
 ### 🧠 Smart Policy Routing
 - Kernel-layer routing: `PROXY(select) -> Auto(url-test) -> Fallback`, seamlessly switching egress without reloading configurations, with bidirectional sync between UI active node state and live kernel `PROXY` egress
+- Persistent active-node snapshot (`selected_node_snapshot`) protecting selected/running nodes across subscription refreshes, failed speedtests, and dead-node cleanups
 - Isolated IP risk & geolocation inspection dialog for any node without switching the active running proxy node or overwriting homepage egress status
+- External proxy coexistence guard: default system-proxy anti-drift check (5s interval), automatic fallback controller port allocation on conflict, and strict `.no_proxy()` isolation for internal direct/control requests
 - Application-layer failover scheduler: EWMA smoothed latency + circuit breaker + hysteresis + cooldown intervals
 - Built-in smart policy groups: AI service unlocking, US streaming optimization, multi-thread download aggregation, and DIRECT bypass for domestic traffic
 
@@ -41,6 +43,7 @@ A high-performance, modern cross-platform proxy workstation built with Rust and 
 - Full import/export support for Clash rules, JSON arrays, and Clash Verge snippets
 
 ### 🎨 User Interface & Internationalization (i18n)
+- Minimalist grouped-card **Settings** and **About** pages (independent release history rollback & download state, one-click diagnostics summary copy, collapsible local paths)
 - Multilingual interface supporting **English**, **Simplified Chinese**, **Traditional Chinese**, and **Japanese**
 - Auto-detects system locale (`LANG` / `LC_*`) and falls back to English in non-Chinese environments
 - 5 curated color themes + dark mode toggle
