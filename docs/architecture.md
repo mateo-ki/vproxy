@@ -32,9 +32,9 @@ Mihomo YAML │ sing-box JSON │ Xray JSON │ VP-Core DSL(.vp) │ Meow 配置
 | `src/kernel` | 内核资产管理、版本检测、更新器（含历史版本列表与按 Tag SHA-256 安装替换）、**内核选路**（§5） |
 | `src/proxy/compiler` | 每内核一个编译器：`mihomo` / `sing_box` / `xray` / `vp_core`（VP-DSL）/ `meow` |
 | `src/proxy/ir` | 内核无关的编译中间层（RoutingPlan / OutboundKind / TransportSpec） |
-| `src/proxy` | 进程生命周期、端口就绪与控制器端口避让、降级状态、系统代理防漂移守护 |
+| `src/proxy` | 进程生命周期、端口就绪与控制器端口避让、多 URL 回退探活、降级状态、系统代理防漂移及 Windows 多宿主 DNS 守护 |
 | `src/speedtest`、`src/proxy_probe.rs` | TCP 预筛 + 多内核并发真实握手测速（Mihomo / VP-Core `vpcore test`）+ 单节点实测 |
-| `src/gui`、`src/api` | egui 界面（极简分组卡片化设置与关于页、多语言、多主题、弹窗状态隔离的 IP 检测与活动节点双向同步）与本地 HTTP API（bearer 鉴权，含 Clash 兼容 `/proxies` 与 `/delay` 探针接口） |
+| `src/gui`、`src/api` | egui 界面（极简设置/关于/清理、单屏四步路由与 DNS 链路追踪、网络体检 DNS 防泄露审计、规则与 DNS 分组过滤、活动节点双向同步）与本地 HTTP API（bearer 鉴权，含 Clash 兼容 `/proxies` 与 `/delay` 探针接口） |
 | `src/db` | 主库 `vproxy.db` + 按源分片的 `data/subscriptions/*.db`（含选中节点完整快照持久化和刷新/清理防误删保护） |
 
 ## 3. 协议支持矩阵

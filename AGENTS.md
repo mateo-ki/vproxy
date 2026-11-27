@@ -28,6 +28,11 @@ pre-commit 钩子（core.hooksPath=scripts/githooks）机械强制。本地必�
 - 更新检查依赖 api.github.com，限流/被掐时走离线缓存或兜底常量——兜底常量（VPCORE_TAG 等）随每次上游发版同步 bump，否则兜底会装回旧版
 - cfg 平台专属代码（`#[cfg(target_os = "macos")]` / unix 块）不受 Windows 门禁编译覆盖——等价改写后必须全库 grep 同类构造点/调用点复核（ProxyChild 包 Box 改造就漏了 mac 测试辅助 1 处，mac CI 连挂 4 次）
 
+## 打包纪律
+
+- 本地 Windows 打包只生成安装版（`cargo build --release --bin vproxy` + `& "D:\software\InnoSetup6\ISCC.exe" installer/vproxy.iss`）及仅含 `*-setup.exe` 的 `dist/sha256-<version>.txt`
+- **本地打包跳过便携版（不生成 `*-windows-x64-portable.zip`）**，除非用户明确要求；便携版由 CI（`.github/workflows/windows.yml`）按需产出
+
 ## 提交纪律
 
 - 一个主题一个提交；提交前 `git diff --stat` 自查，不改无关文件

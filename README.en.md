@@ -21,10 +21,10 @@ A high-performance, modern cross-platform proxy workstation built with Rust and 
 - Standard Subscription URLs (with `YYYY-MM-DD` date placeholder support)
 - GitHub Gist automated discovery: directly extracts and registers gists into subscriptions
 - Telegram Channels: parses `t.me/s/<channel>` web previews for share links and configurations
-- Native Cloudflare WARP MASQUE registration and OpenRung official relay integration
+- Native `warp://native` source collector for direct Cloudflare WARP MASQUE device registration
 
 ### ⚡ Verification & Health
-- TCP pre-screening followed by authentic kernel-level HTTP 204 latency benchmarking (supporting Mihomo controller & VP-Core native concurrent probe)
+- TCP pre-screening followed by authentic kernel-level HTTP 204 latency benchmarking (supporting Mihomo controller & VP-Core native concurrent probe), with multi-URL fallback probing during startup and health recovery
 - Optional single-node real download/upload throughput probing (strictly authentic measurements, zero synthetic estimates)
 - 24-hour health timeline graphs based on true connectivity measurements
 - Automatic failover history and logging
@@ -38,12 +38,14 @@ A high-performance, modern cross-platform proxy workstation built with Rust and 
 - Built-in smart policy groups: AI service unlocking, US streaming optimization, multi-thread download aggregation, and DIRECT bypass for domestic traffic
 
 ### 🌐 Routing Rules & Geo Data
-- GEOSITE / GEOIP / Domain / Port / Process matching rules with live hit tracking
+- GEOSITE / GEOIP / Domain / Port / Process matching rules with live hit tracking, policy-group/keyword filters, expandable recent-connection details, and DNS target-group filtering
+- Pure IP DoH defaults, `sniffer.skip-domain` anti-hijack protection, and built-in DNS leak audit + Windows Smart Multi-Homed Name Resolution guard (`DisableSmartNameResolution=1` one-click fix) in Network Doctor
+- Single-screen Route & DNS Trace dialog (accessible from the dashboard radar shortcut left of speedtest) showing inbound -> DNS safety -> matched rule -> egress with plain-language DNS diagnostics
 - Hot reload and online updates for GeoIP and GeoSite databases
 - Full import/export support for Clash rules, JSON arrays, and Clash Verge snippets
 
 ### 🎨 User Interface & Internationalization (i18n)
-- Minimalist grouped-card **Settings** and **About** pages (independent release history rollback & download state, one-click diagnostics summary copy, collapsible local paths)
+- Minimalist grouped-card **Settings** (with compact cleanup links/icons) and **About** pages (stable release check, independent release history rollback & download state, one-click diagnostics summary copy, collapsible local paths)
 - Multilingual interface supporting **English**, **Simplified Chinese**, **Traditional Chinese**, and **Japanese**
 - Auto-detects system locale (`LANG` / `LC_*`) and falls back to English in non-Chinese environments
 - 5 curated color themes + dark mode toggle
