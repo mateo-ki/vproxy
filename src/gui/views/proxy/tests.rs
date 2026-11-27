@@ -929,4 +929,36 @@ mod egress_ip_badge_tests {
             "模式切换已迁至仪表盘底栏，状态栏不应残留"
         );
     }
+
+    #[test]
+    fn console_node_risk_view_ignores_egress_and_uses_original_node_server_risk() {
+        let mut app = crate::gui::views::nodes::empty_pool_modal_tests::app_with_an_empty_library();
+        app.proxy_status.node_id = Some("n1".into());
+        app.ip_risk_auto_for = Some("n1".into());
+        app.ip_risk = Some(crate::ip_risk::IpRisk {
+            ip: "202.50.253.36".into(),
+            hostname: String::new(),
+            country: "IT".into(),
+            org: "AS12345 OriginNet".into(),
+            datacenter: true,
+            public_proxy: false,
+            verdict: String::new(),
+        });
+        app.ip_risk_egress_for = Some("n1".into());
+        app.ip_risk_egress = Some(crate::ip_risk::IpRisk {
+            ip: "80.174.118.153".into(),
+            hostname: String::new(),
+            country: "IT".into(),
+            org: "AS3008 ExitNet".into(),
+            datacenter: false,
+            public_proxy: false,
+            verdict: String::new(),
+        });
+
+        let view = app.node_risk_view(Some("n1"));
+        let got = view.risk.expect("should return original node risk");
+        assert_eq!(got.ip, "202.50.253.36");
+        assert_eq!(got.org, "AS12345 OriginNet");
+        assert!(got.datacenter);
+    }
 }

@@ -148,7 +148,7 @@ pub fn segmented_pills<T: PartialEq + Copy>(
                 Color32::WHITE
             }
         } else {
-            theme::text_secondary()
+            theme::muted()
         };
         let galley = ui
             .painter()
@@ -170,10 +170,21 @@ pub fn segmented_pills<T: PartialEq + Copy>(
     );
 
     ui.allocate_ui_with_layout(outer_size, Layout::left_to_right(Align::Center), |ui| {
+        let (track_fill, track_stroke) = if theme::is_light() {
+            (
+                Color32::from_rgb(224, 227, 234),
+                Stroke::new(1.0, Color32::from_black_alpha(16)),
+            )
+        } else {
+            (
+                Color32::from_rgb(24, 26, 32),
+                Stroke::new(1.0, Color32::from_white_alpha(18)),
+            )
+        };
         Frame::NONE
-            .fill(theme::sidebar())
-            .stroke(Stroke::new(1.0, theme::border_subtle()))
-            .corner_radius(CornerRadius::same(8))
+            .fill(track_fill)
+            .stroke(track_stroke)
+            .corner_radius(CornerRadius::same(9))
             .inner_margin(Margin::same(frame_margin as i8))
             .show(ui, |ui| {
                 ui.spacing_mut().item_spacing.x = item_gap;
@@ -185,16 +196,20 @@ pub fn segmented_pills<T: PartialEq + Copy>(
                             if theme::is_light() {
                                 (
                                     Color32::WHITE,
-                                    Stroke::new(1.0, Color32::from_black_alpha(24)),
+                                    Stroke::new(1.0, Color32::from_black_alpha(18)),
                                 )
                             } else {
                                 (
-                                    Color32::from_rgb(52, 54, 62),
+                                    Color32::from_rgb(56, 60, 70),
                                     Stroke::new(1.0, Color32::from_white_alpha(28)),
                                 )
                             }
                         } else if resp.hovered() {
-                            (theme::panel_hover().gamma_multiply(0.5), Stroke::NONE)
+                            if theme::is_light() {
+                                (Color32::from_black_alpha(10), Stroke::NONE)
+                            } else {
+                                (Color32::from_white_alpha(12), Stroke::NONE)
+                            }
                         } else {
                             (Color32::TRANSPARENT, Stroke::NONE)
                         };

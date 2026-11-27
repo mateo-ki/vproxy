@@ -5,7 +5,7 @@ use crate::gui::theme;
 use crate::gui::types::BgMsg;
 use crate::gui::widgets::{
     card_frame, fold_title, format_bytes, icon_tile, pill, primary_btn, section_title,
-    segmented_pills, settings_divider, status_badge,
+    settings_divider, status_badge,
 };
 use crate::gui::VpnApp;
 use eframe::egui::{
@@ -205,14 +205,6 @@ impl VpnApp {
                 std::env::consts::OS,
                 std::env::consts::ARCH
             ),
-            format!(
-                "Channel: {}",
-                if self.edit_insider_channel {
-                    "insider"
-                } else {
-                    "stable"
-                }
-            ),
             format!("Data Root: {}", crate::data_root().display()),
             format!(
                 "Proxy: {} (kernel pref: {:?})",
@@ -244,41 +236,13 @@ impl VpnApp {
     }
 
     fn ui_about_update(&mut self, ui: &mut Ui) {
-        let mut insider = self.edit_insider_channel;
-        let tr_stable = self.tr("稳定版");
-        let tr_insider = self.tr("预发版");
         let tr_title = self.tr("应用更新");
-        let mut channel_changed = false;
-
-        ui.horizontal(|ui| {
-            ui.label(
-                RichText::new(tr_title)
-                    .strong()
-                    .size(13.0)
-                    .color(theme::text_primary()),
-            );
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if segmented_pills(ui, &mut insider, &[(false, tr_stable), (true, tr_insider)]) {
-                    channel_changed = true;
-                }
-            });
-        });
-
-        if channel_changed {
-            self.edit_insider_channel = insider;
-            self.app_release = None;
-            self.app_update_progress = None;
-            self.app_update_checked_at = None;
-            self.save_settings();
-            if !self.app_update_busy {
-                self.check_app_update();
-            } else {
-                self.status = format!(
-                    "更新通道已切至{}",
-                    if insider { "预发版" } else { "稳定版" }
-                );
-            }
-        }
+        ui.label(
+            RichText::new(tr_title)
+                .strong()
+                .size(13.0)
+                .color(theme::text_primary()),
+        );
 
         ui.add_space(6.0);
         Frame::NONE
@@ -337,21 +301,18 @@ impl VpnApp {
                     }
                 };
 
-                let mut sub_parts = vec![format!(
-                    "{}通道",
-                    if self.edit_insider_channel {
-                        "预发"
-                    } else {
-                        "稳定"
-                    }
-                )];
+                let mut sub_parts = Vec::new();
                 if let Some(at) = &self.app_update_checked_at {
                     sub_parts.push(format!("上次检查 {at}"));
                 }
                 if let Some(asset) = self.app_release.as_ref().and_then(|r| r.asset.as_ref()) {
                     sub_parts.push(format!("{} ({})", asset.name, format_bytes(asset.size)));
                 }
-                let subtitle = sub_parts.join(" · ");
+                let subtitle = if sub_parts.is_empty() {
+                    "从 GitHub Releases 检查并安装新版本".to_string()
+                } else {
+                    sub_parts.join(" · ")
+                };
 
                 let mut action_check = false;
                 let mut action_download = false;
@@ -857,14 +818,12 @@ impl VpnApp {
     pub(crate) fn check_app_update_quiet(&mut self) {
         let tx = self.tx.clone();
         let proxy = self.app_update_proxy();
-        // 后台这次按**已保存**的通道查：编辑态可能正被用户改到一半。
-        let insider = self.settings.insider_channel;
         self.app_update_quiet = true;
         self.rt.spawn(async move {
             let result = app_update::check(
                 proxy.as_deref(),
                 app_update::current_version(),
-                app_update::UpdateChannel::from_insider_flag(insider),
+                app_update::UpdateChannel::Stable,
             )
             .await
             .map_err(|error| error.to_string());
@@ -894,24 +853,20 @@ impl VpnApp {
     pub(crate) fn check_app_update(&mut self) {
         let tx = self.tx.clone();
         let proxy = self.app_update_proxy();
-        let insider = self.edit_insider_channel;
         self.app_update_busy = true;
         self.app_update_progress = Some(AppUpdateProgress {
             stage: AppUpdateStage::Checking,
             downloaded: 0,
             total: 0,
             bytes_per_second: 0.0,
-            message: format!(
-                "正在读取最新 Release（{}通道）",
-                if insider { "预发" } else { "稳定" }
-            ),
+            message: "正在检查最新正式版本".to_string(),
         });
         self.status = "正在检查更新...".into();
         self.rt.spawn(async move {
             let result = app_update::check(
                 proxy.as_deref(),
                 app_update::current_version(),
-                app_update::UpdateChannel::from_insider_flag(insider),
+                app_update::UpdateChannel::Stable,
             )
             .await
             .map_err(|error| error.to_string());

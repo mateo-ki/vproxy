@@ -800,26 +800,100 @@ impl VpnApp {
                 }
             }
             ConnectionsTab::Dns => {
-                // 1. 工具栏：筛选 + 统计 + 清空（两端对齐充实 100% 宽度）
+                // 统计各分流目标分组数量，便于排查某一个分组的 DNS 记录
+                let mut dns_group_counts: Vec<(String, usize)> = Vec::new();
+                for r in &self.dns_records {
+                    let grp = if r.target.trim().is_empty() {
+                        "未分组".to_string()
+                    } else {
+                        r.target.clone()
+                    };
+                    if let Some(entry) = dns_group_counts.iter_mut().find(|(g, _)| g == &grp) {
+                        entry.1 += 1;
+                    } else {
+                        dns_group_counts.push((grp, 1));
+                    }
+                }
+                dns_group_counts.sort_by_key(|a| std::cmp::Reverse(a.1));
+
+                // 1. 工具栏：筛选 + 分组排查 + 清空
                 ui.horizontal_wrapped(|ui| {
                     ui.label("筛选记录");
                     let dns_filter_field = ui.add(
                         egui::TextEdit::singleline(&mut self.connections_dns_filter)
-                            .hint_text("按域名、解析 IP 或发起进程过滤")
-                            .desired_width(200.0),
+                            .hint_text("按域名、解析 IP、规则或进程过滤")
+                            .desired_width(190.0),
                     );
                     crate::gui::widgets::note_text_field(ui, &dns_filter_field);
                     if !self.connections_dns_filter.is_empty() && ui.button("清空").clicked() {
                         self.connections_dns_filter.clear();
                     }
                     ui.separator();
-                    ui.label(format!("已记录 DNS 轨迹: {} 条", self.dns_records.len()));
+                    ui.label("分流分组:");
+                    let group_label = match self.connections_dns_group_filter.as_str() {
+                        "all" => format!("全部 ({})", self.dns_records.len()),
+                        "MATCH" => "兜底 MATCH".to_string(),
+                        other => other.to_string(),
+                    };
+                    egui::ComboBox::from_id_salt("dns_group_filter_combo")
+                        .width(140.0)
+                        .selected_text(group_label)
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(
+                                &mut self.connections_dns_group_filter,
+                                "all".to_string(),
+                                format!("全部 ({})", self.dns_records.len()),
+                            );
+                            ui.selectable_value(
+                                &mut self.connections_dns_group_filter,
+                                "MATCH".to_string(),
+                                "兜底 MATCH/FINAL",
+                            );
+                            for (grp, cnt) in &dns_group_counts {
+                                ui.selectable_value(
+                                    &mut self.connections_dns_group_filter,
+                                    grp.clone(),
+                                    format!("{grp} ({cnt})"),
+                                );
+                            }
+                        });
+                    if self.connections_dns_group_filter != "all"
+                        && ui.small_button("重置分组").clicked()
+                    {
+                        self.connections_dns_group_filter = "all".to_string();
+                    }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if ui.button("清空全部记录").clicked() {
                             self.dns_records.clear();
+                            self.connections_dns_group_filter = "all".to_string();
                         }
                     });
                 });
+
+                if !dns_group_counts.is_empty() {
+                    ui.add_space(4.0);
+                    ui.horizontal_wrapped(|ui| {
+                        let all_selected = self.connections_dns_group_filter == "all";
+                        if ui
+                            .selectable_label(
+                                all_selected,
+                                format!("全部 ({})", self.dns_records.len()),
+                            )
+                            .clicked()
+                        {
+                            self.connections_dns_group_filter = "all".to_string();
+                        }
+                        for (grp, cnt) in dns_group_counts.iter().take(6) {
+                            let selected = self.connections_dns_group_filter == *grp;
+                            if ui
+                                .selectable_label(selected, format!("{grp} ({cnt})"))
+                                .clicked()
+                            {
+                                self.connections_dns_group_filter = grp.clone();
+                            }
+                        }
+                    });
+                }
 
                 ui.add_space(8.0);
 
@@ -849,15 +923,31 @@ impl VpnApp {
 
                 // 3. DNS 记录表格
                 let d_filter = self.connections_dns_filter.trim();
+                let g_filter = self.connections_dns_group_filter.as_str();
+                let mut clicked_group_filter: Option<String> = None;
                 let filtered_dns: Vec<&DnsRecord> = self
                     .dns_records
                     .iter()
                     .filter(|r| {
-                        d_filter.is_empty()
-                            || contains_ignore_case(&r.host, d_filter)
-                            || contains_ignore_case(&r.ip, d_filter)
-                            || contains_ignore_case(&r.process, d_filter)
-                            || contains_ignore_case(&r.rule, d_filter)
+                        let group_match = match g_filter {
+                            "all" | "" => true,
+                            "MATCH" => is_unmatched_rule(&r.rule),
+                            other => {
+                                let tgt = if r.target.trim().is_empty() {
+                                    "未分组"
+                                } else {
+                                    r.target.as_str()
+                                };
+                                tgt.eq_ignore_ascii_case(other)
+                            }
+                        };
+                        group_match
+                            && (d_filter.is_empty()
+                                || contains_ignore_case(&r.host, d_filter)
+                                || contains_ignore_case(&r.ip, d_filter)
+                                || contains_ignore_case(&r.process, d_filter)
+                                || contains_ignore_case(&r.rule, d_filter)
+                                || contains_ignore_case(&r.target, d_filter))
                     })
                     .collect();
 
@@ -1009,12 +1099,22 @@ impl VpnApp {
                                                     ui.label(RichText::new(&r.network).small().strong().color(net_color));
                                                 });
 
-                                            // 6. 分流动作
+                                            // 6. 分流动作（同时展示出站分组 + 命中规则，点击可直筛该分组）
                                             let is_direct = r.target.eq_ignore_ascii_case("direct") || r.rule.contains("DIRECT");
                                             let (rule_fill, rule_color) = if is_direct {
                                                 (theme::panel_hover(), theme::text_secondary())
                                             } else {
                                                 (theme::accent_bg(), theme::accent_strong())
+                                            };
+                                            let action_label = if r.target.trim().is_empty() {
+                                                r.rule.clone()
+                                            } else {
+                                                format!("{} · {}", r.target, r.rule)
+                                            };
+                                            let target_group = if r.target.trim().is_empty() {
+                                                "未分组".to_string()
+                                            } else {
+                                                r.target.clone()
                                             };
                                             ui.allocate_ui_with_layout(
                                                 Vec2::new(dns_rule_w, 20.0),
@@ -1022,13 +1122,33 @@ impl VpnApp {
                                                 |ui| {
                                                     ui.set_min_width(dns_rule_w);
                                                     ui.set_max_width(dns_rule_w);
-                                                    Frame::NONE
-                                                        .fill(rule_fill)
-                                                        .corner_radius(CornerRadius::same(6))
-                                                        .inner_margin(Margin::symmetric(6, 2))
-                                                        .show(ui, |ui| {
-                                                            ui.add(egui::Label::new(RichText::new(&r.rule).small().strong().color(rule_color)).truncate());
-                                                        });
+                                                    let small_font = egui::TextStyle::Small.resolve(ui.style());
+                                                    let shown_action = crate::gui::widgets::ellipsize(
+                                                        ui,
+                                                        &action_label,
+                                                        (dns_rule_w - 14.0).max(36.0),
+                                                        small_font,
+                                                    );
+                                                    let badge_resp = ui
+                                                        .add(
+                                                            egui::Button::new(
+                                                                RichText::new(shown_action)
+                                                                    .small()
+                                                                    .strong()
+                                                                    .color(rule_color),
+                                                            )
+                                                            .fill(rule_fill)
+                                                            .stroke(Stroke::NONE)
+                                                            .corner_radius(CornerRadius::same(6)),
+                                                        )
+                                                        .on_hover_cursor(egui::CursorIcon::PointingHand)
+                                                        .on_hover_text(format!(
+                                                            "出站分组: {}\n命中规则: {}\n点击只看此分组",
+                                                            target_group, r.rule
+                                                        ));
+                                                    if badge_resp.clicked() {
+                                                        clicked_group_filter = Some(target_group);
+                                                    }
                                                 },
                                             );
 
@@ -1058,6 +1178,9 @@ impl VpnApp {
                                     });
                             });
                     });
+                }
+                if let Some(grp) = clicked_group_filter {
+                    self.connections_dns_group_filter = grp;
                 }
             }
         }

@@ -259,6 +259,8 @@ pub struct VpnApp {
     pub(crate) connections_process_filter: String,
     /// DNS 记录过滤词
     pub(crate) connections_dns_filter: String,
+    /// DNS 记录分组/目标筛选（"all" / "PROXY" / "DIRECT" / "MATCH" / 具体策略组名）
+    pub(crate) connections_dns_group_filter: String,
     /// 「导入规则」弹框：是否打开、贴进来的原文、最近一次解析结果。
     pub(crate) show_rule_import: bool,
     /// 导入框旁边那个「?」——各输入形状的示范，逐段由测试保证真能导入。
@@ -484,7 +486,6 @@ pub struct VpnApp {
     pub(crate) route_trace_live_probing: bool,
     pub(crate) route_trace_live_result: Option<Result<(u128, u16, String, f64), String>>,
     pub(crate) route_trace_copied_notice: Option<std::time::Instant>,
-    pub(crate) route_trace_selected_step: usize,
     pub(crate) route_trace_last_diagnosed: Option<std::time::Instant>,
     pub(crate) reload_due: bool,
     pub(crate) last_full_reload: std::time::Instant,
@@ -531,6 +532,14 @@ pub struct VpnApp {
     /// `rule_tally` 是待落库的增量，每 30 秒刷一次。
     pub(crate) rule_seen: std::collections::HashMap<String, (String, String)>,
     pub(crate) rule_tally: std::collections::HashMap<(String, String), i64>,
+    /// 本进程周期内按 `(rule, target)` 保留的最近命中连接明细（每组最多 25 条，用于展开排查）。
+    pub(crate) recent_rule_hit_details: std::collections::HashMap<
+        (String, String),
+        std::collections::VecDeque<crate::gui::types::RuleHitDetail>,
+    >,
+    pub(crate) expanded_rule_hit: Option<(String, String)>,
+    pub(crate) rule_hits_group_filter: String,
+    pub(crate) rule_hits_keyword: String,
     pub(crate) last_hit_flush: std::time::Instant,
     pub(crate) rule_hits_today: Vec<crate::db::telemetry::RuleHitRow>,
     /// 订阅源拉取历史，按 source_id 分桶（每源只留最近几条）。
@@ -824,6 +833,7 @@ impl VpnApp {
             dns_records: std::collections::VecDeque::new(),
             connections_process_filter: String::new(),
             connections_dns_filter: String::new(),
+            connections_dns_group_filter: "all".to_string(),
             show_rule_import: false,
             show_rule_import_help: false,
             rule_import_text: String::new(),
@@ -957,7 +967,6 @@ impl VpnApp {
             route_trace_live_probing: false,
             route_trace_live_result: None,
             route_trace_copied_notice: None,
-            route_trace_selected_step: 1,
             route_trace_last_diagnosed: None,
             reload_due: false,
             last_full_reload: std::time::Instant::now(),
@@ -995,6 +1004,10 @@ impl VpnApp {
             health_fail_streak: 0,
             rule_seen: std::collections::HashMap::new(),
             rule_tally: std::collections::HashMap::new(),
+            recent_rule_hit_details: std::collections::HashMap::new(),
+            expanded_rule_hit: None,
+            rule_hits_group_filter: "all".to_string(),
+            rule_hits_keyword: String::new(),
             controller_client: None,
             service_check_client: None,
             last_hit_flush: std::time::Instant::now(),
@@ -1782,18 +1795,26 @@ impl VpnApp {
                 }
             };
 
-            let nodes_res = match crate::parser::warp_masque::register_warp_masque_native(None)
+            let nodes_res =
+                match crate::parser::warp_masque::register_warp_masque_native_for_source(
+                    None,
+                    Some(&source_id),
+                )
                 .await
-            {
-                Ok(nodes) => Ok(nodes),
-                Err(err) => {
-                    if let Some(ref proxy) = proxy_url {
-                        crate::parser::warp_masque::register_warp_masque_native(Some(proxy)).await
-                    } else {
-                        Err(err)
+                {
+                    Ok(nodes) => Ok(nodes),
+                    Err(err) => {
+                        if let Some(ref proxy) = proxy_url {
+                            crate::parser::warp_masque::register_warp_masque_native_for_source(
+                                Some(proxy),
+                                Some(&source_id),
+                            )
+                            .await
+                        } else {
+                            Err(err)
+                        }
                     }
-                }
-            };
+                };
 
             let res = match nodes_res {
                 Ok(nodes) => {
@@ -5539,9 +5560,35 @@ impl VpnApp {
         self.request_ip_risk_for(&node_id, false);
     }
 
+    /// 控制台状态卡读取的原节点服务器归属视图：只认选中/运行节点自身服务器的 IP 与归属，
+    /// 绝不混入或替换为经代理实测到的落地/出口 IP (`ip_risk_egress`)。
+    pub(crate) fn node_risk_view(
+        &self,
+        selected_node_id: Option<&str>,
+    ) -> crate::gui::views::proxy::charts::EgressRiskView<'_> {
+        let node_id = selected_node_id
+            .or(self.proxy_status.node_id.as_deref())
+            .or(self.selected_proxy_node_id.as_deref());
+        let front_owner = node_id.filter(|id| {
+            crate::gui::views::proxy::charts::front_risk_belongs_to(
+                id,
+                self.ip_risk_auto_for.as_deref(),
+                self.ip_risk_target.as_deref(),
+            )
+        });
+        let risk = front_owner.and(self.ip_risk.as_ref());
+        let failed = node_id.is_some() && self.ip_risk_failed_for.as_deref() == node_id;
+        crate::gui::views::proxy::charts::EgressRiskView {
+            risk,
+            failed,
+            checking: self.ip_risk_busy && !failed,
+        }
+    }
+
     /// 卡片读的那一份。出口结果优先（那才是站点真正看到的 IP），其次是这颗节点服务器
     /// 的归属。两边都按「这份结果属于哪颗节点」认领，不再拿 server 字符串去比对 ——
     /// 正在跑的那颗常常不在面板列表里（测速没过就不算「可用」），比不中徽章就永远显示未检测。
+    #[allow(dead_code)]
     pub(crate) fn egress_risk_view(&self) -> crate::gui::views::proxy::charts::EgressRiskView<'_> {
         let node_id = self.proxy_status.node_id.as_deref();
         let front_owner = node_id.filter(|id| {
@@ -5850,7 +5897,6 @@ impl VpnApp {
         self.route_trace_live_probing = false;
         self.route_trace_live_result = None;
         self.route_trace_copied_notice = None;
-        self.route_trace_selected_step = 1;
         self.route_trace_last_diagnosed = None;
 
         let trace_node = node
@@ -5864,7 +5910,7 @@ impl VpnApp {
         } else {
             "🎯 PROXY"
         };
-        let report = crate::proxy::tracer::simulate_route_trace(
+        let report = crate::proxy::tracer::simulate_route_trace_with_options(
             &self.route_trace_target,
             "TCP",
             mixed_port,
@@ -5872,6 +5918,7 @@ impl VpnApp {
             trace_node.as_ref(),
             Some(group),
             is_active,
+            &self.proxy_config,
         );
         self.route_trace_report = Some(report);
         self.route_trace_node = node;
@@ -5904,6 +5951,7 @@ impl VpnApp {
             .route_trace_node
             .as_ref()
             .map(crate::proxy::tracer::TraceNodeInfo::from_summary);
+        let options = self.proxy_config.clone();
 
         let tx = self.tx.clone();
         self.rt.spawn(async move {
@@ -5917,7 +5965,9 @@ impl VpnApp {
                 )
                 .await
                 {
-                    Ok(trace) => Some(trace.into_report(&target, trace_node.as_ref())),
+                    Ok(trace) => {
+                        Some(trace.into_report_with_options(&target, trace_node.as_ref(), &options))
+                    }
                     Err(e) => {
                         tracing::warn!("调用 vpcore explain 失败，回退本地白盒推导: {e}");
                         None

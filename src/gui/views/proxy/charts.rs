@@ -570,6 +570,7 @@ pub(crate) struct EgressRiskView<'a> {
 /// 徽章该显示哪一份结果。规则：出口结果优先，但**只有它真的存在**才算它 ——
 /// 出口查询失败时 `egress_owner` 也会被写成这颗节点（错误也要归位），以前这里就
 /// 直接返回 None 并短路，把已经查到的服务器归属挡在后面，徽章永远显示未检测。
+#[allow(dead_code)]
 pub(crate) fn display_risk<'a>(
     node_id: Option<&str>,
     egress_owner: Option<&str>,
@@ -2073,9 +2074,43 @@ impl VpnApp {
                         let (kx_rect, kx_resp) = ui.allocate_exact_size(Vec2::splat(16.0), Sense::click());
                         let kx_color = if kx_resp.hovered() { theme::accent() } else { theme::text_secondary() };
                         draw_icon(ui.painter(), kx_rect.shrink(1.0), Icon::Cpu, kx_color);
+                        let kx_pref = self.proxy_config.kernel_preference;
+                        let kx_pref_label = match kx_pref {
+                            KernelPreference::Auto => "自动选择",
+                            KernelPreference::Mihomo => "Mihomo",
+                            KernelPreference::SingBox => "Sing-box",
+                            KernelPreference::Xray => "Xray",
+                            KernelPreference::Meow => "Meow",
+                            KernelPreference::VpCore => "VP-Core",
+                        };
+                        let kx_tooltip = if is_running {
+                            if let Some(active) = self.proxy_status.kernel {
+                                if kx_pref != KernelPreference::Auto && kx_pref.kernel() != Some(active) {
+                                    let fallback_reason = if kx_pref == KernelPreference::Meow {
+                                        if cfg!(windows) && self.proxy_config.mode.has_tun() {
+                                            "Windows TUN 模式（Meow 存在虚拟网卡环路缺陷）"
+                                        } else {
+                                            "Meow 尚未安装、暂不支持当前传输特性（如 ECH/gRPC/XHTTP）或启动校验失败"
+                                        }
+                                    } else {
+                                        "当前节点协议或模式限制（如 TUN / 不兼容传输层）"
+                                    };
+                                    format!(
+                                        "内核管理（点击打开）\n内核偏好: {kx_pref_label}\n实际运行: {}\n回退原因: {fallback_reason}",
+                                        active.display_name()
+                                    )
+                                } else {
+                                    format!("内核管理（点击打开）\n当前内核: {}", active.display_name())
+                                }
+                            } else {
+                                format!("内核管理：版本、偏好与运行状态（当前偏好: {kx_pref_label}）")
+                            }
+                        } else {
+                            format!("内核管理：版本、偏好与运行状态（当前偏好: {kx_pref_label}）")
+                        };
                         let kx_resp = kx_resp
                             .on_hover_cursor(egui::CursorIcon::PointingHand)
-                            .on_hover_text("内核管理：版本、偏好与运行状态");
+                            .on_hover_text(kx_tooltip);
                         if kx_resp.clicked() {
                             self.dashboard_drawer = Some(DashboardDrawer::Kernels);
                         }
@@ -2103,22 +2138,58 @@ impl VpnApp {
                         if st_resp.clicked() {
                             self.show_speedtest_dialog = true;
                         }
+
+                        // 卡片右上角路由链路入口（位于测速图标左侧）：点击打开当前选中节点的路由链路追踪
+                        ui.add_space(8.0);
+                        let (rt_rect, rt_resp) = ui.allocate_exact_size(Vec2::splat(16.0), Sense::click());
+                        let rt_color = if rt_resp.hovered() { theme::accent() } else { theme::text_secondary() };
+                        draw_icon(ui.painter(), rt_rect.shrink(1.0), Icon::Radar, rt_color);
+                        let trace_target_node = selected_node
+                            .as_ref()
+                            .map(|n| (n.id.clone(), n.name.clone()))
+                            .or_else(|| {
+                                self.proxy_status
+                                    .node_id
+                                    .clone()
+                                    .or_else(|| self.selected_proxy_node_id.clone())
+                                    .map(|id| {
+                                        (
+                                            id,
+                                            self.selected_proxy_node_name.clone().unwrap_or_default(),
+                                        )
+                                    })
+                            });
+                        let rt_tip = match &trace_target_node {
+                            Some((_, name)) if !name.trim().is_empty() => {
+                                format!("路由链路：追踪「{name}」的分流规则与 DNS 解析路径")
+                            }
+                            _ => "路由链路：查看当前分流规则与 DNS 解析路径".to_string(),
+                        };
+                        if rt_resp
+                            .on_hover_cursor(egui::CursorIcon::PointingHand)
+                            .on_hover_text(rt_tip)
+                            .clicked()
+                        {
+                            let id = trace_target_node.map(|(id, _)| id).unwrap_or_default();
+                            self.open_route_trace_dialog(&id);
+                        }
                     });
                 });
 
                 ui.add_space(6.0);
 
-                // 主体两栏：左侧 IP 画像与信息，右侧启停大按钮
+                // 主体两栏：左侧原节点 IP 画像与信息，右侧启停大按钮
                 let btn_diameter = if is_compact { 50.0_f32 } else { 58.0_f32 };
                 let left_w = (w - btn_diameter - 36.0).max(180.0);
-                let (egress_ip, egress_dc, egress_org, egress_country, egress_checking) = {
-                    let view = self.egress_risk_view();
+                let (node_ip, node_dc, node_org, node_country, node_checking, node_failed) = {
+                    let view = self.node_risk_view(selected_node.as_ref().map(|n| n.id.as_str()));
                     (
                         view.risk.map(|r| r.ip.clone()),
                         view.risk.map(|r| r.datacenter),
                         view.risk.map(|r| r.org.clone()),
                         view.risk.map(|r| r.country.clone()),
                         view.checking,
+                        view.failed,
                     )
                 };
 
@@ -2149,9 +2220,11 @@ impl VpnApp {
                             painter.rect_filled(flag_rect, CornerRadius::same(9), apple_sub_bg());
                             painter.rect_stroke(flag_rect, CornerRadius::same(9), Stroke::new(1.0_f32, apple_stroke()), egui::StrokeKind::Inside);
 
-                            let country_code = egress_country
+                            let country_code = selected_node
+                                .as_ref()
+                                .and_then(|n| n.country.clone())
                                 .filter(|country| !country.trim().is_empty())
-                                .or_else(|| selected_node.as_ref().and_then(|n| n.country.clone()).filter(|country| !country.trim().is_empty()))
+                                .or_else(|| node_country.filter(|country| !country.trim().is_empty()))
                                 .unwrap_or_else(|| "—".into());
                             let galley = painter.layout_no_wrap(
                                 country_code,
@@ -2167,11 +2240,11 @@ impl VpnApp {
                             // 区域国旗方块与 IP / 节点名称之间留出间距
                             ui.add_space(8.0);
 
-                            // 国家标签右侧展示 IP（优先实测出口 IP，回退到当前节点服务器 IP/地址，未连接显示未连接）
-                            let display_title = if let Some(ip) = egress_ip.as_ref() {
-                                ip.clone()
-                            } else if let Some(node) = selected_node {
+                            // 国家标签右侧展示原节点服务器 IP / 地址（不展示出口落地 IP），未选节点显示未连接
+                            let display_title = if let Some(node) = selected_node {
                                 node.server.clone()
+                            } else if let Some(ip) = node_ip.as_ref() {
+                                ip.clone()
                             } else if let Some(ref name) = self.selected_proxy_node_name {
                                 self.proxy_nodes.iter().chain(self.nodes.iter()).find(|n| &n.name == name).map(|n| n.server.clone()).unwrap_or_else(|| "127.0.0.1".into())
                             } else {
@@ -2188,13 +2261,14 @@ impl VpnApp {
                                 .truncate(),
                             );
                             if let Some(node) = selected_node {
-                                ip_label.on_hover_text(format!(
-                                    "出口 IP: {}\n服务器: {}:{}\n节点: {}",
-                                    egress_ip.as_deref().unwrap_or("未检测"),
-                                    node.server,
-                                    node.port,
-                                    node.name
-                                ));
+                                let mut tip = format!(
+                                    "节点服务器: {}:{}\n节点: {}",
+                                    node.server, node.port, node.name
+                                );
+                                if let Some(ip) = node_ip.as_deref().filter(|ip| *ip != node.server) {
+                                    tip.push_str(&format!("\n解析 IP: {ip}"));
+                                }
+                                ip_label.on_hover_text(tip);
                             }
                         });
 
@@ -2204,9 +2278,11 @@ impl VpnApp {
                         // 标签药丸行：IP 类型 / 质量（按实测延迟分档）/ IP 协议版本
                         ui.horizontal_wrapped(|ui| {
                             ui.spacing_mut().item_spacing.x = 9.0;
-                            let tag_dc = if let Some(dc) = egress_dc {
+                            let tag_dc = if let Some(dc) = node_dc {
                                 if dc { "机房" } else { "住宅" }
-                            } else if egress_checking {
+                            } else if node_failed {
+                                "查失败"
+                            } else if node_checking {
                                 "检测中"
                             } else {
                                 "未检测"
@@ -2271,7 +2347,7 @@ impl VpnApp {
                             }
                             q_resp.on_hover_text("点击测速当前节点延迟");
 
-                            let ip_text = egress_ip
+                            let ip_text = node_ip
                                 .clone()
                                 .or_else(|| selected_node.as_ref().map(|n| n.server.clone()))
                                 .unwrap_or_default();
@@ -2287,7 +2363,7 @@ impl VpnApp {
 
                         ui.add_space(slack_gap);
 
-                        // 四列元信息 [运行时长] [组织] [协议] [内核]
+                        // 三列元信息 [运行时长] [组织] [协议]
                         ui.horizontal(|ui| {
                             ui.spacing_mut().item_spacing.x = if is_compact { 16.0 } else { 22.0 };
 
@@ -2299,7 +2375,7 @@ impl VpnApp {
                             });
 
                             // 2. 组织
-                            let org_str = egress_org.as_deref()
+                            let org_str = node_org.as_deref()
                                 .map(str::trim)
                                 .filter(|org| !org.is_empty())
                                 .unwrap_or("未知");
@@ -2327,116 +2403,6 @@ impl VpnApp {
                                 ui.label(RichText::new("协议").size(10.5).color(theme::muted()));
                                 ui.label(RichText::new(proto_str).size(13.0).strong().color(theme::text_primary()));
                             });
-
-                            // 4. 内核（下拉选，支持 自动选择 / Mihomo / Shoes / Sing-box / Xray / Meow）
-                            if !is_compact {
-                                ui.vertical(|ui| {
-                                    ui.horizontal(|ui| {
-                                        ui.label(RichText::new("内核").size(10.5).color(theme::muted()));
-                                        let (k_rect, k_resp) = ui.allocate_exact_size(Vec2::splat(12.0), Sense::click());
-                                        draw_icon(ui.painter(), k_rect.shrink(0.5), Icon::Cpu, theme::text_secondary());
-                                        let k_resp = k_resp
-                                            .on_hover_cursor(egui::CursorIcon::PointingHand)
-                                            .on_hover_text("点击打开内核管理（右侧滑出抽屉）");
-                                        if k_resp.clicked() {
-                                            self.dashboard_drawer = Some(DashboardDrawer::Kernels);
-                                        }
-                                        if k_resp.hovered() {
-                                            draw_icon(ui.painter(), k_rect.shrink(0.5), Icon::Cpu, theme::accent());
-                                        }
-                                    });
-                                    let prev_pref = self.proxy_config.kernel_preference;
-                                    let mut current_pref = prev_pref;
-                                    let combo_label = match current_pref {
-                                        KernelPreference::Auto => "自动选择",
-                                        KernelPreference::Mihomo => "Mihomo",
-                                        KernelPreference::SingBox => "Sing-box",
-                                        KernelPreference::Xray => "Xray",
-                                        KernelPreference::Meow => "Meow",
-                                        KernelPreference::VpCore => "VP-Core",
-                                    };
-                                    let (display_text, tooltip_hint) = if is_running {
-                                        if let Some(active) = self.proxy_status.kernel {
-                                            if current_pref != KernelPreference::Auto && current_pref.kernel() != Some(active) {
-                                                (
-                                                    format!("{combo_label} ↳ {}", active.display_name()),
-                                                    format!("内核偏好: {combo_label}\n当前节点因协议或配置限制，已平滑回退至 {} 运行", active.display_name()),
-                                                )
-                                            } else {
-                                                (combo_label.to_string(), "切换代理运行内核（可手动指定或自动选择）".to_string())
-                                            }
-                                        } else {
-                                            (combo_label.to_string(), "切换代理运行内核（可手动指定或自动选择）".to_string())
-                                        }
-                                    } else {
-                                        (combo_label.to_string(), "切换代理运行内核（可手动指定或自动选择）".to_string())
-                                    };
-                                    // 菜单与按钮同宽：若发生回退则显示 ↳ 图标，适当放宽宽度
-                                    let combo_w = if is_compact { 92.0 } else { 128.0 };
-                                    egui::ComboBox::from_id_salt("dash_status_kernel_dropdown")
-                                        .width(combo_w)
-                                        // 选项按本主题行距约 350px，超过 egui 菜单默认
-                                        // 200px 上限会内部滚动，把第一项"自动选择"卷出可视区
-                                        .height(380.0)
-                                        .selected_text(
-                                            RichText::new(&display_text)
-                                                .size(12.0)
-                                                .strong()
-                                                .color(theme::text_primary()),
-                                        )
-                                        .show_ui(ui, |ui| {
-                                            ui.selectable_value(
-                                                &mut current_pref,
-                                                KernelPreference::Auto,
-                                                "自动选择",
-                                            );
-                                            ui.selectable_value(
-                                                &mut current_pref,
-                                                KernelPreference::Mihomo,
-                                                "Mihomo",
-                                            );
-                                            ui.selectable_value(
-                                                &mut current_pref,
-                                                KernelPreference::SingBox,
-                                                "Sing-box",
-                                            );
-                                            ui.selectable_value(
-                                                &mut current_pref,
-                                                KernelPreference::Xray,
-                                                "Xray",
-                                            );
-                                            ui.selectable_value(
-                                                &mut current_pref,
-                                                KernelPreference::Meow,
-                                                "Meow",
-                                            );
-                                            ui.selectable_value(
-                                                &mut current_pref,
-                                                KernelPreference::VpCore,
-                                                "VP-Core",
-                                            );
-                                        })
-                                        .response
-                                        .on_hover_text(tooltip_hint);
-
-                                    if current_pref != prev_pref {
-                                        self.proxy_config.kernel_preference = current_pref;
-                                        if !self.supports_chain_proxy() {
-                                            if self.proxy_config.chain_proxy_enabled {
-                                                self.proxy_config.chain_proxy_enabled = false;
-                                            }
-                                            if self.proxy_config.routing_mode == crate::proxy::RoutingMode::Chain {
-                                                self.proxy_config.routing_mode = crate::proxy::RoutingMode::Rule;
-                                            }
-                                        }
-                                        if is_running && !self.proxy_busy {
-                                            self.start_proxy();
-                                        } else {
-                                            self.save_proxy_config_quiet();
-                                        }
-                                    }
-                                });
-                            }
                         });
                     });
                     });
@@ -3357,9 +3323,9 @@ impl VpnApp {
                         let tooltip = if !supports_chain {
                             format!("当前内核（{kernel_name}）暂不支持链式代理\n请将内核切换为 Mihomo / VP-Core / Meow 后开启")
                         } else if chain_on {
-                            "链式代理已启用（点击关闭）".to_string()
+                            "链式代理开关（已启用）：保留当前分流规则，需代理流量经前置→后置双跳（点击关闭）".to_string()
                         } else {
-                            "点击开启链式代理".to_string()
+                            "点击开启链式代理：保留当前分流规则，将代理出站升级为前置→后置双跳".to_string()
                         };
                         if resp
                             .on_hover_text(tooltip)

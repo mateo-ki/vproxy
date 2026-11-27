@@ -1,6 +1,6 @@
-use crate::gui::icons::{icon_label, Icon};
+use crate::gui::icons::{icon_btn_square, icon_label, Icon};
 use crate::gui::theme;
-use crate::gui::widgets::{format_bytes, primary_btn, status_badge};
+use crate::gui::widgets::{format_bytes, status_badge};
 use crate::gui::VpnApp;
 use eframe::egui::{self, RichText, Ui};
 use std::path::{Path, PathBuf};
@@ -454,18 +454,37 @@ impl VpnApp {
                 "历史备份与临时缓存",
                 Some(&summary_hint),
                 |ui| {
+                    if total_count > 0 {
+                        let clean_resp = egui::Frame::NONE
+                            .fill(theme::primary_btn())
+                            .corner_radius(egui::CornerRadius::same(5))
+                            .inner_margin(egui::Margin::symmetric(10, 3))
+                            .show(ui, |ui| {
+                                ui.label(
+                                    RichText::new("全部清理")
+                                        .size(11.5)
+                                        .strong()
+                                        .color(theme::on_primary()),
+                                );
+                            })
+                            .response
+                            .interact(egui::Sense::click())
+                            .on_hover_cursor(egui::CursorIcon::PointingHand)
+                            .on_hover_text("安全清理旧程序镜像、更新包与临时缓存");
+                        if clean_resp.clicked() {
+                            let (cnt, bytes) = self.cleanup_state.clean_all();
+                            self.status = format!(
+                                "清理完成：成功删除 {cnt} 个历史文件，释放了 {}",
+                                format_bytes(bytes)
+                            );
+                        }
+                    }
                     if ui
-                        .add_enabled(total_count > 0, primary_btn("一键清理全部"))
-                        .on_hover_text("安全清理旧程序镜像、更新包与临时缓存")
+                        .add(icon_btn_square(Icon::Sync, 12.0))
+                        .on_hover_cursor(egui::CursorIcon::PointingHand)
+                        .on_hover_text("重新扫描可清理文件")
                         .clicked()
                     {
-                        let (cnt, bytes) = self.cleanup_state.clean_all();
-                        self.status = format!(
-                            "清理完成：成功删除 {cnt} 个历史文件，释放了 {}",
-                            format_bytes(bytes)
-                        );
-                    }
-                    if ui.button("重新扫描").clicked() {
                         self.cleanup_state.scan();
                     }
                 },
@@ -505,15 +524,29 @@ impl VpnApp {
                                 &format!("{cat_count} 项 · {}", format_bytes(cat_size)),
                                 theme::warning(),
                             );
-                        } else {
-                            status_badge(ui, "暂无残留", theme::muted());
                         }
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui
-                                .add_enabled(cat_count > 0, egui::Button::new("清理此类"))
-                                .clicked()
-                            {
-                                clean_category_clicked = true;
+                            if cat_count > 0 {
+                                if ui
+                                    .link(
+                                        RichText::new("清理")
+                                            .size(12.0)
+                                            .strong()
+                                            .color(theme::accent_strong()),
+                                    )
+                                    .on_hover_cursor(egui::CursorIcon::PointingHand)
+                                    .on_hover_text(format!(
+                                        "清理「{}」全部 {cat_count} 项",
+                                        category.title()
+                                    ))
+                                    .clicked()
+                                {
+                                    clean_category_clicked = true;
+                                }
+                            } else {
+                                ui.label(
+                                    RichText::new("暂无残留").size(11.5).color(theme::muted()),
+                                );
                             }
                         });
                     });
@@ -545,14 +578,27 @@ impl VpnApp {
                                         egui::Layout::right_to_left(egui::Align::Center),
                                         |ui| {
                                             if ui
-                                                .small_button("删除")
+                                                .link(
+                                                    RichText::new("删除")
+                                                        .small()
+                                                        .color(theme::danger()),
+                                                )
+                                                .on_hover_cursor(egui::CursorIcon::PointingHand)
                                                 .on_hover_text(item.path.display().to_string())
                                                 .clicked()
                                             {
                                                 delete_target = Some(item.path.clone());
                                             }
                                             if let Some(parent) = item.path.parent() {
-                                                if ui.small_button("定位").clicked() {
+                                                if ui
+                                                    .link(
+                                                        RichText::new("定位")
+                                                            .small()
+                                                            .color(theme::muted()),
+                                                    )
+                                                    .on_hover_cursor(egui::CursorIcon::PointingHand)
+                                                    .clicked()
+                                                {
                                                     let _ = crate::platform::shell_open(parent);
                                                 }
                                             }

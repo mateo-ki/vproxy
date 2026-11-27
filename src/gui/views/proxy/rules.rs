@@ -234,35 +234,253 @@ impl VpnApp {
             crate::gui::widgets::render_distribution_bar(ui, &segments, total as f32, 7.0);
             ui.add_space(6.0);
 
+            // 分组过滤与关键词搜索栏
+            let mut distinct_targets: Vec<String> = Vec::new();
+            for hit in &self.rule_hits_today {
+                if !hit.target.is_empty() && !distinct_targets.contains(&hit.target) {
+                    distinct_targets.push(hit.target.clone());
+                }
+            }
+            ui.horizontal_wrapped(|ui| {
+                ui.label(RichText::new("分组筛选").small().color(theme::muted()));
+                for (code, label) in [
+                    ("all", "全部"),
+                    ("PROXY", "代理 PROXY"),
+                    ("DIRECT", "直连 DIRECT"),
+                    ("MATCH", "兜底 MATCH"),
+                ] {
+                    let selected = self.rule_hits_group_filter == code;
+                    if ui.selectable_label(selected, label).clicked() {
+                        self.rule_hits_group_filter = code.to_string();
+                    }
+                }
+                if !distinct_targets.is_empty() {
+                    let cur_label = match self.rule_hits_group_filter.as_str() {
+                        "all" => "指定策略组…",
+                        other => other,
+                    };
+                    egui::ComboBox::from_id_salt("rule_hits_target_combo")
+                        .width(120.0)
+                        .selected_text(cur_label)
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(
+                                &mut self.rule_hits_group_filter,
+                                "all".to_string(),
+                                "全部分组",
+                            );
+                            for t in &distinct_targets {
+                                ui.selectable_value(
+                                    &mut self.rule_hits_group_filter,
+                                    t.clone(),
+                                    t,
+                                );
+                            }
+                        });
+                }
+                ui.separator();
+                let kw = ui.add(
+                    egui::TextEdit::singleline(&mut self.rule_hits_keyword)
+                        .hint_text("过滤规则或策略组")
+                        .desired_width(140.0),
+                );
+                crate::gui::widgets::note_text_field(ui, &kw);
+                if !self.rule_hits_keyword.is_empty() && ui.small_button("清空").clicked() {
+                    self.rule_hits_keyword.clear();
+                }
+            });
+            ui.add_space(6.0);
+
             ui.horizontal(|ui| {
-                header_cell(ui, "命中的规则");
+                header_cell(ui, "命中的规则（点击行展开最近连接明细）");
                 header_cell(ui, "派给");
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     header_cell(ui, "条数 / 占比");
                 });
             });
+            let kw_lower = self.rule_hits_keyword.trim().to_ascii_lowercase();
+            let group_filter = self.rule_hits_group_filter.clone();
+            let hits_snapshot = self.rule_hits_today.clone();
+            let mut copy_detail_text: Option<String> = None;
+            let mut inspect_dns_group: Option<String> = None;
+
             egui::ScrollArea::vertical()
                 .id_salt("rule_hits_table")
                 .auto_shrink([false, false])
                 .show(ui, |ui| {
-                    for hit in &self.rule_hits_today {
+                    for hit in &hits_snapshot {
+                        let group_ok = match group_filter.as_str() {
+                            "all" => true,
+                            "MATCH" => {
+                                hit.rule.to_ascii_uppercase().starts_with("MATCH")
+                                    || hit.rule.to_ascii_uppercase().starts_with("FINAL")
+                            }
+                            other => hit.target.eq_ignore_ascii_case(other),
+                        };
+                        if !group_ok {
+                            continue;
+                        }
+                        if !kw_lower.is_empty()
+                            && !hit.rule.to_ascii_lowercase().contains(&kw_lower)
+                            && !hit.target.to_ascii_lowercase().contains(&kw_lower)
+                        {
+                            continue;
+                        }
+
                         let share = if total > 0 { hit.hits * 100 / total } else { 0 };
-                        ui.horizontal(|ui| {
-                            ui.label(RichText::new(&hit.rule).color(theme::accent()).monospace());
-                            ui.label(RichText::new(format!("→ {}", hit.target)));
-                            ui.with_layout(
-                                egui::Layout::right_to_left(egui::Align::Center),
-                                |ui| {
+                        let key = (hit.rule.clone(), hit.target.clone());
+                        let is_expanded = self.expanded_rule_hit.as_ref() == Some(&key);
+                        let details = self.recent_rule_hit_details.get(&key);
+                        let detail_count = details.map_or(0, std::collections::VecDeque::len);
+
+                        let row_resp = ui
+                            .horizontal(|ui| {
+                                let arrow = if is_expanded { "▾" } else { "▸" };
+                                ui.label(
+                                    RichText::new(arrow)
+                                        .small()
+                                        .color(if is_expanded {
+                                            theme::accent()
+                                        } else {
+                                            theme::muted()
+                                        }),
+                                );
+                                ui.label(RichText::new(&hit.rule).color(theme::accent()).monospace());
+                                ui.label(RichText::new(format!("→ {}", hit.target)));
+                                if detail_count > 0 {
                                     ui.label(
-                                        RichText::new(format!("{} 条 · {}%", hit.hits, share))
-                                            .strong()
-                                            .color(theme::text_primary()),
+                                        RichText::new(format!("({detail_count} 条近期明细)"))
+                                            .small()
+                                            .color(theme::muted()),
                                     );
-                                },
-                            );
-                        });
+                                }
+                                ui.with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| {
+                                        ui.label(
+                                            RichText::new(format!("{} 条 · {}%", hit.hits, share))
+                                                .strong()
+                                                .color(theme::text_primary()),
+                                        );
+                                    },
+                                );
+                            })
+                            .response
+                            .interact(egui::Sense::click())
+                            .on_hover_cursor(egui::CursorIcon::PointingHand);
+
+                        if row_resp.clicked() {
+                            if is_expanded {
+                                self.expanded_rule_hit = None;
+                            } else {
+                                self.expanded_rule_hit = Some(key.clone());
+                            }
+                        }
+
+                        if is_expanded {
+                            Frame::NONE
+                                .fill(theme::sidebar())
+                                .stroke(Stroke::new(1.0, theme::border_subtle()))
+                                .corner_radius(CornerRadius::same(6))
+                                .inner_margin(Margin::symmetric(10, 6))
+                                .show(ui, |ui| {
+                                    ui.set_width(ui.available_width());
+                                    if let Some(list) = details.filter(|l| !l.is_empty()) {
+                                        for (d_idx, item) in list.iter().enumerate() {
+                                            ui.push_id(("rule_detail", &hit.rule, d_idx), |ui| {
+                                                ui.horizontal(|ui| {
+                                                    ui.label(
+                                                        RichText::new(&item.time_str)
+                                                            .small()
+                                                            .monospace()
+                                                            .color(theme::muted()),
+                                                    );
+                                                    let target_host = if item.host.is_empty() {
+                                                        item.destination.as_str()
+                                                    } else {
+                                                        item.host.as_str()
+                                                    };
+                                                    ui.label(
+                                                        RichText::new(target_host)
+                                                            .small()
+                                                            .strong()
+                                                            .color(theme::text_primary()),
+                                                    );
+                                                    if !item.host.is_empty()
+                                                        && !item.destination.is_empty()
+                                                        && item.host != item.destination
+                                                    {
+                                                        ui.label(
+                                                            RichText::new(format!(
+                                                                "({})",
+                                                                item.destination
+                                                            ))
+                                                            .small()
+                                                            .monospace()
+                                                            .color(theme::muted()),
+                                                        );
+                                                    }
+                                                    if !item.process.is_empty() {
+                                                        ui.label(
+                                                            RichText::new(format!(
+                                                                "[{}]",
+                                                                item.process
+                                                            ))
+                                                            .small()
+                                                            .color(theme::text_secondary()),
+                                                        );
+                                                    }
+                                                    ui.label(
+                                                        RichText::new(&item.network)
+                                                            .small()
+                                                            .color(theme::muted()),
+                                                    );
+                                                    ui.with_layout(
+                                                        egui::Layout::right_to_left(
+                                                            egui::Align::Center,
+                                                        ),
+                                                        |ui| {
+                                                            if ui.small_button("复制").clicked() {
+                                                                copy_detail_text =
+                                                                    Some(target_host.to_string());
+                                                            }
+                                                        },
+                                                    );
+                                                });
+                                            });
+                                        }
+                                    } else {
+                                        ui.horizontal(|ui| {
+                                            ui.label(
+                                                RichText::new("该统计行来自启动后累计计数，当前尚无本轮实时连接样本（新产生流量后将自动记录最近 25 条明细）。")
+                                                    .small()
+                                                    .color(theme::muted()),
+                                            );
+                                        });
+                                    }
+                                    ui.add_space(3.0);
+                                    ui.horizontal(|ui| {
+                                        if ui
+                                            .small_button(format!("前往 DNS 记录只看「{}」分组 →", hit.target))
+                                            .clicked()
+                                        {
+                                            inspect_dns_group = Some(hit.target.clone());
+                                        }
+                                    });
+                                });
+                            ui.add_space(4.0);
+                        }
                     }
                 });
+
+            if let Some(txt) = copy_detail_text {
+                ui.ctx().copy_text(txt.clone());
+                self.status = format!("已复制命中目标: {txt}");
+            }
+            if let Some(grp) = inspect_dns_group {
+                self.connections_dns_group_filter = grp;
+                self.connections_tab = crate::gui::types::ConnectionsTab::Dns;
+                self.dashboard_drawer = Some(crate::gui::types::DashboardDrawer::Connections);
+            }
         });
         if refresh {
             self.reload_rule_hits();

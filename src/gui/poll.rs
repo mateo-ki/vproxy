@@ -1395,12 +1395,36 @@ impl VpnApp {
                                 if !self.rule_seen.contains_key(&conn.id) {
                                     let key = (conn.rule.clone(), conn.target.clone());
                                     *self.rule_tally.entry(key.clone()).or_insert(0) += 1;
-                                    self.rule_seen.insert(conn.id.clone(), key);
+                                    self.rule_seen.insert(conn.id.clone(), key.clone());
+
+                                    let now_str =
+                                        chrono::Local::now().format("%H:%M:%S").to_string();
+                                    if self.recent_rule_hit_details.len() < 300
+                                        || self.recent_rule_hit_details.contains_key(&key)
+                                    {
+                                        let bucket =
+                                            self.recent_rule_hit_details.entry(key).or_default();
+                                        let dup_front = bucket.front().is_some_and(|d| {
+                                            d.host == conn.host
+                                                && d.destination == conn.destination
+                                                && d.process == conn.process
+                                        });
+                                        if !dup_front {
+                                            if bucket.len() >= 25 {
+                                                bucket.pop_back();
+                                            }
+                                            bucket.push_front(crate::gui::types::RuleHitDetail {
+                                                time_str: now_str.clone(),
+                                                host: conn.host.clone(),
+                                                destination: conn.destination.clone(),
+                                                process: conn.process.clone(),
+                                                network: conn.network.to_uppercase(),
+                                            });
+                                        }
+                                    }
 
                                     // 记录新增 DNS 解析 / 域名请求轨迹
                                     if !conn.host.is_empty() || conn.destination.contains(":53") {
-                                        let now_str =
-                                            chrono::Local::now().format("%H:%M:%S").to_string();
                                         let is_duplicate =
                                             self.dns_records.iter().take(15).any(|r| {
                                                 r.host == conn.host && r.ip == conn.destination

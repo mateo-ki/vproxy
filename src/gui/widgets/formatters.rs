@@ -216,7 +216,7 @@ pub fn routing_mode_description(mode: RoutingMode) -> &'static str {
         RoutingMode::Global => "所有流量使用当前代理节点",
         RoutingMode::Direct => "所有流量绕过代理直接连接",
         RoutingMode::Subscription => "选用指定订阅的规则与策略组 · 聚合节点池出站",
-        RoutingMode::Chain => "链式代理 · 前置中继与落地出口级联传输",
+        RoutingMode::Chain => "全局链式代理 · 忽略规则直连，全部流量走前置→后置双跳",
     }
 }
 
@@ -230,7 +230,7 @@ pub fn routing_mode_detail(mode: RoutingMode) -> &'static str {
         RoutingMode::Global => "忽略分流规则，所有可代理流量走当前节点。",
         RoutingMode::Direct => "忽略分流规则，内核保持运行但流量全部直连。",
         RoutingMode::Subscription => "复用所选订阅的分流规则与策略组，支持自定义例外规则。",
-        RoutingMode::Chain => "流量经前置中继节点转发至落地节点。",
+        RoutingMode::Chain => "全流量模式：忽略分流规则，全部流量经前置中继转发至后置落地（若只需代理流量走双跳并保留规则直连，请开启主界面的「链式代理」开关）。",
     }
 }
 

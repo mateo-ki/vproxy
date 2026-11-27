@@ -255,6 +255,16 @@ pub struct DnsRecord {
     pub time_str: String,
 }
 
+/// 分流规则命中的最近连接样本（用于命中记录展开排查）。
+#[derive(Debug, Clone, Default)]
+pub struct RuleHitDetail {
+    pub time_str: String,
+    pub host: String,
+    pub destination: String,
+    pub process: String,
+    pub network: String,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DashboardDrawer {
     Network,     // DNS / TUN
