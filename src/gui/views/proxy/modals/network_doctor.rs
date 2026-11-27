@@ -162,6 +162,50 @@ pub async fn perform_network_diagnosis(
                 suggestion: None,
             });
         }
+
+        // 1.1b Windows 智能多宿主名称解析检查（TUN 模式下并发泄露给物理网卡）
+        match crate::platform::check_smart_multi_homed_dns() {
+            crate::platform::SmartMultiHomedStatus::Disabled => {
+                items.push(DiagnosticItem {
+                    id: "sys_smart_multihomed_dns".into(),
+                    category: "系统网络".into(),
+                    name: "Windows 智能多宿主 DNS 解析防护".into(),
+                    status: DiagnosticStatus::Pass,
+                    detail: "已禁用智能多宿主名称解析 (DisableSmartNameResolution=1)，TUN 模式下不会向物理网卡并发泄露 DNS。".into(),
+                    repairable: false,
+                    suggestion: None,
+                });
+            }
+            crate::platform::SmartMultiHomedStatus::Enabled(val) => {
+                let is_tun = options.mode.has_tun();
+                items.push(DiagnosticItem {
+                    id: "sys_smart_multihomed_dns".into(),
+                    category: "系统网络".into(),
+                    name: "Windows 智能多宿主 DNS 解析防护".into(),
+                    status: if is_tun {
+                        DiagnosticStatus::Fail
+                    } else {
+                        DiagnosticStatus::Warning
+                    },
+                    detail: format!(
+                        "Windows 未禁用「智能多宿主名称解析」（当前注册表值: {}），{}。",
+                        val.map(|v| v.to_string())
+                            .unwrap_or_else(|| "未设置/默认开启".into()),
+                        if is_tun {
+                            "当前处于 TUN 模式，系统会同时向物理网卡发出明文 DNS 请求导致域名泄露！"
+                        } else {
+                            "当前非 TUN 模式暂无泄露；若日后切换 TUN 模式将会向物理网卡并发泄露 DNS"
+                        }
+                    ),
+                    repairable: true,
+                    suggestion: Some(
+                        "点击修复将以管理员权限写入 DisableSmartNameResolution=1 并刷新 DNS 缓存。"
+                            .into(),
+                    ),
+                });
+            }
+            crate::platform::SmartMultiHomedStatus::Unsupported => {}
+        }
     }
     #[cfg(not(windows))]
     {
@@ -504,6 +548,52 @@ pub async fn perform_network_diagnosis(
         }
     }
 
+    // 2.5 DNS 防泄露与规则解析静态审计（对齐 DNSnitch 规则矩阵）
+    let dns_audit = crate::proxy::tracer::audit_dns_config(&options);
+    if dns_audit.findings.is_empty() {
+        items.push(DiagnosticItem {
+            id: "kernel_dns_leak_audit".into(),
+            category: "代理内核".into(),
+            name: "DNS 防泄露与规则解析审计".into(),
+            status: DiagnosticStatus::Pass,
+            detail:
+                "内核 DNS 启用状态、加密 DoH 上游、节点域名解析与 IP 规则 no-resolve 均无异常。"
+                    .into(),
+            repairable: false,
+            suggestion: None,
+        });
+    } else {
+        let highest = dns_audit
+            .highest_severity()
+            .unwrap_or(crate::proxy::tracer::DnsAuditSeverity::Low);
+        let status = match highest {
+            crate::proxy::tracer::DnsAuditSeverity::High => DiagnosticStatus::Fail,
+            crate::proxy::tracer::DnsAuditSeverity::Medium
+            | crate::proxy::tracer::DnsAuditSeverity::Low => DiagnosticStatus::Warning,
+        };
+        let detail = dns_audit
+            .findings
+            .iter()
+            .map(|f| format!("[{}] {}", f.code, f.summary))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let suggestion = dns_audit
+            .findings
+            .iter()
+            .map(|f| format!("[{}] {}", f.code, f.remediation))
+            .collect::<Vec<_>>()
+            .join("；");
+        items.push(DiagnosticItem {
+            id: "kernel_dns_leak_audit".into(),
+            category: "代理内核".into(),
+            name: format!("DNS 防泄露与规则解析审计 ({} 项)", dns_audit.findings.len()),
+            status,
+            detail,
+            repairable: dns_audit.has_auto_repairable(),
+            suggestion: Some(suggestion),
+        });
+    }
+
     // =========================================================================
     // 3. 软件与出口连通性诊断 (Software & Egress Layer)
     // =========================================================================
@@ -605,7 +695,10 @@ pub async fn perform_network_diagnosis(
 }
 
 /// 执行指定的或全部修复操作
-pub async fn perform_network_repair(target_id: Option<&str>) -> Result<String, String> {
+pub async fn perform_network_repair(
+    target_id: Option<&str>,
+    repair_smart_multihomed: bool,
+) -> Result<String, String> {
     let mut messages = Vec::new();
 
     // 1. 修复 DNS 污染 (若指定或全部)
@@ -627,6 +720,29 @@ pub async fn perform_network_repair(target_id: Option<&str>) -> Result<String, S
                 }
                 Err(e) => {
                     messages.push(format!("执行 DNS 修复任务失败: {e}"));
+                }
+            }
+        }
+    }
+
+    // 1b. 修复 Windows 智能多宿主名称解析泄露
+    if target_id == Some("sys_smart_multihomed_dns")
+        || (target_id.is_none() && repair_smart_multihomed)
+    {
+        #[cfg(windows)]
+        {
+            match tokio::task::spawn_blocking(crate::platform::disable_smart_multi_homed_dns).await
+            {
+                Ok(Ok(())) => {
+                    messages.push(
+                        "已写入注册表禁用 Windows 智能多宿主名称解析 (DisableSmartNameResolution=1)".into(),
+                    );
+                }
+                Ok(Err(e)) => {
+                    messages.push(format!("禁用 Windows 智能多宿主解析失败: {e}"));
+                }
+                Err(e) => {
+                    messages.push(format!("执行多宿主 DNS 防护任务失败: {e}"));
                 }
             }
         }
@@ -679,9 +795,34 @@ impl VpnApp {
     pub(crate) fn repair_network_doctor(&mut self, target_id: Option<String>) {
         self.network_doctor_repairing = true;
         self.network_doctor_message = Some("正在执行智能修复...".into());
+        let mut local_notes = Vec::new();
+        if target_id.is_none() || target_id.as_deref() == Some("kernel_dns_leak_audit") {
+            let repaired = crate::proxy::tracer::repair_dns_config_options(&mut self.proxy_config);
+            if !repaired.is_empty() {
+                self.save_proxy_config_quiet();
+                local_notes.extend(repaired);
+            }
+        }
+        let repair_smart_multihomed = self.proxy_config.mode.has_tun()
+            && !matches!(
+                crate::platform::check_smart_multi_homed_dns(),
+                crate::platform::SmartMultiHomedStatus::Disabled
+            );
         let tx = self.tx.clone();
         self.rt.spawn(async move {
-            let result = perform_network_repair(target_id.as_deref()).await;
+            let result = perform_network_repair(target_id.as_deref(), repair_smart_multihomed)
+                .await
+                .map(|msg| {
+                    let mut all = local_notes;
+                    if !msg.trim().is_empty() {
+                        all.push(msg);
+                    }
+                    if all.is_empty() {
+                        "已完成复核，未发现需要修改的系统项".to_string()
+                    } else {
+                        all.join("；")
+                    }
+                });
             let _ = tx.send(crate::gui::types::BgMsg::NetworkDoctorRepairResult(result));
         });
     }
@@ -1021,9 +1162,10 @@ mod tests {
         let options = MihomoConfigOptions::default();
         let status = ProxyRuntimeStatus::stopped(options.clone());
         let report = perform_network_diagnosis(options, status).await;
-        // 应该至少包含系统网络和代理内核的诊断项
+        // 应该至少包含系统网络、代理内核与 DNS 防泄露审计诊断项
         assert!(!report.items.is_empty());
         assert!(report.items.iter().any(|i| i.category == "系统网络"));
         assert!(report.items.iter().any(|i| i.category == "代理内核"));
+        assert!(report.items.iter().any(|i| i.id == "kernel_dns_leak_audit"));
     }
 }

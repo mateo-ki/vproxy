@@ -432,7 +432,57 @@ impl BackendCompiler for VpCoreCompiler {
                 obj.remove("tun");
             }
 
+            // 清理与归一可能由 Rhai 脚本 / YAML 覆写引入的 kebab-case / snake_case 重名别名，
+            // 防止 vp-config 反序列化时抛出 `duplicate field` 错误（如 dns.enhanced_mode vs enhanced-mode）。
+            dedup_alias_keys(
+                obj,
+                &[
+                    ("mixed-port", &["mixed_port"]),
+                    ("allow-lan", &["allow_lan"]),
+                    ("bind-address", &["bind_address"]),
+                    ("log-level", &["log_level"]),
+                    ("external-controller", &["external_controller"]),
+                    ("proxy-groups", &["proxy_groups"]),
+                    ("rule-providers", &["rule_providers"]),
+                    ("proxy-providers", &["proxy_providers"]),
+                ],
+            );
+            if let Some(tun) = obj.get_mut("tun").and_then(|t| t.as_object_mut()) {
+                dedup_alias_keys(
+                    tun,
+                    &[
+                        ("fake-ip-range", &["fake_ip_range"]),
+                        ("fake-ip-range6", &["fake_ip_range6"]),
+                        ("auto-route", &["auto_route"]),
+                        ("auto-route-mode", &["auto_route_mode"]),
+                        ("route-address", &["route_address"]),
+                        ("route-exclude-address", &["route_exclude_address"]),
+                        ("ring-capacity", &["ring_capacity"]),
+                    ],
+                );
+            }
+
             if let Some(dns) = obj.get_mut("dns").and_then(|d| d.as_object_mut()) {
+                dedup_alias_keys(
+                    dns,
+                    &[
+                        ("enhanced-mode", &["enhanced_mode"]),
+                        ("default-nameserver", &["default_nameserver"]),
+                        ("fake-ip-range", &["fake_ip_range"]),
+                        ("fake-ip-range6", &["fake_ip_range6"]),
+                        ("fake-ip-filter", &["fake_ip_filter"]),
+                        ("nameserver-policy", &["nameserver_policy"]),
+                        ("fallback-filter", &["fallback_filter"]),
+                        ("respect-rules", &["respect_rules"]),
+                        ("proxy-server-nameserver", &["proxy_server_nameserver"]),
+                    ],
+                );
+                if let Some(ff) = dns
+                    .get_mut("fallback-filter")
+                    .and_then(|v| v.as_object_mut())
+                {
+                    dedup_alias_keys(ff, &[("geoip-code", &["geoip_code"])]);
+                }
                 if plan.inbounds.mode.has_tun() {
                     dns.insert("enhanced-mode".into(), serde_json::json!("fake-ip"));
                     dns.insert("fake-ip-range".into(), serde_json::json!("198.18.0.0/16"));
@@ -581,6 +631,24 @@ pub(crate) fn is_valid_vpcore_geoip_code(code: &str) -> bool {
         return true;
     }
     code.eq_ignore_ascii_case("LAN") || code.eq_ignore_ascii_case("PRIVATE")
+}
+
+/// 将对象内与 `canonical` 同义的蛇形/别名键移除并将值合并到规范键（保留后写入的别名值）。
+fn dedup_alias_keys(
+    map: &mut serde_json::Map<String, serde_json::Value>,
+    pairs: &[(&str, &[&str])],
+) {
+    for &(canonical, aliases) in pairs {
+        let mut override_val = None;
+        for &alias in aliases {
+            if let Some(val) = map.remove(alias) {
+                override_val = Some(val);
+            }
+        }
+        if let Some(val) = override_val {
+            map.insert(canonical.to_string(), val);
+        }
+    }
 }
 
 /// VP-Core 可运行的节点类型与传输层白名单（内核遇到未知类型/传输会整进程拒绝启动）
@@ -1363,5 +1431,41 @@ rules:
         assert_eq!(s5["port"], 1080);
         // socks5 节点未声明 udp 时不应被强制注入 udp: true，防止对纯 TCP socks5 节点造成握手异常
         assert!(s5.get("udp").is_none());
+    }
+
+    #[test]
+    fn test_vpcore_compiler_dedups_dns_enhanced_mode_alias() {
+        let node = test_node(
+            "ss",
+            json!({
+                "cipher": "aes-128-gcm",
+                "password": "pwd"
+            }),
+        );
+        // 复现内置 Rhai 模板写法 `config.dns.enhanced_mode = ...` 与 YAML 覆写蛇形键并存场景
+        let options = MihomoConfigOptions {
+            mode: ProxyMode::Tun,
+            override_yaml: Some(
+                "dns:\n  enhanced_mode: fake-ip\n  fake_ip_range: 198.18.0.0/16\n".into(),
+            ),
+            override_script: Some("config.dns.enhanced_mode = \"redir-host\";".into()),
+            ..Default::default()
+        };
+        let plan = crate::proxy::ir::lower_options_to_ir(&options, Some(&node));
+        let artifact = VpCoreCompiler.compile(&plan).expect("compile success");
+        let yaml = match artifact {
+            CompiledArtifact::Yaml(y) => y,
+            _ => panic!("expected Yaml artifact"),
+        };
+
+        assert!(
+            !yaml.contains("enhanced_mode:"),
+            "compiled YAML must not emit duplicate snake_case enhanced_mode:\n{yaml}"
+        );
+        assert!(
+            !yaml.contains("fake_ip_range:"),
+            "compiled YAML must not emit duplicate snake_case fake_ip_range:\n{yaml}"
+        );
+        assert!(yaml.contains("enhanced-mode:"));
     }
 }

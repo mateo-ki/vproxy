@@ -7,7 +7,10 @@ use crate::proxy::adapter::kernel_adapter;
 use crate::proxy::types::{
     MihomoConfigOptions, ProxyMode, ProxyRuntimeStatus, ProxyState, RoutingMode,
 };
-use crate::proxy_probe::{ProxyProbeProgress, ProxyProbeResult, PROXY_CONNECTIVITY_TEST_URL};
+use crate::proxy_probe::{
+    ProxyProbeProgress, ProxyProbeResult, PROXY_CONNECTIVITY_FALLBACK_URL,
+    PROXY_CONNECTIVITY_TEST_URL,
+};
 use crate::system_proxy::{platform_system_proxy, SystemProxyControl, SystemProxySnapshot};
 use anyhow::{anyhow, Context, Result};
 use serde_json::Value;
@@ -29,7 +32,8 @@ pub const STARTUP_PROXY_VERIFY_TIMEOUT: Duration = Duration::from_millis(1_500);
 pub const STARTUP_SYSTEM_PROXY_RESERVE: Duration = Duration::from_millis(250);
 pub const STARTUP_PORT_CONNECT_TIMEOUT: Duration = Duration::from_millis(60);
 pub const VERIFY_CONNECTIVITY_ON_START: bool = true;
-pub const STARTUP_PROXY_VERIFY_URLS: [&str; 1] = [PROXY_CONNECTIVITY_TEST_URL];
+pub const STARTUP_PROXY_VERIFY_URLS: [&str; 2] =
+    [PROXY_CONNECTIVITY_TEST_URL, PROXY_CONNECTIVITY_FALLBACK_URL];
 const RECOVERY_DELAYS: [Duration; 3] = [
     Duration::from_secs(2),
     Duration::from_secs(5),
@@ -1081,7 +1085,7 @@ impl ProxyManager {
         match verify_selected_outbound_alive(
             controller_port,
             &controller_secret,
-            PROXY_CONNECTIVITY_TEST_URL,
+            &STARTUP_PROXY_VERIFY_URLS,
             allow_direct,
         )
         .await
@@ -2680,7 +2684,7 @@ impl ProxyManager {
                         verify_selected_outbound_alive(
                             controller_port,
                             &controller_secret,
-                            PROXY_CONNECTIVITY_TEST_URL,
+                            &STARTUP_PROXY_VERIFY_URLS,
                             allow_direct,
                         )
                     };
@@ -3900,7 +3904,7 @@ fn outbound_alive_verdict(snapshot: &Value, allow_direct: bool) -> OutboundVerdi
 async fn verify_selected_outbound_alive(
     controller_port: u16,
     secret: &str,
-    test_url: &str,
+    test_urls: &[&str],
     allow_direct: bool,
 ) -> Result<()> {
     use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
@@ -3938,22 +3942,33 @@ async fn verify_selected_outbound_alive(
         }
         OutboundVerdict::Probe(leaf) => {
             let encoded = utf8_percent_encode(&leaf, NON_ALPHANUMERIC).to_string();
-            let target = utf8_percent_encode(test_url, NON_ALPHANUMERIC).to_string();
-            let url = format!("{base}/proxies/{encoded}/delay?timeout=5000&url={target}");
-            match with_controller_auth(client.get(&url), secret).send().await {
-                Ok(response) if response.status().is_success() => Ok(()),
-                // 404 = 内核没实现 delay 探活端点，不能据此判死。
-                Ok(response) if response.status() == reqwest::StatusCode::NOT_FOUND => {
-                    tracing::debug!("内核不支持 /proxies/*/delay 端点，跳过出站探活");
-                    Ok(())
+            let mut last_error = None;
+            for test_url in test_urls {
+                let target = utf8_percent_encode(test_url, NON_ALPHANUMERIC).to_string();
+                let url = format!("{base}/proxies/{encoded}/delay?timeout=5000&url={target}");
+                match with_controller_auth(client.get(&url), secret).send().await {
+                    Ok(response) if response.status().is_success() => return Ok(()),
+                    // 404 = 内核没实现 delay 探活端点，不能据此判死。
+                    Ok(response) if response.status() == reqwest::StatusCode::NOT_FOUND => {
+                        tracing::debug!("内核不支持 /proxies/*/delay 端点，跳过出站探活");
+                        return Ok(());
+                    }
+                    Ok(response) => {
+                        last_error = Some(anyhow!(
+                            "当前出站「{leaf}」探活失败（HTTP {}）：节点已失效，204 检查是经 DIRECT 回退通过的假绿",
+                            response.status()
+                        ));
+                    }
+                    Err(error) => {
+                        last_error = Some(anyhow!(
+                            "当前出站「{leaf}」探活失败: {error}：节点已失效，204 检查是经 DIRECT 回退通过的假绿"
+                        ));
+                    }
                 }
-                Ok(response) => Err(anyhow!(
-                    "当前出站「{leaf}」探活失败（HTTP {}）：节点已失效，204 检查是经 DIRECT 回退通过的假绿",
-                    response.status()
-                )),
-                Err(error) => Err(anyhow!(
-                    "当前出站「{leaf}」探活失败: {error}：节点已失效，204 检查是经 DIRECT 回退通过的假绿"
-                )),
+            }
+            match last_error {
+                Some(error) => Err(error),
+                None => Ok(()),
             }
         }
     }
@@ -5607,11 +5622,57 @@ mod outbound_alive_tests {
         let result = verify_selected_outbound_alive(
             port,
             "alive-secret",
-            PROXY_CONNECTIVITY_TEST_URL,
+            &[PROXY_CONNECTIVITY_TEST_URL],
             false,
         )
         .await;
         assert!(result.is_ok(), "活节点不应报错: {result:?}");
+        tokio::time::timeout(Duration::from_secs(5), server)
+            .await
+            .unwrap()
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn outbound_alive_check_succeeds_when_fallback_url_recovers() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let snapshot = serde_json::json!({
+            "proxies": { "PROXY": { "now": "优选1" }, "优选1": {} }
+        });
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let _ = read_request_path(&mut stream).await;
+            let body = snapshot.to_string();
+            stream
+                .write_all(http_response("HTTP/1.1 200 OK", &body).as_bytes())
+                .await
+                .unwrap();
+            // 首次主测试地址（Cloudflare）超时 504
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let first_path = read_request_path(&mut stream).await;
+            assert!(first_path.contains("cp%2Ecloudflare%2Ecom"), "{first_path}");
+            stream
+                .write_all(http_response("HTTP/1.1 504 Gateway Timeout", "{}").as_bytes())
+                .await
+                .unwrap();
+            // 回退测试地址（Google）正常返回 200
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let second_path = read_request_path(&mut stream).await;
+            assert!(second_path.contains("google%2Ecom"), "{second_path}");
+            stream
+                .write_all(http_response("HTTP/1.1 200 OK", "{\"delay\":180}").as_bytes())
+                .await
+                .unwrap();
+        });
+        let result = verify_selected_outbound_alive(
+            port,
+            "fallback-secret",
+            &STARTUP_PROXY_VERIFY_URLS,
+            false,
+        )
+        .await;
+        assert!(result.is_ok(), "备用测试地址恢复后应放行: {result:?}");
         tokio::time::timeout(Duration::from_secs(5), server)
             .await
             .unwrap()
@@ -5641,9 +5702,13 @@ mod outbound_alive_tests {
                 .await
                 .unwrap();
         });
-        let result =
-            verify_selected_outbound_alive(port, "dead-secret", PROXY_CONNECTIVITY_TEST_URL, false)
-                .await;
+        let result = verify_selected_outbound_alive(
+            port,
+            "dead-secret",
+            &[PROXY_CONNECTIVITY_TEST_URL],
+            false,
+        )
+        .await;
         let error = result.unwrap_err().to_string();
         assert!(error.contains("探活失败"), "必须点明死因: {error}");
         assert!(error.contains("假绿"), "必须说清 204 为什么还能通: {error}");
@@ -5676,9 +5741,13 @@ mod outbound_alive_tests {
                 .await
                 .unwrap();
         });
-        let result =
-            verify_selected_outbound_alive(port, "no-endpoint", PROXY_CONNECTIVITY_TEST_URL, false)
-                .await;
+        let result = verify_selected_outbound_alive(
+            port,
+            "no-endpoint",
+            &[PROXY_CONNECTIVITY_TEST_URL],
+            false,
+        )
+        .await;
         assert!(
             result.is_ok(),
             "404 只代表端点缺失，不得误判节点死亡: {result:?}"
@@ -5696,7 +5765,7 @@ mod outbound_alive_tests {
         let port = listener.local_addr().unwrap().port();
         drop(listener);
         let result =
-            verify_selected_outbound_alive(port, "s", PROXY_CONNECTIVITY_TEST_URL, false).await;
+            verify_selected_outbound_alive(port, "s", &[PROXY_CONNECTIVITY_TEST_URL], false).await;
         assert!(result.is_ok(), "API 不可达时保守放行: {result:?}");
     }
 }

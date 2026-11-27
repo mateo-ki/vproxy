@@ -2015,6 +2015,125 @@ pub fn restore_all_stale_loopback_dns() -> Result<usize> {
     Ok(0)
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SmartMultiHomedStatus {
+    /// 已在注册表显式禁用（DisableSmartNameResolution = 1），TUN 模式下安全
+    Disabled,
+    /// 未禁用（键不存在或值不为 1），Windows TUN 模式下存在向物理网卡并发泄露 DNS 的风险
+    Enabled(Option<u32>),
+    /// 非 Windows 平台无需此检查
+    Unsupported,
+}
+
+#[cfg(windows)]
+pub fn check_smart_multi_homed_dns() -> SmartMultiHomedStatus {
+    use windows_sys::Win32::System::Registry::{
+        RegCloseKey, RegOpenKeyExW, RegQueryValueExW, HKEY, HKEY_LOCAL_MACHINE, KEY_READ, REG_DWORD,
+    };
+
+    let wide =
+        |value: &str| -> Vec<u16> { value.encode_utf16().chain(std::iter::once(0)).collect() };
+    let subkey_w = wide(r"SOFTWARE\Policies\Microsoft\Windows NT\DNSClient");
+    let mut hkey: HKEY = std::ptr::null_mut();
+    let open_status = unsafe {
+        RegOpenKeyExW(
+            HKEY_LOCAL_MACHINE,
+            subkey_w.as_ptr(),
+            0,
+            KEY_READ,
+            &mut hkey,
+        )
+    };
+    if open_status != 0 || hkey.is_null() {
+        return SmartMultiHomedStatus::Enabled(None);
+    }
+
+    let val_w = wide("DisableSmartNameResolution");
+    let mut type_code: u32 = 0;
+    let mut dword_val: u32 = 0;
+    let mut byte_len: u32 = std::mem::size_of::<u32>() as u32;
+    let query_status = unsafe {
+        RegQueryValueExW(
+            hkey,
+            val_w.as_ptr(),
+            std::ptr::null_mut(),
+            &mut type_code,
+            (&mut dword_val as *mut u32).cast::<u8>(),
+            &mut byte_len,
+        )
+    };
+    unsafe { RegCloseKey(hkey) };
+
+    if query_status == 0 && type_code == REG_DWORD && byte_len == 4 {
+        if dword_val == 1 {
+            SmartMultiHomedStatus::Disabled
+        } else {
+            SmartMultiHomedStatus::Enabled(Some(dword_val))
+        }
+    } else {
+        SmartMultiHomedStatus::Enabled(None)
+    }
+}
+
+#[cfg(not(windows))]
+pub fn check_smart_multi_homed_dns() -> SmartMultiHomedStatus {
+    SmartMultiHomedStatus::Unsupported
+}
+
+#[cfg(windows)]
+pub fn disable_smart_multi_homed_dns() -> Result<()> {
+    use std::os::windows::process::CommandExt;
+
+    const SCRIPT: &str = r#"
+$path = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\DNSClient'
+if (-not (Test-Path $path)) { New-Item -Path $path -Force | Out-Null }
+Set-ItemProperty -Path $path -Name 'DisableSmartNameResolution' -Value 1 -Type DWord -Force
+Clear-DnsClientCache -ErrorAction SilentlyContinue
+"#;
+
+    let output = if is_elevated() {
+        std::process::Command::new("powershell")
+            .args(["-NoProfile", "-Command", SCRIPT])
+            .creation_flags(0x0800_0000)
+            .output()?
+    } else {
+        let encoded = SCRIPT.replace('"', "\"\"");
+        let runas_cmd = format!(
+            "Start-Process powershell -Verb RunAs -WindowStyle Hidden -Wait -ArgumentList '-NoProfile -Command \"{}\"'",
+            encoded
+        );
+        std::process::Command::new("powershell")
+            .args(["-NoProfile", "-Command", &runas_cmd])
+            .creation_flags(0x0800_0000)
+            .output()?
+    };
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(anyhow::anyhow!(if stderr.is_empty() {
+            "写入注册表 DisableSmartNameResolution 失败（可能被系统拦截或取消了管理员授权）"
+                .to_string()
+        } else {
+            stderr
+        }));
+    }
+
+    if !matches!(
+        check_smart_multi_homed_dns(),
+        SmartMultiHomedStatus::Disabled
+    ) {
+        return Err(anyhow::anyhow!(
+            "注册表写入后复检仍未生效（请确认是否授予了管理员权限）"
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(not(windows))]
+pub fn disable_smart_multi_homed_dns() -> Result<()> {
+    Ok(())
+}
+
 pub fn self_heal_stale_dns() -> bool {
     #[cfg(windows)]
     {

@@ -7,7 +7,7 @@ use crate::proxy::compiler::{
 };
 use crate::proxy::ir::{lower_options_to_ir, IRAction, IRMatcher, RuleSource};
 use crate::proxy::mihomo::{URL_TEST_INTERVAL_SECS, URL_TEST_TIMEOUT_MS, URL_TEST_TOLERANCE_MS};
-use crate::proxy_probe::PROXY_CONNECTIVITY_TEST_URL;
+use crate::proxy_probe::{PROXY_CONNECTIVITY_FALLBACK_URL, PROXY_CONNECTIVITY_TEST_URL};
 use crate::system_proxy::{SystemProxyControl, SystemProxySnapshot};
 use anyhow::Result;
 use serde_json::Value;
@@ -214,7 +214,10 @@ fn startup_proxy_verification_uses_five_second_total_budget() {
     assert_eq!(STARTUP_PROXY_TOTAL_TIMEOUT, Duration::from_secs(15));
     assert_eq!(STARTUP_PROXY_VERIFY_TIMEOUT, Duration::from_millis(1_500));
     assert_eq!(STARTUP_SYSTEM_PROXY_RESERVE, Duration::from_millis(250));
-    assert_eq!(STARTUP_PROXY_VERIFY_URLS, [PROXY_CONNECTIVITY_TEST_URL]);
+    assert_eq!(
+        STARTUP_PROXY_VERIFY_URLS,
+        [PROXY_CONNECTIVITY_TEST_URL, PROXY_CONNECTIVITY_FALLBACK_URL]
+    );
 }
 
 #[test]
@@ -761,7 +764,7 @@ fn builds_tun_dns_and_ordered_routing_config() {
     assert_eq!(config["dns"]["respect-rules"], true);
     assert_eq!(
         config["dns"]["nameserver-policy"]["geosite:cn"][0],
-        "223.5.5.5"
+        "https://223.5.5.5/dns-query"
     );
     assert_eq!(
         config["dns"]["nameserver-policy"]["geosite:geolocation-!cn"][0],

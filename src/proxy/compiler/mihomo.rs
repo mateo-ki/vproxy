@@ -1348,8 +1348,8 @@ impl BackendCompiler for MihomoCompiler {
             nameserver_policy.insert(
                 "geosite:cn".to_string(),
                 json!([
-                    "223.5.5.5",
-                    "119.29.29.29",
+                    "https://223.5.5.5/dns-query",
+                    "https://120.53.53.53/dns-query",
                     "https://doh.pub/dns-query",
                     "https://dns.alidns.com/dns-query"
                 ]),
@@ -1358,8 +1358,8 @@ impl BackendCompiler for MihomoCompiler {
         nameserver_policy.insert(
             "+.cn".to_string(),
             json!([
-                "223.5.5.5",
-                "119.29.29.29",
+                "https://223.5.5.5/dns-query",
+                "https://120.53.53.53/dns-query",
                 "https://doh.pub/dns-query",
                 "https://dns.alidns.com/dns-query"
             ]),
@@ -1367,8 +1367,8 @@ impl BackendCompiler for MihomoCompiler {
         nameserver_policy.insert(
             "+.52pojie.cn".to_string(),
             json!([
-                "223.5.5.5",
-                "119.29.29.29",
+                "https://223.5.5.5/dns-query",
+                "https://120.53.53.53/dns-query",
                 "https://doh.pub/dns-query",
                 "https://dns.alidns.com/dns-query"
             ]),
@@ -1388,10 +1388,10 @@ impl BackendCompiler for MihomoCompiler {
             plan.dns.proxy_server_nameservers.clone()
         } else {
             vec![
-                "223.5.5.5".into(),
-                "119.29.29.29".into(),
-                "1.1.1.1".into(),
-                "8.8.8.8".into(),
+                "https://223.5.5.5/dns-query".into(),
+                "https://120.53.53.53/dns-query".into(),
+                "https://1.1.1.1/dns-query".into(),
+                "https://8.8.8.8/dns-query".into(),
             ]
         };
 
@@ -1420,6 +1420,7 @@ impl BackendCompiler for MihomoCompiler {
                 "force-dns-mapping": true,
                 "parse-pure-ip": true,
                 "override-destination": true,
+                "skip-domain": ["+.push.apple.com"],
                 "skip-dst-address": default_sniffer_skip,
                 "sniff": {
                     "HTTP": { "ports": [80, 8080] },

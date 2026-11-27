@@ -110,8 +110,8 @@ pub struct DnsConfig {
 
 fn default_proxy_server_nameserver() -> Vec<String> {
     vec![
-        "223.5.5.5".into(),
-        "119.29.29.29".into(),
+        "https://223.5.5.5/dns-query".into(),
+        "https://120.53.53.53/dns-query".into(),
         DEFAULT_DNS_PRIMARY.into(),
         DEFAULT_DNS_SECONDARY.into(),
     ]
@@ -144,8 +144,15 @@ impl DnsConfig {
             self.nameservers = vec![DEFAULT_DNS_PRIMARY.into(), DEFAULT_DNS_SECONDARY.into()];
             migrated = true;
         }
+        let legacy_ps = [
+            "223.5.5.5",
+            "119.29.29.29",
+            DEFAULT_DNS_PRIMARY,
+            DEFAULT_DNS_SECONDARY,
+        ];
         if self.proxy_server_nameserver.is_empty()
             || self.proxy_server_nameserver == [DEFAULT_DNS_PRIMARY, DEFAULT_DNS_SECONDARY]
+            || self.proxy_server_nameserver == legacy_ps
         {
             self.proxy_server_nameserver = default_proxy_server_nameserver();
             migrated = true;
