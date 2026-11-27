@@ -409,13 +409,48 @@ pub fn generate_p256_keypair() -> anyhow::Result<(String, String)> {
     Ok((spki_b64, sec1_b64))
 }
 
+pub(crate) const CLOUDFLARE_WARP_API_BASE: &str = "https://api.cloudflareclient.com";
+
+/// 判断订阅 URL 是否为原生 WARP 注册源标识（`warp://native`）。
+pub fn is_warp_native_url(url: &str) -> bool {
+    url.trim().eq_ignore_ascii_case("warp://native")
+}
+
 /// 原生向 Cloudflare 注册新 WARP 设备并登记 MASQUE 隧道，生成全部 57 个节点
 pub async fn register_warp_masque_native(proxy_url: Option<&str>) -> anyhow::Result<Vec<Node>> {
+    register_warp_masque_native_for_source(proxy_url, Some("src_warp_native")).await
+}
+
+/// 原生注册并绑定指定 `source_id` 的 WARP MASQUE 节点池。
+pub async fn register_warp_masque_native_for_source(
+    proxy_url: Option<&str>,
+    source_id: Option<&str>,
+) -> anyhow::Result<Vec<Node>> {
     let mut builder = reqwest::Client::builder().timeout(std::time::Duration::from_secs(15));
     if let Some(proxy) = proxy_url {
         builder = builder.proxy(reqwest::Proxy::all(proxy)?);
+    } else {
+        builder = builder.no_proxy();
     }
     let client = builder.build()?;
+    register_warp_masque_native_with_client(&client, source_id).await
+}
+
+/// 使用调用方提供好的 HTTP 客户端向 Cloudflare 原生注册并生成 WARP MASQUE 节点。
+pub async fn register_warp_masque_native_with_client(
+    client: &reqwest::Client,
+    source_id: Option<&str>,
+) -> anyhow::Result<Vec<Node>> {
+    register_warp_masque_native_at(client, CLOUDFLARE_WARP_API_BASE, source_id).await
+}
+
+/// 可指定 API 基地址的 WARP 原生注册实现（供采集器及集成测试复用）。
+pub(crate) async fn register_warp_masque_native_at(
+    client: &reqwest::Client,
+    api_base: &str,
+    source_id: Option<&str>,
+) -> anyhow::Result<Vec<Node>> {
+    let base = api_base.trim_end_matches('/');
 
     let (spki, sec1) = generate_p256_keypair()?;
 
@@ -448,7 +483,7 @@ pub async fn register_warp_masque_native(proxy_url: Option<&str>) -> anyhow::Res
     });
 
     let resp = client
-        .post("https://api.cloudflareclient.com/v0a4471/reg")
+        .post(format!("{base}/v0a4471/reg"))
         .header("User-Agent", "WARP for Android")
         .header("CF-Client-Version", "a-6.35-4471")
         .header("Content-Type", "application/json; charset=UTF-8")
@@ -480,9 +515,7 @@ pub async fn register_warp_masque_native(proxy_url: Option<&str>) -> anyhow::Res
     });
 
     let patch_resp = client
-        .patch(format!(
-            "https://api.cloudflareclient.com/v0a4471/reg/{acc_id}"
-        ))
+        .patch(format!("{base}/v0a4471/reg/{acc_id}"))
         .header("User-Agent", "WARP for Android")
         .header("CF-Client-Version", "a-6.35-4471")
         .header("Authorization", format!("Bearer {token}"))
@@ -525,15 +558,7 @@ pub async fn register_warp_masque_native(proxy_url: Option<&str>) -> anyhow::Res
         for &port in WARP_MASQUE_PORTS {
             let name = node_name(ip, port);
             nodes.push(create_masque_node(
-                &name,
-                ip,
-                port,
-                &sec1,
-                &peer_pub,
-                ipv4,
-                ipv6,
-                None,
-                Some("src_warp_native"),
+                &name, ip, port, &sec1, &peer_pub, ipv4, ipv6, None, source_id,
             ));
         }
     }
@@ -541,15 +566,7 @@ pub async fn register_warp_masque_native(proxy_url: Option<&str>) -> anyhow::Res
         for &port in WARP_MASQUE_PORTS {
             let name = node_name(ip, port);
             nodes.push(create_masque_node(
-                &name,
-                ip,
-                port,
-                &sec1,
-                &peer_pub,
-                ipv4,
-                ipv6,
-                None,
-                Some("src_warp_native"),
+                &name, ip, port, &sec1, &peer_pub, ipv4, ipv6, None, source_id,
             ));
         }
     }
@@ -562,7 +579,7 @@ pub async fn register_warp_masque_native(proxy_url: Option<&str>) -> anyhow::Res
         ipv4,
         ipv6,
         Some(OFFICIAL_SNI),
-        Some("src_warp_native"),
+        source_id,
     ));
 
     Ok(nodes)

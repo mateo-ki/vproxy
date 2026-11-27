@@ -228,6 +228,13 @@ impl Collector {
                     .fetch_telegram_source(source, &channel, task_id, attempt_budget)
                     .await;
             }
+            // warp://native 走原生 Cloudflare WARP MASQUE 设备注册接口获取节点。
+            if crate::parser::warp_masque::is_warp_native_url(&resolved_url) {
+                info!(name = %source.name, "fetching native warp masque nodes");
+                return self
+                    .fetch_warp_native_source(source, &resolved_url, task_id, attempt_budget)
+                    .await;
+            }
             // 订阅 URL 常内嵌付费 token（query 或路径段），日志里只留 scheme://host/path，
             // 丢弃 query——足够定位是哪个源，又不把凭据写进本地日志文件
             info!(name = %source.name, url = %redact_url_query(&resolved_url), "fetching source");
@@ -429,6 +436,127 @@ impl Collector {
                 }
             }
         })
+    }
+
+    async fn fetch_warp_native_source(
+        &self,
+        source: &Source,
+        resolved_url: &str,
+        task_id: &str,
+        attempt_budget: Duration,
+    ) -> FetchResult {
+        self.fetch_warp_native_source_at(
+            source,
+            resolved_url,
+            task_id,
+            attempt_budget,
+            crate::parser::warp_masque::CLOUDFLARE_WARP_API_BASE,
+        )
+        .await
+    }
+
+    async fn fetch_warp_native_source_at(
+        &self,
+        source: &Source,
+        resolved_url: &str,
+        task_id: &str,
+        attempt_budget: Duration,
+        api_base: &str,
+    ) -> FetchResult {
+        self.tasks
+            .phase(task_id, &source.id, TaskPhase::Downloading);
+        let started = Instant::now();
+        let nodes = match tokio::time::timeout(
+            attempt_budget,
+            crate::parser::warp_masque::register_warp_masque_native_at(
+                &self.client,
+                api_base,
+                Some(&source.id),
+            ),
+        )
+        .await
+        {
+            Ok(Ok(nodes)) => nodes,
+            Ok(Err(error)) => {
+                let message = format!("WARP 原生获取失败: {error}");
+                warn!(name = %source.name, error = %message, "native warp fetch failed");
+                self.mark_source_fetched(&source.id, &message, 0).await;
+                return FetchResult {
+                    source_id: source.id.clone(),
+                    source_name: source.name.clone(),
+                    resolved_url: resolved_url.to_string(),
+                    success: false,
+                    message,
+                    node_count: 0,
+                    extracted_rules: Vec::new(),
+                };
+            }
+            Err(_) => {
+                let message = format!("WARP 原生获取超时（{}s）", attempt_budget.as_secs().max(1));
+                warn!(name = %source.name, error = %message, "native warp fetch timed out");
+                self.mark_source_fetched(&source.id, &message, 0).await;
+                return FetchResult {
+                    source_id: source.id.clone(),
+                    source_name: source.name.clone(),
+                    resolved_url: resolved_url.to_string(),
+                    success: false,
+                    message,
+                    node_count: 0,
+                    extracted_rules: Vec::new(),
+                };
+            }
+        };
+
+        self.tasks.timings(
+            task_id,
+            &source.id,
+            Some(started.elapsed().as_millis() as u64),
+            None,
+            None,
+            None,
+            None,
+        );
+        let count = nodes.len();
+        self.tasks.nodes(task_id, &source.id, count);
+        self.tasks.phase(task_id, &source.id, TaskPhase::Writing);
+        let write_started = Instant::now();
+        match self.db.replace_source_nodes(&source.id, &nodes).await {
+            Ok(inserted) => {
+                self.tasks.timings(
+                    task_id,
+                    &source.id,
+                    None,
+                    None,
+                    Some(write_started.elapsed().as_millis() as u64),
+                    None,
+                    None,
+                );
+                self.mark_source_fetched(&source.id, "ok", count as i64)
+                    .await;
+                FetchResult {
+                    source_id: source.id.clone(),
+                    source_name: source.name.clone(),
+                    resolved_url: resolved_url.to_string(),
+                    success: true,
+                    message: format!("ok, warp_native={count}, stored={inserted}"),
+                    node_count: count,
+                    extracted_rules: Vec::new(),
+                }
+            }
+            Err(error) => {
+                let message = format!("store failed: {error}");
+                self.mark_source_fetched(&source.id, &message, 0).await;
+                FetchResult {
+                    source_id: source.id.clone(),
+                    source_name: source.name.clone(),
+                    resolved_url: resolved_url.to_string(),
+                    success: false,
+                    message,
+                    node_count: count,
+                    extracted_rules: Vec::new(),
+                }
+            }
+        }
     }
 
     /// Race every candidate for this URL and keep the first body that arrives. A blocked
@@ -2300,6 +2428,132 @@ mod tests {
         assert_eq!(captured.len(), 2);
         assert_eq!(captured[0], "clash.meta");
         assert_eq!(captured[1], "clash-verge/v1.7.7");
+
+        server.abort();
+        drop(collector);
+        drop(db);
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[tokio::test]
+    async fn warp_native_source_updates_via_collector() {
+        use axum::routing::{patch, post};
+
+        assert!(crate::parser::warp_masque::is_warp_native_url(
+            "warp://native"
+        ));
+        assert!(crate::parser::warp_masque::is_warp_native_url(
+            "  WARP://native "
+        ));
+        assert!(!crate::parser::warp_masque::is_warp_native_url(
+            "https://example.com"
+        ));
+
+        let reg_calls = Arc::new(AtomicUsize::new(0));
+        let patch_calls = Arc::new(AtomicUsize::new(0));
+        let reg_calls_srv = Arc::clone(&reg_calls);
+        let patch_calls_srv = Arc::clone(&patch_calls);
+
+        let app = axum::Router::new()
+            .route(
+                "/v0a4471/reg",
+                post(move || {
+                    let count = reg_calls_srv.fetch_add(1, Ordering::SeqCst) + 1;
+                    async move {
+                        axum::Json(serde_json::json!({
+                            "id": format!("dev-{count}"),
+                            "token": "tok-test",
+                            "config": {
+                                "interface": {
+                                    "addresses": {
+                                        "v4": "172.16.0.2",
+                                        "v6": "2606:4700:110:81a0::1"
+                                    }
+                                }
+                            }
+                        }))
+                    }
+                }),
+            )
+            .route(
+                "/v0a4471/reg/{id}",
+                patch(move || {
+                    patch_calls_srv.fetch_add(1, Ordering::SeqCst);
+                    async move {
+                        axum::Json(serde_json::json!({
+                            "config": {
+                                "peers": [{
+                                    "public_key": "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEIaU7MToJm9NKp8YfGxR6r+/h4mcG7SxI8tsW8OR1A5tv/zCzVbCRRh2t87/kxnP6lAy0lkr7qYwu+ox+k3dr6w==\n-----END PUBLIC KEY-----\n"
+                                }],
+                                "interface": {
+                                    "addresses": {
+                                        "v4": "172.16.0.2",
+                                        "v6": "2606:4700:110:81a0::1"
+                                    }
+                                }
+                            }
+                        }))
+                    }
+                }),
+            );
+
+        let listener = bind_test_listener().await;
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+
+        let db_path = std::env::temp_dir().join(format!("vproxy-{}.db", Uuid::new_v4()));
+        let db = Database::connect(db_path.to_str().unwrap()).await.unwrap();
+        let source = db
+            .create_source(CreateSource {
+                name: "Cloudflare WARP (MASQUE) 原生节点".into(),
+                url_template: "warp://native".into(),
+                enabled: true,
+                remark: None,
+                user_agent: None,
+            })
+            .await
+            .unwrap();
+        assert!(!source.is_imported());
+
+        let collector = Collector::new(db.clone(), TaskTracker::default()).unwrap();
+        let task_id = collector
+            .tasks
+            .start(TaskKind::Fetch, [(source.id.clone(), source.name.clone())]);
+        let res = collector
+            .fetch_warp_native_source_at(
+                &source,
+                "warp://native",
+                &task_id,
+                Duration::from_secs(10),
+                &format!("http://{address}"),
+            )
+            .await;
+
+        assert!(res.success, "expected success, got: {}", res.message);
+        assert_eq!(res.node_count, 57);
+        assert_eq!(reg_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(patch_calls.load(Ordering::SeqCst), 1);
+
+        let stored = db
+            .list_nodes(
+                None,
+                Some(&source.id),
+                None,
+                None,
+                None,
+                1,
+                100,
+                Some("name"),
+            )
+            .await
+            .unwrap();
+        assert_eq!(stored.total, 57);
+        assert_eq!(stored.items.len(), 57);
+        assert!(stored.items.iter().all(|n| n.protocol == "masque"));
+
+        let refreshed_src = db.get_source(&source.id).await.unwrap().unwrap();
+        assert_eq!(refreshed_src.last_status.as_deref(), Some("ok"));
+        assert_eq!(refreshed_src.last_node_count, 57);
 
         server.abort();
         drop(collector);
